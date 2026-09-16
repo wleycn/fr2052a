@@ -1,0 +1,270 @@
+"""REF 层（引用数据）生成。
+
+REF 是本批数据的字典：ODS 中出现的法人实体、交易对手、币种、日期都必须取自这里，
+生成结束后的完整性自检会逐条核对，杜绝悬空引用。
+"""
+
+from __future__ import annotations
+
+import random
+import string
+from dataclasses import dataclass, field
+from datetime import date, timedelta
+from pathlib import Path
+
+from .config import (
+    CALENDAR_END,
+    CALENDAR_START,
+    REPORT_DATE,
+    table_rng,
+    write_csv,
+)
+
+USD_RATE_SOURCE = "BLOOMBERG"
+
+# 交易日历中的休市日（美国口径，演示用）
+HOLIDAYS: dict[date, str] = {
+    date(2026, 9, 7): "Labor Day",
+    date(2026, 11, 26): "Thanksgiving",
+    date(2026, 12, 25): "Christmas",
+}
+
+# 汇率（1 单位外币 = 多少 USD）
+FX_RATES: dict[str, float] = {
+    "EUR": 1.0800,
+    "GBP": 1.2600,
+    "JPY": 0.0067,
+    "CHF": 1.1200,
+    "CNY": 0.1400,
+    "HKD": 0.1280,
+    "AUD": 0.6600,
+    "CAD": 0.7400,
+    "SGD": 0.7500,
+}
+
+# 法人实体：层级、注册地、是否重要实体、本位币（用于交易币种加权）
+ENTITY_ROWS: list[tuple[str, str, str, str, int, str, str, bool, str, bool, str, str]] = [
+    ("ENT001", "Global Bank Holding Inc.", "LEI0000000000000001", "", 1, "US", "HOLDING", True, "FULL", True, "2020-01-01", ""),
+    ("ENT002", "Global Bank NA", "LEI0000000000000002", "ENT001", 2, "US", "BANK", True, "FULL", True, "2020-01-01", ""),
+    ("ENT003", "Global Broker Dealer LLC", "LEI0000000000000003", "ENT001", 2, "US", "BROKER", False, "FULL", True, "2021-01-01", ""),
+    ("ENT004", "Global Bank London Branch", "LEI0000000000000004", "ENT002", 3, "GB", "BANK", True, "FULL", True, "2021-06-01", ""),
+    ("ENT005", "Global Bank Tokyo Branch", "LEI0000000000000005", "ENT002", 3, "JP", "BANK", False, "FULL", True, "2022-01-01", ""),
+]
+
+# 承接业务的实体（母公司不直接记账）
+TRADING_ENTITIES = ("ENT002", "ENT003", "ENT004", "ENT005")
+
+MATURITY_BUCKET_ROWS = [
+    ("O/N", "Overnight", 0, 0, 1, 1),
+    ("1-7D", "1 to 7 days", 1, 7, 2, 2),
+    ("8-30D", "8 to 30 days", 8, 30, 3, 3),
+    ("31-90D", "31 to 90 days", 31, 90, 4, 4),
+    ("91-180D", "91 to 180 days", 91, 180, 5, 5),
+    ("181D-1Y", "181 days to 1yr", 181, 365, 6, 6),
+    (">1Y", "Over 1 year", 366, 99999, 7, 7),
+    ("OPEN", "Open-ended", "", "", 8, 8),
+]
+
+LINE_ITEM_ROWS = [
+    ("A-01", "A", "Commercial Paper Outstanding", "", False, "", "AMOUNT", "POSITIVE", True, 1),
+    ("A-02", "A", "Large Time Deposits", "", False, "", "AMOUNT", "POSITIVE", True, 2),
+    ("B-01", "B", "Repo Outstanding", "", False, "", "AMOUNT", "POSITIVE", True, 3),
+    ("B-02", "B", "Reverse Repo", "", False, "", "AMOUNT", "POSITIVE", True, 4),
+    ("C-01", "C", "Retail Demand Deposits", "", False, "", "AMOUNT", "POSITIVE", True, 5),
+    ("C-02", "C", "Retail Savings Deposits", "", False, "", "AMOUNT", "POSITIVE", True, 6),
+    ("C-03", "C", "Wholesale Demand Deposits", "", False, "", "AMOUNT", "POSITIVE", True, 7),
+    ("C-04", "C", "Brokered Deposits", "", False, "", "AMOUNT", "POSITIVE", True, 8),
+    ("D-01", "D", "Other Funding", "", False, "", "AMOUNT", "POSITIVE", True, 9),
+    ("E-01", "E", "Cash and Due from Banks", "", False, "", "AMOUNT", "POSITIVE", True, 10),
+    ("F-01", "F", "Commercial Loan Inflows", "", False, "", "AMOUNT", "POSITIVE", True, 11),
+    ("G-01", "G", "HQLA Level 1 Market Value", "", False, "", "AMOUNT", "POSITIVE", True, 12),
+    ("G-02", "G", "HQLA Level 2A Market Value", "", False, "", "AMOUNT", "POSITIVE", True, 13),
+    ("G-03", "G", "HQLA Level 2B Market Value", "", False, "", "AMOUNT", "POSITIVE", True, 14),
+    ("H-01", "H", "Net MTM Asset", "", False, "", "AMOUNT", "EITHER", True, 15),
+    ("I-01", "I", "Unencumbered HQLA L1", "", False, "", "AMOUNT", "POSITIVE", True, 16),
+    ("J-01", "J", "Credit Commitments", "", False, "", "AMOUNT", "POSITIVE", True, 17),
+    ("K-01", "K", "Total Funding", "", True, "A+B+C+D", "AMOUNT", "POSITIVE", True, 18),
+    ("K-02", "K", "Net Funding Gap", "", True, "Inflow - Outflow", "AMOUNT", "EITHER", True, 19),
+]
+
+REGULATORY_MAPPING_ROWS = [
+    ("G", "G-01", "hqla_level_1_mv_usd", "FR 2052a Instructions Page 42", "FR2052A-G-01", 0.00, "Treasury Liquidity Team", "2024-01-01", ""),
+    ("G", "G-02", "hqla_level_2a_mv_usd", "FR 2052a Instructions Page 43", "FR2052A-G-02", 0.15, "Treasury Liquidity Team", "2024-01-01", ""),
+    ("G", "G-03", "hqla_level_2b_mv_usd", "FR 2052a Instructions Page 44", "FR2052A-G-03", 0.50, "Treasury Liquidity Team", "2024-01-01", ""),
+    ("C", "C-01", "retail_demand_usd", "FR 2052a Instructions Page 20", "FR2052A-C-01", 0.00, "Treasury Liquidity Team", "2024-01-01", ""),
+    ("F", "F-01", "commercial_inflow_usd", "FR 2052a Instructions Page 30", "FR2052A-F-01", 0.00, "Treasury Liquidity Team", "2024-01-01", ""),
+]
+
+BEHAVIOR_ASSUMPTION_ROWS = [
+    ("DEMAND", "RETAIL", "O/N", 0.05, 0.00, "2024-01-01", ""),
+    ("SAVINGS", "RETAIL", "1-7D", 0.10, 0.00, "2024-01-01", ""),
+    ("TIME", "CORPORATE", "8-30D", 0.30, 0.00, "2024-01-01", ""),
+    ("CD", "FINANCIAL", "31-90D", 0.50, 0.00, "2024-01-01", ""),
+    ("BROKERED", "RETAIL", "O/N", 0.20, 0.00, "2024-01-01", ""),
+    ("MMDA", "CORPORATE", "O/N", 0.15, 0.00, "2024-01-01", ""),
+]
+
+# 校验规则：与 [02] §2.7 的 20 条 VDQ 逐条对应
+VALIDATION_RULE_ROWS = [
+    ("VDQ-001", "Source file complete arrival", "COMPLETENESS", "ODS", "ERROR", "row_count > 0", "源文件整批到达，无空文件", True),
+    ("VDQ-002", "Key fields not null", "COMPLETENESS", "ODS", "ERROR", "source_record_id IS NOT NULL AND currency IS NOT NULL", "主键与币种不得为空", True),
+    ("VDQ-003", "Amount non-negative", "ACCURACY", "OWD", "ERROR", "principal_amount_usd >= 0", "金额不得为负", True),
+    ("VDQ-004", "Interest rate in range", "ACCURACY", "OWD", "WARNING", "interest_rate BETWEEN -0.10 AND 1.0", "利率落在合理区间", True),
+    ("VDQ-005", "Currency is ISO 4217", "ACCURACY", "OWD", "ERROR", "LENGTH(currency) = 3", "币种须为三位 ISO 4217 代码", True),
+    ("VDQ-006", "Outstanding <= facility", "CONSISTENCY", "OWD", "ERROR", "outstanding_amount <= facility_amount", "已用额度不得超过授信额度", True),
+    ("VDQ-007", "Repo collateral value sane", "CONSISTENCY", "OWD", "WARNING", "collateral_market_value BETWEEN cash_amount AND cash_amount * 1.5", "回购抵押品市值相对现金金额合理", True),
+    ("VDQ-008", "Maturity not before report date", "CONSISTENCY", "OWD", "ERROR", "maturity_date >= report_date", "到期日不得早于报告日", True),
+    ("VDQ-009", "FX conversion error under 1%", "ACCURACY", "OWD", "WARNING", "ABS(amount_usd - amount_local * spot_rate) / NULLIF(amount_usd, 0) < 0.01", "折算金额与本地金额×汇率误差小于 1%", True),
+    ("VDQ-010", "Summary equals detail sum", "CONSISTENCY", "OWS", "ERROR", "ABS(summary_amount - detail_sum) < 0.01", "汇总数必须等于明细求和", True),
+    ("VDQ-011", "Unencumbered <= total", "CONSISTENCY", "OWS", "ERROR", "unencumbered_amount <= total_amount", "非受限资产不得超过总资产", True),
+    ("VDQ-012", "Pledged <= market value", "CONSISTENCY", "OWS", "ERROR", "pledged_amount <= market_value", "已质押金额不得超过总市值", True),
+    ("VDQ-013", "Section total equals line items", "CONSISTENCY", "ADS", "ERROR", "ABS(section_total - line_items_total) < 0.01", "Section 合计等于其行项目合计", True),
+    ("VDQ-014", "Total funding vs balance sheet", "BUSINESS", "ADS", "WARNING", "ABS(total_funding - balance_sheet_total) / NULLIF(balance_sheet_total, 0) < 0.05", "总融资与资产负债表口径偏差小于 5%", True),
+    ("VDQ-015", "Period-over-period move", "BUSINESS", "ADS", "WARNING", "ABS(current_amount - prior_amount) / NULLIF(prior_amount, 0) < 0.20", "环比波动小于 20%", True),
+    ("VDQ-016", "Loaded before T+1 08:00 ET", "TIMELINESS", "ODS", "ERROR", "etl_load_timestamp <= report_date + INTERVAL '1 day 8 hours'", "T+1 早八点前完成加载", True),
+    ("VDQ-017", "L2A+2B within 40% of HQLA", "BUSINESS", "ADS", "WARNING", "(hqla_level_2a + hqla_level_2b) <= 0.40 * total_hqla", "二级资产不得超过 HQLA 总额 40%", True),
+    ("VDQ-018", "Inflow capped at 75% of outflow", "BUSINESS", "ADS", "ERROR", "total_inflow <= 0.75 * total_outflow", "现金流入上限为流出的 75%", True),
+    ("VDQ-019", "Mandatory line items present", "COMPLETENESS", "ADS", "ERROR", "mandatory_line_items_missing IS NULL", "必填行项目不得缺失", True),
+    ("VDQ-020", "LEI format", "ACCURACY", "OWD", "WARNING", "lei_code ~ '^[A-Z0-9]{20}$'", "LEI 须为 20 位大写字母数字", True),
+]
+
+
+@dataclass
+class ReferenceData:
+    """本批 REF 的外键集合，供 ODS 生成与完整性自检复用。"""
+
+    entity_codes: list[str] = field(default_factory=list)
+    trading_entities: list[str] = field(default_factory=list)
+    counterparties: list[str] = field(default_factory=list)
+    counterparty_types: dict[str, str] = field(default_factory=dict)
+    currencies: list[str] = field(default_factory=list)
+    spot_rates: dict[str, float] = field(default_factory=dict)
+    business_dates: list[str] = field(default_factory=list)
+    row_counts: dict[str, int] = field(default_factory=dict)
+
+
+def _random_lei(rng: random.Random) -> str:
+    return "".join(rng.choices(string.ascii_uppercase + string.digits, k=20))
+
+
+def _generate_entity_hierarchy(ref_dir: Path, ref: ReferenceData) -> None:
+    header = [
+        "entity_code", "entity_name", "lei_code", "parent_entity_code", "entity_level",
+        "jurisdiction", "entity_type", "is_material_entity", "consolidation_method",
+        "is_active", "effective_date", "expiry_date",
+    ]
+    rows = [list(row) for row in ENTITY_ROWS]
+    ref.row_counts["ref_entity_hierarchy"] = write_csv(ref_dir / "ref_entity_hierarchy.csv", header, rows)
+    ref.entity_codes = [str(row[0]) for row in ENTITY_ROWS]
+    ref.trading_entities = list(TRADING_ENTITIES)
+
+
+def _generate_counterparty(ref_dir: Path, ref: ReferenceData) -> None:
+    rng = table_rng("ref_counterparty")
+    types = ["BANK", "BROKER", "CORPORATE", "SOVEREIGN", "CENTRAL_BANK"]
+    countries = ["US", "GB", "DE", "JP", "CH", "CN", "HK", "AU", "CA", "SG"]
+    ratings = ["AAA", "AA", "A", "BBB", "BB", "B"]
+    industries = ["6200", "6010", "6020", "6030", "6040"]
+
+    rows = []
+    for index in range(1, 51):
+        counterparty_id = f"CP{index:04d}"
+        counterparty_type = rng.choice(types)
+        rows.append([
+            counterparty_id,
+            f"Counterparty {index} {rng.choice(['Inc', 'LLC', 'Ltd', 'Corp'])}",
+            _random_lei(rng),
+            counterparty_type,
+            rng.choice(countries),
+            rng.choice(ratings),
+            rng.choice(industries),
+        ])
+        ref.counterparty_types[counterparty_id] = counterparty_type
+
+    header = [
+        "counterparty_id", "counterparty_name", "lei_code", "counterparty_type",
+        "country_code", "credit_rating", "industry_code",
+    ]
+    ref.row_counts["ref_counterparty"] = write_csv(ref_dir / "ref_counterparty.csv", header, rows)
+    ref.counterparties = [row[0] for row in rows]
+
+
+def _generate_maturity_bucket(ref_dir: Path, ref: ReferenceData) -> None:
+    header = ["bucket_code", "bucket_description", "min_days", "max_days", "sort_order", "fr2052a_display_order"]
+    rows = [list(row) for row in MATURITY_BUCKET_ROWS]
+    ref.row_counts["ref_maturity_bucket"] = write_csv(ref_dir / "ref_maturity_bucket.csv", header, rows)
+
+
+def _generate_line_items(ref_dir: Path, ref: ReferenceData) -> None:
+    header = [
+        "line_item_code", "section_code", "line_description", "parent_line_item",
+        "is_calculated", "calculation_formula", "data_type", "sign_convention",
+        "mandatory_flag", "sort_order",
+    ]
+    rows = [list(row) for row in LINE_ITEM_ROWS]
+    ref.row_counts["ref_fr2052a_line_items"] = write_csv(ref_dir / "ref_fr2052a_line_items.csv", header, rows)
+
+
+def _generate_exchange_rates(ref_dir: Path, ref: ReferenceData) -> None:
+    header = ["rate_date", "from_currency", "to_currency", "spot_rate", "rate_type", "rate_source"]
+    rows = [[REPORT_DATE.isoformat(), currency, "USD", rate, "MID", USD_RATE_SOURCE] for currency, rate in FX_RATES.items()]
+    rows.append([REPORT_DATE.isoformat(), "USD", "USD", 1.0, "MID", "INTERNAL"])
+    ref.row_counts["ref_exchange_rates"] = write_csv(ref_dir / "ref_exchange_rates.csv", header, rows)
+    ref.currencies = [str(row[1]) for row in rows]
+    ref.spot_rates = {str(row[1]): float(row[3]) for row in rows}
+
+
+def _generate_regulatory_mapping(ref_dir: Path, ref: ReferenceData) -> None:
+    header = [
+        "section_code", "line_item_code", "field_name", "regulatory_reference",
+        "rule_id", "haircut_rate", "owner", "effective_date", "expiry_date",
+    ]
+    rows = [list(row) for row in REGULATORY_MAPPING_ROWS]
+    ref.row_counts["ref_regulatory_mapping"] = write_csv(ref_dir / "ref_regulatory_mapping.csv", header, rows)
+
+
+def _generate_behavior_assumptions(ref_dir: Path, ref: ReferenceData) -> None:
+    header = ["product_category", "customer_segment", "maturity_bucket", "runoff_rate", "inflow_rate", "effective_date", "expiry_date"]
+    rows = [list(row) for row in BEHAVIOR_ASSUMPTION_ROWS]
+    ref.row_counts["ref_behavior_assumptions"] = write_csv(ref_dir / "ref_behavior_assumptions.csv", header, rows)
+
+
+def _generate_calendar(ref_dir: Path, ref: ReferenceData) -> None:
+    header = ["calendar_date", "is_business_day", "holiday_name", "jurisdiction"]
+    rows = []
+    business_dates: list[str] = []
+    current = CALENDAR_START
+    while current <= CALENDAR_END:
+        is_business_day = current.weekday() < 5
+        holiday_name = HOLIDAYS.get(current, "")
+        if holiday_name:
+            is_business_day = False
+        iso = current.isoformat()
+        rows.append([iso, is_business_day, holiday_name, "US"])
+        if is_business_day and current <= REPORT_DATE:
+            business_dates.append(iso)
+        current += timedelta(days=1)
+
+    ref.row_counts["ref_calendar"] = write_csv(ref_dir / "ref_calendar.csv", header, rows)
+    ref.business_dates = business_dates
+
+
+def _generate_validation_rules(ref_dir: Path, ref: ReferenceData) -> None:
+    header = ["rule_id", "rule_name", "rule_category", "apply_layer", "severity", "sql_expression", "description", "is_active"]
+    rows = [list(row) for row in VALIDATION_RULE_ROWS]
+    ref.row_counts["ref_validation_rules"] = write_csv(ref_dir / "ref_validation_rules.csv", header, rows)
+
+
+def generate_all(ref_dir: Path) -> ReferenceData:
+    """生成全部 9 张 REF 表，返回可复用的外键集合。"""
+    ref = ReferenceData()
+    _generate_entity_hierarchy(ref_dir, ref)
+    _generate_counterparty(ref_dir, ref)
+    _generate_maturity_bucket(ref_dir, ref)
+    _generate_line_items(ref_dir, ref)
+    _generate_exchange_rates(ref_dir, ref)
+    _generate_regulatory_mapping(ref_dir, ref)
+    _generate_behavior_assumptions(ref_dir, ref)
+    _generate_calendar(ref_dir, ref)
+    _generate_validation_rules(ref_dir, ref)
+    return ref
