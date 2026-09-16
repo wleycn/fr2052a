@@ -69,6 +69,9 @@ services:
     volumes:
       - ./spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
       - ./spark:/opt/spark/fr2052a:ro
+      # 应用代码（python/ 与 sql/）与样本数据，由 sync-app.sh 从 dev 侧同步。
+      # 注意：不能挂在 /opt/spark/fr2052a 下面——父挂载是只读的，runc 无法在其内部建挂载点。
+      - ./app:/opt/fr2052a-app:ro
     networks:
       - fr2052a_net
 
@@ -91,6 +94,7 @@ services:
     volumes:
       - ./spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
       - ./spark:/opt/spark/fr2052a:ro
+      - ./app:/opt/fr2052a-app:ro
     networks:
       - fr2052a_net
 

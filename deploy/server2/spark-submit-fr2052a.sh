@@ -31,9 +31,9 @@ fi
 
 exec docker exec fr2052a_spark_master /opt/spark/bin/spark-submit \
   --master "spark://spark-master:7077" \
-  --conf "spark.sql.catalog.spark_catalog.uri=jdbc:postgresql://${SERVER1_HOST}:5432/${POSTGRES_DB}?currentSchema=iceberg_catalog" \
-  --conf "spark.sql.catalog.spark_catalog.jdbc.user=${POSTGRES_USER}" \
-  --conf "spark.sql.catalog.spark_catalog.jdbc.password=${POSTGRES_PASSWORD}" \
-  --conf "spark.sql.catalog.spark_catalog.s3.access-key-id=${MINIO_ROOT_USER}" \
-  --conf "spark.sql.catalog.spark_catalog.s3.secret-access-key=${MINIO_ROOT_PASSWORD}" \
+  --conf "spark.sql.catalog.lakehouse.uri=jdbc:postgresql://${SERVER1_HOST}:5432/${POSTGRES_DB}?currentSchema=iceberg_catalog" \
+  --conf "spark.sql.catalog.lakehouse.jdbc.user=${POSTGRES_USER}" \
+  --conf "spark.sql.catalog.lakehouse.jdbc.password=${POSTGRES_PASSWORD}" \
+  --conf "spark.sql.catalog.lakehouse.s3.access-key-id=${MINIO_ROOT_USER}" \
+  --conf "spark.sql.catalog.lakehouse.s3.secret-access-key=${MINIO_ROOT_PASSWORD}" \
   "$@"

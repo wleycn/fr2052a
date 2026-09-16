@@ -240,6 +240,7 @@ Iceberg 的**表元数据落 PostgreSQL**（JDBC catalog），**数据文件落 
 
 - Iceberg 的命名空间（`ref`/`bronze`/`silver`）由底层 session catalog 管理，不落在 JDBC catalog；
   重建环境时需要重新建命名空间（`iceberg_smoke.py` 可重复执行）。
+  → **该结论已被 E4.2 推翻并修正**：SessionCatalog 的方案换成了独立命名 catalog。
 - dbt 的 spark target 目前只有连通性自检模型，正式模型在 E4 落地。
 
 ---
@@ -292,6 +293,58 @@ Iceberg 的**表元数据落 PostgreSQL**（JDBC catalog），**数据文件落 
 
 - CSV 尚未入湖：REF 走批加载、ODS 经 Kafka 流入 Iceberg，在 E4.2 / E4.3 完成。
 - `report_date` 与 `entity_code` 是对 `[99]` ODS 表结构的扩展，E4.2 的 Iceberg 建表语句要体现，并同步到项目文档。
+
+---
+
+## E4.2 数据湖建表 + 防漂移闸（2026-09-17）
+
+**目标**：把 16 张表建进数据湖（ref 9 张 + bronze 7 张），并用机器闸锁死表结构与生成器 CSV 表头的一致性。
+
+**产出**
+
+| 位置 | 内容 |
+|---|---|
+| dev `sql/iceberg/01_create_ref_tables.sql` | REF 9 张表，逐列带中文业务含义 |
+| dev `sql/iceberg/02_create_ods_tables.sql` | ODS 7 张表，按 `days(report_date)` 分区 |
+| dev `python/lakehouse/run_sql_file.py` | 把 .sql 逐条交给 Spark SQL 执行，任一失败即退出非零 |
+| dev `python/lakehouse/verify_ods_schema.py` | 防漂移闸：表结构与 CSV 表头逐列比对 |
+| dev `python/lakehouse/inspect_catalog.py` | 目录巡检：命名空间、表清单、抽检行数 |
+| dev `deploy/server2/sync-app.sh` | 把 `python/ sql/ dbt/ sample_data/` 同步到 Server 2 |
+| dev `deploy/server2/docker-compose.yml` | Spark 容器新增 `./app:/opt/fr2052a-app:ro` 挂载 |
+
+**验证证据**
+
+| 判据 | 实测 |
+|---|---|
+| 建表 | ref 9 张、bronze 7 张，`SHOW TABLES` 与 PG `iceberg_catalog.iceberg_tables` 双向一致 |
+| 防漂移闸 | 16 张表全部 PASS，列序与列名逐一吻合 |
+| 目录自省 | `SHOW NAMESPACES` 返回 default/ref/bronze/silver |
+
+**坑（按代价排序）**
+
+1. **SparkSessionCatalog 会吞掉命名空间。** 这是本步最贵的一个。
+   表建成功了，但 `SHOW NAMESPACES` 只剩 `default`、`SHOW TABLES IN ref` 报 `SCHEMA_NOT_FOUND`；
+   同时 `SELECT count(*) FROM ref.ref_calendar` 却能跑通 —— 表可按名寻址，只是目录自省失效，
+   所以症状极隐蔽：跑数据没事，dbt、BI、血缘采集这类依赖自省的环节会集体失灵。
+   根因是 SparkSessionCatalog 把命名空间交给 Spark 自身管理，命名空间不落 JDBC catalog。
+   改法：**推翻 E3 的 SessionCatalog 选择**，改用独立命名 catalog（`lakehouse`），
+   命名空间与表都落 PostgreSQL；未限定的 `db.table` 由 `spark.sql.defaultCatalog=lakehouse` 兜住，
+   依旧不必加前缀。
+
+2. **挂载点不能嵌在只读挂载里。** 先按 `/opt/spark/fr2052a/app` 挂，容器直接起不来：
+   `mkdirat ... /opt/spark/fr2052a/app: read-only file system` —— 父挂载是只读的，runc 建不了挂载点。
+   改挂 `/opt/fr2052a-app`。
+
+3. **rsync 多源带尾斜杠会把目录摊平。** `python/ sql/ dbt/ sample_data/` 四份内容全摊到同一层，
+   且只带 `--delete` 清不掉残骸（多源时它不覆盖目标根目录）。改为先清空目标、再逐树同步。
+
+4. **自检规则套错了层。** 「必须有 `etl_load_timestamp`」是 bronze 的规矩，却套到了 ref 表上，
+   9 张 ref 全 FAIL。改为按层分白名单。教训：闸报错时要先确认判据本身对不对，别急着改数据。
+
+**遗留**
+
+- ADS 层 PostgreSQL 建表脚本未写（E4.4 随 dbt 模型一起落）。
+- E3 遗留的两个自检表（`bronze.smoke_check`、`silver.spark_smoke`）待清理。
 
 ---
 
