@@ -15,6 +15,10 @@ venv/
 sample_data/
 *.log
 
+# 第三方二进制依赖（用 fetch-deps.sh 重新获取，不入库）
+deploy/server2/spark/jars/
+deploy/server2/spark/jdk17/
+
 # 编辑器与系统
 .DS_Store
 .idea/

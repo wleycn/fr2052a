@@ -58,12 +58,17 @@ services:
     restart: unless-stopped
     environment:
       TZ: ${TZ}
+      # Iceberg 1.11 要求 Java 17，而 Spark 镜像自带 Java 11，故挂载外部 JDK
+      JAVA_HOME: /opt/spark/fr2052a/jdk17
     command: >-
       /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
       --host spark-master --port 7077 --webui-port 8081
     ports:
       - "7077:7077"
       - "8081:8081"
+    volumes:
+      - ./spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - ./spark:/opt/spark/fr2052a:ro
     networks:
       - fr2052a_net
 
@@ -75,6 +80,7 @@ services:
       - spark-master
     environment:
       TZ: ${TZ}
+      JAVA_HOME: /opt/spark/fr2052a/jdk17
       SPARK_WORKER_CORES: ${SPARK_WORKER_CORES}
       SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY}
     command: >-
@@ -83,10 +89,10 @@ services:
     ports:
       - "8082:8082"
     volumes:
-      - spark_work:/opt/spark/work
+      - ./spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - ./spark:/opt/spark/fr2052a:ro
     networks:
       - fr2052a_net
 
 volumes:
   kafka_data:
-  spark_work:

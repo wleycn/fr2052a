@@ -1,0 +1,20 @@
+name: fr2052a
+version: '1.0.0'
+config-version: 2
+
+profile: fr2052a
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+target-path: target
+clean-targets:
+  - target
+  - dbt_packages
+
+models:
+  fr2052a:
+    # 连通性自检模型，正式跑批时可 --exclude tag:smoke 排除
+    smoke:
+      +tags: ["smoke"]

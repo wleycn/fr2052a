@@ -1,0 +1,58 @@
+# FR 2052a — dbt 连接配置
+#
+# 凭据一律通过 env_var() 读取，取值来自 Server 2 的 ~/fr2052a-infra/.env。
+# 运行前先 source 该文件（见 run-dbt.sh）。
+#
+# 两个 target 对应两套存储：
+#   pg    → Server 1 的 PostgreSQL，承载 ADS 报表服务层
+#   spark → Server 2 的 Spark 集群，读写 MinIO 上的 Iceberg 表
+#
+# 注意：dbt-spark 的 Spark 配置字段名是 server_side_parameters。
+# 写成 spark_conf 不会报错，但会被静默忽略，导致会话退化成宿主机本地 Spark。
+
+fr2052a:
+  target: pg
+  outputs:
+    pg:
+      type: postgres
+      host: "{{ env_var('SERVER1_HOST') }}"
+      port: 5432
+      user: "{{ env_var('POSTGRES_USER') }}"
+      password: "{{ env_var('POSTGRES_PASSWORD') }}"
+      dbname: "{{ env_var('POSTGRES_DB') }}"
+      schema: ads
+      threads: 4
+
+    spark:
+      type: spark
+      method: session
+      # dbt-spark 要求 database 与 schema 一致，故不设 database。
+      # 未限定的 db.table 由 Iceberg SessionCatalog 承接，schema=silver 即 Iceberg 的 silver 命名空间。
+      schema: silver
+      host: "{{ env_var('SERVER2_HOST') }}"
+      port: 7077
+      threads: 2
+      server_side_parameters:
+        spark.master: "spark://{{ env_var('SERVER2_HOST') }}:7077"
+        # 驱动跑在 Server 2 宿主机上，Worker 在容器里，需要显式通告可达地址
+        spark.driver.host: "{{ env_var('SERVER2_HOST') }}"
+        # 执行器在 Worker 容器里，jar 已挂载进容器，无需再传输
+        spark.executor.extraClassPath: /opt/spark/fr2052a/jars/*
+        # 外挂 JDK 17.0.1 的 cgroup 缺陷会让执行器启动即失败（exit 50），
+        # 必须随应用配置一起下发给执行器，容器默认配置在这里不生效。
+        spark.executor.extraJavaOptions: -XX:-UseContainerSupport
+        spark.sql.extensions: org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+        # 用 Iceberg 的 SessionCatalog 接管 spark_catalog，未限定的表名才会落到 Iceberg
+        spark.sql.catalog.spark_catalog: org.apache.iceberg.spark.SparkSessionCatalog
+        spark.sql.catalog.spark_catalog.type: jdbc
+        spark.sql.catalog.spark_catalog.uri: "jdbc:postgresql://{{ env_var('SERVER1_HOST') }}:5432/{{ env_var('POSTGRES_DB') }}?currentSchema=iceberg_catalog"
+        spark.sql.catalog.spark_catalog.jdbc.user: "{{ env_var('POSTGRES_USER') }}"
+        spark.sql.catalog.spark_catalog.jdbc.password: "{{ env_var('POSTGRES_PASSWORD') }}"
+        spark.sql.catalog.spark_catalog.warehouse: s3://fr2052a-bucket/warehouse
+        spark.sql.catalog.spark_catalog.io-impl: org.apache.iceberg.aws.s3.S3FileIO
+        spark.sql.catalog.spark_catalog.s3.endpoint: "http://{{ env_var('SERVER1_HOST') }}:9000"
+        spark.sql.catalog.spark_catalog.s3.path-style-access: "true"
+        spark.sql.catalog.spark_catalog.client.region: us-east-1
+        spark.sql.catalog.spark_catalog.s3.access-key-id: "{{ env_var('MINIO_ROOT_USER') }}"
+        spark.sql.catalog.spark_catalog.s3.secret-access-key: "{{ env_var('MINIO_ROOT_PASSWORD') }}"
+        spark.sql.shuffle.partitions: "8"

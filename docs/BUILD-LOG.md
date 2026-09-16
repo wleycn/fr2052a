@@ -169,6 +169,81 @@ docker tag  docker.1ms.run/apache/spark:3.5.9 apache/spark:3.5.9
 
 ---
 
+## E3 端到端穿透（2026-09-16 / 17 跨零点）
+
+**目标**：证明 Spark（Server 2）能读写 MinIO（Server 1）上的 Iceberg 表，且 dbt 能同时连 PostgreSQL 与数据湖。
+
+**产出**
+
+| 位置 | 内容 |
+|---|---|
+| dev `deploy/server2/spark/` | `spark-defaults.conf`、`iceberg_smoke.py`、`jars/`（不入库） |
+| dev `deploy/server2/` | `fetch-deps.sh`、`setup-venv.sh`、`run-dbt.sh`、`spark-submit-fr2052a.sh` |
+| dev `dbt/` | `dbt_project.yml`、`profiles.yml`、`models/smoke/` |
+| Server 2 `~/fr2052a-infra/` | 以上全部，另加 `venv/`、`jdk17/` |
+| Server 1 PostgreSQL | 新增 `iceberg_catalog` schema（存 Iceberg 表元数据） |
+
+**版本选定**
+
+| 组件 | 版本 | 说明 |
+|---|---|---|
+| Iceberg | 1.11.0 | `iceberg-spark-runtime-3.5_2.12` + `iceberg-aws-bundle` |
+| OpenJDK | 17.0.1 | 镜像自带 Java 11 不满足 Iceberg 1.11 |
+| PostgreSQL JDBC | 42.7.13 | Iceberg JDBC catalog 用 |
+| dbt | core 1.12.5 / spark 1.11.0 / postgres 1.11.0 | venv 基于 Python 3.11 |
+| PySpark | 3.5.9 | 与 Spark 集群同版本 |
+
+**存储分工（方案 A 的落地）**
+
+Iceberg 的**表元数据落 PostgreSQL**（JDBC catalog），**数据文件落 MinIO**（S3FileIO）。
+命名空间：`ref`、`bronze`（ODS）、`silver`（OWD/OWS）。PostgreSQL 侧另有 `ads`、`audit` 两个业务 schema。
+
+**验证证据**
+
+| 判据 | 实测 |
+|---|---|
+| Spark 穿透自检 | `iceberg_smoke.py` 通过：建 4 个命名空间、写 3 行、读回一致 |
+| Iceberg 表元数据 | PG `iceberg_catalog.iceberg_tables` 有 `bronze.smoke_check`、`silver.spark_smoke` |
+| 数据文件 | MinIO `warehouse/bronze/smoke_check/` 与 `warehouse/silver/spark_smoke/` 各有 parquet + metadata + snapshot |
+| dbt pg target | `OK created sql view model ads.pg_smoke` |
+| dbt spark target | `OK created sql table model silver.spark_smoke [OK in 3.04s]` |
+
+**踩到的坑（按代价排序）**
+
+1. **dbt-spark 的 Spark 配置字段名是 `server_side_parameters`，不是 `spark_conf`。**
+   写错不报错，只静默忽略，会话会退化成宿主机上的本地 Spark + Hive catalog，表现为一堆莫名其妙的
+   `does not support truncate in batch mode`。这是本次最贵的坑，排查了大半小时。
+
+2. **Iceberg 1.11 要求 Java 17，`apache/spark` 镜像自带 Java 11。**
+   解法是外挂一份 JDK 17 并设 `JAVA_HOME`，不重新拉镜像（镜像 1.86GB，拉取要 40 分钟）。
+
+3. **JDK 17.0.1 在内核 7.0 上探测 cgroup 抛 NPE。**
+   三个位置要分别处理：容器进程靠 `spark.driver/executor.extraJavaOptions`；
+   dbt 的 session 驱动由 pyspark 拉起，靠 `JAVA_TOOL_OPTIONS`；
+   执行器必须在应用配置里显式下发，否则启动即 `exited with code 50`。
+
+4. **Hadoop catalog 走不通。** 它要求 `s3a://` 协议栈，得再拉 300MB 的 AWS SDK。
+   改用 Iceberg 的 JDBC catalog，只多一个 1MB 的 PG 驱动，且元数据落 PG 更好讲。
+
+5. **Iceberg 的 S3 区域属性名是 `client.region`，不是 `s3.region`。**
+
+6. **必须让 Iceberg 的 SessionCatalog 接管 `spark_catalog`。**
+   否则未限定的表名会落到 Spark 内置 catalog，表既不在数据湖里，覆盖写也会报
+   `does not support truncate in batch mode`。
+
+7. **大镜像不走全局镜像源。** 走显式前缀拉取再打回标准标签，见 E2 的结论。
+
+8. **session 模式下 `spark.jars` 注入的包赶不上 DataSource 注册时机。**
+   把 Iceberg 运行时包直接放进 pyspark 自带的 `jars/` 目录（`run-dbt.sh` 每次同步）。
+
+**遗留**
+
+- Iceberg 的命名空间（`ref`/`bronze`/`silver`）由底层 session catalog 管理，不落在 JDBC catalog；
+  重建环境时需要重新建命名空间（`iceberg_smoke.py` 可重复执行）。
+- dbt 的 spark target 目前只有连通性自检模型，正式模型在 E4 落地。
+
+---
+
 ## 后续步骤
 
-E3 端到端穿透（Iceberg + MinIO + Spark + dbt）→ E4 业务开发 → E5 编排 → E6 合规演示剧本 → E7 治理收口。
+E4 业务开发（数据生成器 → ODS → OWD → OWS → ADS）→ E5 编排 → E6 合规演示剧本 → E7 治理收口。
