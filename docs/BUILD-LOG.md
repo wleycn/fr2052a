@@ -103,6 +103,72 @@ PostgreSQL 内**只**建了 `ads` 与 `audit` 两个 schema。`ods`、`owd`、`o
 
 ---
 
+## E2 Server 2 计算底座（2026-09-16）
+
+**目标**：在 Server 2 起 Kafka 与 Spark，并验证 dev 机可穿透访问。
+
+**产出**
+
+| 位置 | 内容 |
+|---|---|
+| dev `deploy/server2/` | `docker-compose.yml`、`.env.example` |
+| Server 2 `~/fr2052a-infra/` | 同上，另加 `.env`（600 权限） |
+
+**版本选定**
+
+| 组件 | 版本 | 说明 |
+|---|---|---|
+| Kafka | `apache/kafka:4.3.1` | KRaft 单节点，无 ZooKeeper；关闭隐式建主题 |
+| Spark | `apache/spark:3.5.9` | 见下方"为什么不是 Spark 4" |
+
+**为什么不是 Spark 4**
+
+Iceberg 按 Spark 版本发布运行时包，目前只有 `iceberg-spark-runtime-3.5_2.12` 与 `iceberg-spark-runtime-4.0_2.13`，**没有 Spark 4.1/4.2 对应的运行时**。因此 Spark 只能在 3.5.x 与 4.0.x 之间选。3.5.9 是 3.5 线最后一个补丁版，且 dbt-spark、PySpark、Iceberg 三方都对它提供支持；4.0.4 虽然技术上可行，但 dbt-spark 对 Spark 4 的支持未经验证。取舍原则是"整条链路都有官方支持的版本里取最高"。
+
+Kafka 无此约束，直接取最新的 4.3.1。
+
+**资源分配**：Spark Worker 给 4 核 / 6G（文档原写 2 核，机器实际 8 核，留一半余量给 Kafka 与系统）。
+
+**验证证据**
+
+| 判据 | 实测 |
+|---|---|
+| 容器状态 | kafka `Up (healthy)`、spark-master `Up`、spark-worker `Up` |
+| Spark Master | `status=ALIVE`，`aliveworkers=1`，`cores=4`，`mem=6144` |
+| Worker 注册 | 日志 `Successfully registered with master spark://spark-master:7077` |
+| Kafka 自产自销 | 建 2 分区主题，生产 `smoke-payload-001`，消费者取回同值 |
+| 自测主题清理 | 删除后仅剩 `__consumer_offsets` |
+| dev → `24:7077/8081/8082/9092/9094` | 全部连通 |
+| dev → `24:8081`、`24:8082` | HTTP 200，约 0.09s |
+
+**坑：镜像源不是加速器，是瓶颈**
+
+两轮实测下来，这个问题花了最多时间，结论和直觉相反。
+
+| 路径 | 实测速度 |
+|---|---|
+| 裸下载（阿里云 Maven，同机同时刻） | 1.66 MB/s |
+| 经 daocloud 镜像源拉镜像 | 148 KB/s |
+| 经 1ms.run 镜像源拉镜像 | 152–372 KB/s |
+
+机器上行是好的，慢的是到 Docker 镜像源的链路。`apache/spark:3.5.9` 镜像 1.86GB，整个过程超过 40 分钟。
+
+**应对策略（后续沿用）**：大镜像不走 daemon 全局镜像源，改用显式前缀拉取再打回标准标签。
+
+```bash
+docker pull docker.1ms.run/apache/spark:3.5.9
+docker tag  docker.1ms.run/apache/spark:3.5.9 apache/spark:3.5.9
+```
+
+这样 compose 文件里始终写标准镜像名，镜像不与某个镜像源绑定。
+
+**遗留**
+
+- Server 2 目前没有 Iceberg 运行时包，E3 需补齐（从阿里云 Maven 取，该源实测 1.66 MB/s，快）。
+- Kafka 主题命名方案尚未定（三套候选），E3 前需要拍板。
+
+---
+
 ## 后续步骤
 
-E2 Server 2 计算底座 → E3 端到端穿透 → E4 业务开发 → E5 编排 → E6 合规演示剧本 → E7 治理收口。
+E3 端到端穿透（Iceberg + MinIO + Spark + dbt）→ E4 业务开发 → E5 编排 → E6 合规演示剧本 → E7 治理收口。

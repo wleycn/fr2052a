@@ -1,0 +1,92 @@
+# FR 2052a — Server 2 计算底座
+#
+# 承载：
+#   Kafka     : 交易数据实时接入（KRaft 单节点，无 ZooKeeper）
+#   Spark     : 批流计算（Standalone，Master + Worker）
+#
+# 启动：docker compose --env-file .env up -d
+# 停止：docker compose --env-file .env down
+# 变量：见同目录 .env.example
+
+name: fr2052a
+
+networks:
+  fr2052a_net:
+    driver: bridge
+
+services:
+  kafka:
+    image: apache/kafka:4.3.1
+    container_name: fr2052a_kafka
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      # INTERNAL 供容器网络内使用，EXTERNAL 供 dev 与 Server 1 使用
+      KAFKA_LISTENERS: INTERNAL://:9092,EXTERNAL://:9094,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://${SERVER2_HOST}:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # 单节点副本数必须为 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # 关闭隐式建主题，主题由初始化步骤显式创建
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - fr2052a_net
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  spark-master:
+    image: apache/spark:3.5.9
+    container_name: fr2052a_spark_master
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+    command: >-
+      /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+      --host spark-master --port 7077 --webui-port 8081
+    ports:
+      - "7077:7077"
+      - "8081:8081"
+    networks:
+      - fr2052a_net
+
+  spark-worker:
+    image: apache/spark:3.5.9
+    container_name: fr2052a_spark_worker
+    restart: unless-stopped
+    depends_on:
+      - spark-master
+    environment:
+      TZ: ${TZ}
+      SPARK_WORKER_CORES: ${SPARK_WORKER_CORES}
+      SPARK_WORKER_MEMORY: ${SPARK_WORKER_MEMORY}
+    command: >-
+      /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker
+      spark://spark-master:7077 --webui-port 8082
+    ports:
+      - "8082:8082"
+    volumes:
+      - spark_work:/opt/spark/work
+    networks:
+      - fr2052a_net
+
+volumes:
+  kafka_data:
+  spark_work:
