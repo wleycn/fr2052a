@@ -1,0 +1,2 @@
+# 统一按 LF 存储，避免跨平台行尾抖动
+* text=auto eol=lf

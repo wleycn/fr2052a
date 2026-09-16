@@ -1,0 +1,95 @@
+在 FR 2052a 的升级版架构中，`fr2052a_alerts` 绝不仅仅是一张普通的日志表，它是整个监管报送系统的 **“合规熔断器”与“审计证据链”**。
+
+在真实的投行环境中，监管报表不允许“带病上报”。这张表的核心作用是将之前讨论的 **GL对账差异、GE校验失败、数据质量异常** 从“被动记录”转化为“主动拦截”，并为审计师提供不可篡改的告警历史。
+
+具体来说，它承担以下三大核心职能：
+
+### 1. 🛑 Airflow 调度熔断 (Circuit Breaker)
+这是它最直接的工程用途。在 Airflow DAG 中，`fr2052a_alerts` 是决定下游任务是否执行的**唯一真理来源**。
+
+-   **机制**：在 OWS/ADS 计算完成后、生成最终 XML/CSV 报送文件之前，插入一个 `CheckAlertsOperator`。
+-   **逻辑**：查询 `fr2052a_alerts` 表中当日是否存在 `severity = 'CRITICAL'` 且 `is_resolved = FALSE` 的记录。
+-   **效果**：如果存在，Airflow 任务直接 Fail 或进入 Skipped 状态，**物理阻断**错误数据被推送到美联储门户。这避免了人工检查的疏漏。
+
+### 2. 🔍 审计溯源与重述追踪 (Audit Trail & Restatement)
+结合我们之前提到的“迟到数据与重述机制”，这张表记录了每一次数据异常的完整生命周期。
+
+| 字段 | 类型 | 业务含义 | 审计价值 |
+| :--- | :--- | :--- | :--- |
+| `alert_id` | UUID | 全局唯一标识 | 跨系统关联（Airflow Run ID + GE Validation ID） |
+| `report_date` | DATE | 受影响的报表日 | 快速定位是哪一天的报送出了问题 |
+| `source_model` | VARCHAR | 触发告警的 dbt 模型名 | 如 `rec_gl_vs_liquidity`，精确定位问题节点 |
+| `severity` | ENUM | CRITICAL / WARNING / INFO | 区分“必须停报”和“仅提示” |
+| `rule_id` | VARCHAR | 关联的监管规则编号 | 如 `FR2052A-G-01`，证明告警有法可依 |
+| `variance_amount` | DECIMAL | 差异金额（如对账差额） | 量化风险敞口 |
+| `is_resolved` | BOOLEAN | 是否已解决 | 防止未闭环的问题被遗忘 |
+| `resolution_note` | TEXT | 解决说明/重述原因 | 审计师必查项：“为什么这笔数据后来改了？” |
+
+> **💡 关键点**：当发生 T+3 日修正 T-1 日数据时，必须在 `fr2052a_alerts` 中更新原告警的 `is_resolved = TRUE` 并填写 `resolution_note`，同时可能触发一条新的 `RESTATED` 类型告警。这构成了完整的**合规叙事**。
+
+### 3. 📊 实时监控仪表盘数据源 (Operational Dashboard)
+对于资金部（Treasury）和合规部（Compliance）来说，他们不会去看 Airflow 或 dbt docs，他们需要一张实时看板。`fr2052a_alerts` 就是这张看板的后端数据源。
+
+-   **当日健康度**：`SELECT COUNT(*) FILTER (WHERE severity='CRITICAL' AND NOT is_resolved)` → 如果 > 0，大屏亮红灯。
+-   **趋势分析**：过去 30 天哪类规则（`rule_id`）频繁触发告警？→ 推动上游源系统修复根因。
+-   **SLA 监控**：从 `created_at` 到 `resolved_at` 的平均时长 → 衡量数据团队的响应效率。
+
+### ⚙️ 建表 DDL 参考 (PostgreSQL)
+
+```sql
+CREATE TABLE fr2052a_alerts (
+    alert_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    report_date     DATE NOT NULL,
+    source_model    VARCHAR(255) NOT NULL,      -- e.g., 'rec_gl_vs_liquidity'
+    rule_id         VARCHAR(50),                -- e.g., 'FR2052A-G-01' or 'GE-NOT-NULL'
+    severity        VARCHAR(20) NOT NULL        -- CRITICAL, WARNING, INFO
+                    CHECK (severity IN ('CRITICAL', 'WARNING', 'INFO')),
+    message         TEXT NOT NULL,              -- 人类可读的错误描述
+    variance_amount NUMERIC(38,10),             -- 可选：量化差异
+    context_json    JSONB,                      -- 存储 GE 的 validation result 或 dbt test 详情
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    resolved_at     TIMESTAMPTZ,
+    is_resolved     BOOLEAN DEFAULT FALSE,
+    resolution_note TEXT,
+    airflow_run_id  VARCHAR(100),               -- 关联 Airflow DAG Run
+    CONSTRAINT chk_resolved_consistency 
+        CHECK (NOT is_resolved OR resolved_at IS NOT NULL)
+);
+
+-- 核心索引：Airflow 熔断检查高频查询
+CREATE INDEX idx_alerts_unresolved_critical 
+ON fr2052a_alerts (report_date, severity, is_resolved) 
+WHERE severity = 'CRITICAL' AND is_resolved = FALSE;
+```
+
+### 🔄 与其他组件的交互流
+
+```text
+[dbt test / GE Validation] 
+       │ 发现异常
+       ▼
+[写入 fr2052a_alerts] ←── severity=CRITICAL
+       │
+       ├──→ [Airflow CheckAlertsOperator] ──→ 阻断下游报送
+       │
+       ├──→ [DataHub Ingestion] ──→ 在元数据平台展示数据质量事件
+       │
+       └──→ [Superset/Grafana] ──→ 合规官实时看板
+       
+[人工排查后]
+       │ UPDATE is_resolved=TRUE, resolution_note='...'
+       ▼
+[Airflow 手动重跑 / 自动重试] ──→ 通过检查 ──→ 继续报送
+```
+
+### 💡 总结
+
+`fr2052a_alerts` 是把你的项目从 **“数据管道”** 升级为 **“合规引擎”** 的关键拼图。没有它，GL对账和GE校验只是“跑了但没人看的测试”；有了它，这些校验才真正具备了**阻止错误、留存证据、驱动改进**的监管级效力。
+
+在演示时，建议你故意制造一笔 GL 不平的数据，然后现场展示：
+1.  `fr2052a_alerts` 中自动生成了 CRITICAL 记录
+2.  Airflow DAG 在报送节点前自动停止
+3.  DataHub 上对应模型出现了红色质量标记
+4.  你手动修复数据并更新 `is_resolved` 后，DAG 恢复运行
+
+ 

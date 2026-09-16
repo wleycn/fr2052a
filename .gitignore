@@ -1,0 +1,21 @@
+# 环境变量与凭据
+.env
+**/.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 生成数据与日志
+sample_data/
+*.log
+
+# 编辑器与系统
+.DS_Store
+.idea/
+.vscode/
