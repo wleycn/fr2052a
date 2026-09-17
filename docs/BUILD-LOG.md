@@ -348,6 +348,71 @@ Iceberg 的**表元数据落 PostgreSQL**（JDBC catalog），**数据文件落 
 
 ---
 
+## E4.3 数据入湖：ref 批加载 + ODS 经 Kafka 流入 bronze（2026-09-17）
+
+**目标**：把两类数据按各自该走的路送进数据湖 —— REF 走批加载，ODS 走 Kafka 实时流入。
+
+**产出**
+
+| 位置 | 内容 |
+|---|---|
+| dev `config/pipeline_topics.json` | 主题与数据湖落点的唯一声明，建主题/生产者/消费者共读一份 |
+| dev `deploy/server2/create-topics.sh` | 按声明建主题，幂等 |
+| dev `deploy/server2/prepare-runtime-dirs.sh` | 建宿主机侧运行时目录并改属主 |
+| dev `python/lakehouse/load_ref_tables.py` | REF 批加载，整表覆盖写保证幂等 |
+| dev `python/lakehouse/verify_bronze.py` | bronze 层与样本 CSV 的行数核对 |
+| dev `python/producers/replay_ods_to_kafka.py` | 把 ODS 明细按主题重放进 Kafka |
+| dev `python/consumers/kafka_to_iceberg.py` | 消费 7 个主题，按主键 MERGE 入 bronze |
+| dev `deploy/server2/fetch-deps.sh` | 新增 Kafka 连接器依赖，下载带校验与换源 |
+
+**主题映射**（一张 ODS 表对一个主题）
+
+| ODS 表 | Kafka 主题 | 源系统 |
+|---|---|---|
+| ods_deposits | core_banking_txns | CORE_BANKING |
+| ods_loans | loan_book | LOAN_SYS |
+| ods_repo_transactions | treasury_deals | TREASURY_SYS |
+| ods_securities | custody_positions | CUSTODY_SYS |
+| ods_derivatives | derivatives_trades | DERIV_SYS |
+| ods_gl_balances | gl_entries | FINANCE_SYS |
+| ods_off_bs_commitments | off_bs_commitments | OFFBS_SYS |
+
+另有 3 个主题只作声明、本演示无生产者：`market_data_prices`、`reference_data_updates`、`fr2052a_alerts`（后者归 E6 使用）。
+
+**验证证据**
+
+| 判据 | 实测 |
+|---|---|
+| REF 批加载 | 9 张全成功，行数与生成器一致；重跑后行数不变（覆盖写幂等） |
+| 类型落位 | `spot_rate` 落成 `decimal(18,8)`，空 `expiry_date` 落成 NULL |
+| 主题 | 10 个主题建成，7 个有数据 |
+| 生产者 | 1500 条消息写入，逐主题计数与 CSV 行数一致 |
+| broker 落盘 | 7 个数据主题偏移量合计 1500 |
+| bronze 层 | 7 张表合计 1500 行，与 CSV 逐表吻合 |
+| 幂等入湖 | 重放 1500 条**重复**消息后再消费，各表行数不变（MERGE 按主键去重） |
+
+**坑（三处，都属于"报错信息指向的地方不是真因"）**
+
+1. **下载到的 jar 其实是 HTML。** 我新写的 `fetch_jar` 把目录路径当成了文件路径
+   （只写到 `.../kafka-clients/3.9.0`，漏了文件名），镜像对这个不存在的文件返回
+   **200 + 目录列表 HTML**，而 `curl -f` 只认 4xx/5xx，于是 HTML 被当 jar 存了下来。
+   后果是运行时报 `Failed to find data source: kafka` —— 一个跟下载完全无关的错。
+   修法：URL 带上文件名，且下载后按 **zip 魔数**验身，不合格就换下一个源。
+   顺带把 Iceberg 与 PG 驱动的下载也切到同一函数，一并获得校验与兜底。
+2. **检查点目录写不进去。** 绑定挂载的源目录不存在时 Docker 会自动创建，属主是 root，
+   而容器内进程是 uid 185(spark)。流式作业报 `mkdir of file:/opt/fr2052a-checkpoints/... failed`，
+   看起来像检查点配置问题，实际是目录权限。修法：`prepare-runtime-dirs.sh` 预建并改属主。
+3. **收尾汇总会撒谎。** 消费完成后打印的 bronze 行数整列是 0，而表里其实有 1500 行；
+   原因是同一会话早先解析过的表握着旧快照。修法：计数前 `refreshTable`。
+   教训：**自报数字必须能被独立复核** —— 我是靠另起一个作业跑核对脚本才确认数据没丢的。
+
+**遗留**
+
+- dbt 四层模型（ODS → OWD → OWS → ADS）是 E4.4 的主体，尚未开始。
+- `market_data_prices` 等 3 个声明主题暂无生产者，`SHOW` 时为空属预期。
+
+---
+
 ## 后续步骤
 
 E4 业务开发（数据生成器 → ODS → OWD → OWS → ADS）→ E5 编排 → E6 合规演示剧本 → E7 治理收口。

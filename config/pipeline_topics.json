@@ -1,0 +1,74 @@
+{
+  "_comment": "Kafka 主题与数据湖落点的唯一声明。建主题脚本、重放生产者、入湖消费者都读这一份，避免三处各写一份名字。",
+  "kafka": {
+    "bootstrap_servers_internal": "kafka:9092",
+    "bootstrap_servers_external": "192.168.17.24:9094",
+    "partitions": 3,
+    "replication_factor": 1
+  },
+  "topics": [
+    {
+      "name": "core_banking_txns",
+      "source_system": "CORE_BANKING",
+      "target_table": "bronze.ods_deposits",
+      "has_producer": true
+    },
+    {
+      "name": "loan_book",
+      "source_system": "LOAN_SYS",
+      "target_table": "bronze.ods_loans",
+      "has_producer": true
+    },
+    {
+      "name": "treasury_deals",
+      "source_system": "TREASURY_SYS",
+      "target_table": "bronze.ods_repo_transactions",
+      "has_producer": true
+    },
+    {
+      "name": "custody_positions",
+      "source_system": "CUSTODY_SYS",
+      "target_table": "bronze.ods_securities",
+      "has_producer": true
+    },
+    {
+      "name": "derivatives_trades",
+      "source_system": "DERIV_SYS",
+      "target_table": "bronze.ods_derivatives",
+      "has_producer": true
+    },
+    {
+      "name": "gl_entries",
+      "source_system": "FINANCE_SYS",
+      "target_table": "bronze.ods_gl_balances",
+      "has_producer": true
+    },
+    {
+      "name": "off_bs_commitments",
+      "source_system": "OFFBS_SYS",
+      "target_table": "bronze.ods_off_bs_commitments",
+      "has_producer": true
+    },
+    {
+      "name": "market_data_prices",
+      "source_system": "MARKET_DATA",
+      "target_table": null,
+      "has_producer": false,
+      "note": "行情主题，本演示未生成对应的 ODS 表，暂作声明保留"
+    },
+    {
+      "name": "reference_data_updates",
+      "source_system": "REF_DATA",
+      "target_table": null,
+      "has_producer": false,
+      "note": "引用数据走批加载直入 ref 命名空间，本主题暂作声明保留"
+    },
+    {
+      "name": "fr2052a_alerts",
+      "source_system": "ALERTING",
+      "target_table": null,
+      "has_producer": false,
+      "note": "实时流动性预警主题，E6 使用"
+    }
+  ]
+}

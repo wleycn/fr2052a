@@ -72,6 +72,8 @@ services:
       # 应用代码（python/ 与 sql/）与样本数据，由 sync-app.sh 从 dev 侧同步。
       # 注意：不能挂在 /opt/spark/fr2052a 下面——父挂载是只读的，runc 无法在其内部建挂载点。
       - ./app:/opt/fr2052a-app:ro
+      # 流式作业的检查点。挂到容器本地盘之外，容器重建后偏移量不丢。
+      - ./checkpoints:/opt/fr2052a-checkpoints
     networks:
       - fr2052a_net
 

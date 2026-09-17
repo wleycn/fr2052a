@@ -34,7 +34,7 @@ ssh "$SERVER2_HOST" "mkdir -p '$REMOTE_DIR'"
 # 这样既不会留下上次同步的残骸，也避开了 rsync 多源时 --delete 不覆盖目标根目录的语义坑。
 ssh "$SERVER2_HOST" "find '$REMOTE_DIR' -mindepth 1 -maxdepth 1 -exec rm -rf {} +"
 
-for tree in python sql dbt sample_data; do
+for tree in python sql dbt config sample_data; do
   rsync -az --delete \
     --exclude '__pycache__' \
     --exclude '*.pyc' \
