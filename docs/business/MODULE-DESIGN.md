@@ -13,10 +13,10 @@
 | ADS 报表 | FR 2052a 对齐、报送文件生成 | 不做数据采集、不做实时预警 |
 | GL 对账 | 总账与报表对账，差异阻断 | 不做数据修正、不做重述 |
 | 重述 | SCD2 版本管理、迟到数据处理 | 不做历史数据回滚、不做审计 |
-| 数据质量 | GE 校验、规则引擎 | 不做数据纠错、不做阻断 |
-| 合规熔断 | `fr2052a_alerts` 检查、Airflow 阻断 | 不做告警发送、不做修复 |
+| 数据质量 | 规则引擎执行 `ref.ref_validation_rules` 里的规则 | 不做数据纠错、不做阻断 |
+| 合规熔断 | `ads.ads_fr2052a_alerts` 检查、报送放行闸阻断 | 不做告警发送、不做修复 |
 | 调度编排 | Airflow DAG 管理 | 不做业务逻辑、不做数据访问 |
-| 元数据治理 | DataHub 摄取、血缘生成 | 不做数据质量校验、不做业务映射 |
+| 元数据/血缘 | dbt meta 声明 + `render_lineage.py` 渲染血缘与监管映射 | 不做数据质量校验、不做业务映射 |
 | PII 脱敏 | 动态脱敏、权限控制 | 不做数据加密、不做审计日志 |
 
 ## 接口契约
@@ -42,15 +42,20 @@
 
 ### Kafka Topic 契约
 
-| Topic | schema | 生产者 | 消费者 |
-|-------|--------|--------|--------|
-| `core_banking_txns` | `{source_system, source_record_id, txn_type, amount, currency, event_time}` | Core Banking | Spark Streaming |
-| `treasury_deals` | `{deal_id, deal_type, notional, currency, counterparty_id, event_time}` | Treasury | Spark Streaming |
-| `derivatives_trades` | `{trade_id, instrument_type, notional, currency, counterparty_id, event_time}` | Derivatives | Spark Streaming |
-| `market_data_prices` | `{price_type, instrument_id, price, currency, timestamp}` | Market Data | Spark Streaming |
-| `gl_entries` | `{gl_account_id, debit, credit, currency, entry_date, event_time}` | GL System | 批处理 |
-| `reference_data_updates` | `{ref_type, ref_id, action, data_json, timestamp}` | MDM | 维表更新 |
-| `fr2052a_alerts` | `{alert_id, report_date, source_model, severity, message, created_at}` | 校验引擎 | 告警服务 |
+| Topic | 源系统 | 落点 | 生产者 |
+|-------|--------|------|--------|
+| `core_banking_txns` | CORE_BANKING | `bronze.ods_deposits` | 有 |
+| `loan_book` | LOAN_SYS | `bronze.ods_loans` | 有 |
+| `treasury_deals` | TREASURY_SYS | `bronze.ods_repo_transactions` | 有 |
+| `custody_positions` | CUSTODY_SYS | `bronze.ods_securities` | 有 |
+| `derivatives_trades` | DERIV_SYS | `bronze.ods_derivatives` | 有 |
+| `gl_entries` | FINANCE_SYS | `bronze.ods_gl_balances` | 有 |
+| `off_bs_commitments` | OFFBS_SYS | `bronze.ods_off_bs_commitments` | 有 |
+| `market_data_prices` | MARKET_DATA | 不落表 | 暂作声明保留（本演示未生成对应的 ODS 表） |
+| `reference_data_updates` | REF_DATA | 不落表 | 暂作声明保留（引用数据走批加载直入 ref） |
+| `fr2052a_alerts` | ALERTING | 不落表 | 熔断判定写入，供告警下游订阅 |
+
+主题清单、落点与是否有生产者的唯一声明在 `config/pipeline_topics.json`，本表不另抄一份。载荷字段同理：生产者的 JSON 键就是 ODS 表头，字段清单见 `sql/iceberg/02_create_ods_tables.sql`。
 
 ## 依赖关系
 
@@ -63,7 +68,7 @@
               ↓
            合规熔断 → 报送阻断/放行
               ↓
-           DataHub 血缘
+        血缘与监管映射（dbt meta + 自研渲染）
 ```
 
 **单向依赖**：上层依赖下层，禁止反向依赖。

@@ -44,9 +44,9 @@
 | Time Travel | Iceberg Time Travel | 按 snapshot 查询历史数据 | "历史查询" |
 | Kafka KRaft | Kafka Raft Consensus | Kafka 无 ZooKeeper 模式 | "Kafka 集群"（模糊）|
 | dbt model | Data Build Tool Transformation Model | dbt 转换模型，SQL 定义数据转换 | "SQL 文件" |
-| Great Expectations | GE 数据质量框架 | 校验规则引擎 | "校验脚本" |
+| 规则引擎 | Rule Engine（`run_dq_rules.py`） | 执行 `ref.ref_validation_rules` 里声明的校验规则，结论落校验日志 | "校验脚本" |
 | Airflow DAG | Directed Acyclic Graph | 调度依赖图 | "任务"（缺少依赖语义）|
-| DataHub | LinkedIn DataHub | 元数据治理平台 | "血缘工具" |
+| 血缘渲染 | `render_lineage.py` | 用 dbt 元数据与 SQL 解析出表级血缘、列级监管映射 | "血缘工具" |
 | MinIO | 对象存储 | S3 兼容对象存储 | "文件存储" |
 | Iceberg | Apache Iceberg | 开放表格式 | "表格式" |
 
@@ -70,9 +70,12 @@
 
 | 枚举 | 取值 | 含义 | 状态流转 | 代码位置 |
 |---|---|---|---|---|
-| `ReportStatus` | `DRAFT` / `VALIDATED` / `SUBMITTED` / `RESTATED` | 报表状态 | `DRAFT → VALIDATED → SUBMITTED`；`SUBMITTED → RESTATED` | `ads/fr2052a_submission` |
-| `AlertSeverity` | `CRITICAL` / `WARNING` / `INFO` | 告警严重度 | — | `ads/fr2052a_alerts` |
-| `ReconciliationStatus` | `PASS` / `FAIL` / `PENDING` | 对账状态 | `PENDING → PASS/FAIL` | `ads/gl_reconciliation` |
+| `submission_status` | `ACCEPTED` / `REJECTED` | 报送文件是否被接收 | 每次报送即为终态 | `ads.ads_fr2052a_submission` |
+| `severity` | `CRITICAL` / `WARNING` / `INFO` | 预警严重度 | — | `ads.ads_fr2052a_alerts` |
+| `status`（预警） | `OPEN` / `CLOSED` | 规则是否仍在命中 | 命中即 `OPEN`，不再命中自动转 `CLOSED` | `ads.ads_fr2052a_alerts` |
+| `state`（熔断闸） | `OPEN` / `HALTED` | 报送是否放行 | 出现阻断级预警即 `HALTED`，清零后回 `OPEN` | `ads.ads_circuit_breaker` |
+| `status`（对账） | `PASS` / `FAIL` | 单个 Section 是否对平 | 每轮重算 | `ads.ads_gl_reconciliation` |
+| `check_result` | `PASS` / `FAIL` / `SKIPPED` | 单条规则的结论 | — | `ads.ads_fr2052a_validation_log` |
 
 ### 3.2 数据质量状态
 
@@ -100,9 +103,9 @@
 | OWS 层 | 到期分桶、现金流计算、HQLA 分类 | `ows.*` schema | 明细展开、GL 对账 |
 | ADS 层 | FR 2052a 报表输出 | `ads.*` schema | 数据采集、实时预警 |
 | 调度编排 | Airflow DAG 管理 | DAG 定义 | 业务逻辑、数据访问 |
-| 数据质量 | GE 校验规则引擎 | 校验日志 | 数据纠错、阻断报送 |
-| 合规熔断 | `fr2052a_alerts` 检查 | 告警表 | 告警发送、修复 |
-| 元数据治理 | DataHub 摄取与血缘 | 元数据目录 | 数据质量、业务映射 |
+| 数据质量 | 规则引擎执行 `ref.ref_validation_rules` | 校验日志 | 数据纠错、阻断报送 |
+| 合规熔断 | `ads.ads_fr2052a_alerts` 检查 | 告警表 | 告警发送、修复 |
+| 元数据/血缘 | dbt meta 声明 + `render_lineage.py` | 血缘表与 Markdown 报告 | 数据质量、业务映射 |
 | PII 脱敏 | 动态脱敏、权限控制 | 脱敏视图 | 数据加密、审计日志 |
 
 ## 5. 易混术语对照

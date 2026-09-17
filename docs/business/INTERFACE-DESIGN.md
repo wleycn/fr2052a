@@ -205,48 +205,70 @@ python producers/replay_ods_to_kafka.py --data-dir <dir> --config <json>
 
 ### 5.1 `fr2052a_daily_batch`
 
+DAG 只做编排：每个任务 ssh 到 Server 2 调用跑批脚本的同一个环节，编排逻辑只有一份。
+
 ```text
-check_source_arrival
-  → load_ods
-  → dbt_run_owd
-  → dbt_run_ows
-  → dbt_run_ads
-  → gx_validate
-  → gl_reconciliation
-  → check_alerts (熔断检查)
-  → generate_submission
-  → datahub_ingest
-  → submit_to_fed
+check_source_arrival          确认 7 张 ODS 源文件到位，避免空跑一整轮
+  → load_ref                  REF 字典表入 Iceberg
+  → replay_ods                样本明细按主题重放进 Kafka
+  → load_bronze               消费 Kafka 入 bronze，按主键 MERGE 去重
+  → dbt_run                   OWD → OWS → ADS 三层建模
+  → pii_vault                 建脱敏对照表
+  → lineage                   渲染血缘与监管映射
+  → dq_validate               执行 ref 层声明的质量规则
+  → publish_access            施加库侧迁移与授权
+  → export_pg                 导出到报送服务层
+  → liquidity_monitor         算 LCR、产预警、翻转熔断闸
+  → verify_*                  三层核对与权限核对
+  → pipeline_health           巡检收口
 ```
 
-**调度**：每日 02:00 启动，SLA 08:00 ET 前完成
+**调度**：每日 06:00 触发，为 T+1 08:00 截止留余量；SLA 2 小时。
+
+报送放行闸与报送文件生成不在本 DAG 内 —— 它们由 `fr2052a_submission` 触发，否则日批会因熔断整体变红，看不出是哪一环出的问题。
 
 ### 5.2 `fr2052a_realtime_alert`
 
-- **触发**：Kafka Consumer 实时消费
-- **逻辑**：检测大额提款、大额贷款提取，触发 LCR 红线告警
-- **输出**：写入 `fr2052a_alerts` 表
+- **触发**：定时每 15 分钟扫描一次
+- **逻辑**：消费核心存款主题，识别未保险、USD 计价、单笔超过门槛的存款敞口
+- **输出**：写入 `ads.ads_fr2052a_realtime_alerts`，同时投递告警主题
 
 ### 5.3 `fr2052a_backfill_and_restate`
 
-- **参数**：`report_date`、`entity_code`、`reason`
-- **逻辑**：重跑 OWD/OWS/ADS，写入重述日志
-- **输出**：`ads_restatement_log`
+- **参数**：`report_date`、`entity_code`、`reason`、`requested_by`、`approved_by`、`effective_date`
+- **逻辑**：先留取重跑前的报表快照，再重跑链路，最后登记新版本并关闭旧版本
+- **输出**：`ads.ads_restatement_log` 与 `ads.ads_fr2052a_report_history`
 
-## 6. DataHub 血缘接口
+## 6. 血缘与监管映射接口
 
-| 层级 | 摄取内容 | 频率 |
-|------|----------|------|
-| 技术血缘 | dbt 模型依赖图 | 每次 dbt run |
-| 业务血缘 | `ref_regulatory_mapping` 字段映射 | 手动触发 |
-| 监管映射 | FR 2052a Section/Line Item 绑定 | 模型定义时标注 |
+| 层级 | 来源 | 产出 |
+|------|------|------|
+| 表级血缘 | dbt 元数据里的模型依赖 | `audit.audit_data_lineage` 的边 |
+| 列级血缘 | SQL 解析 | 列级边 |
+| 监管映射 | 模型 `schema.yml` 的 meta 声明 | 列到 Section / Line Item 的绑定 |
+| 人读报告 | 以上三者渲染 | `LINEAGE.md` |
 
-## 7. 错误码表
+## 7. 退出码与规则编码
 
-| 错误码 | HTTP | 含义 | 触发条件 | 建议动作 |
-|--------|------|------|----------|----------|
-| `VDQ_ERROR` | - | 数据质量 ERROR | 校验规则失败 | 阻断报送，人工排查 |
-| `VDQ_WARNING` | - | 数据质量 WARNING | 校验规则警告 | 放行，记录日志 |
-| `GL_MISMATCH` | - | GL 对账差异 | 总账与报表偏差 > 阈值 | 阻断报送 |
-| `ALERT_CRITICAL` | - | 合规告警 CRITICAL | `fr2052a_alerts` 有未解决 CRITICAL | 熔断，等待修复 |
-| `SOURCE_LATE` | - | 数据迟到 | T+1 08:00 ET 后到达 | 标记迟到，触发重述流程 |
+本项目没有对外 HTTP 接口，对外的是**退出码**：跑批环境靠退出码判断放行与否，比读日志可靠。
+
+| 退出码 | 来源 | 含义 | 建议动作 |
+|--------|------|------|----------|
+| 0 | `check_submission_gate` | 放行 | 继续生成报送文件 |
+| 2 | `check_submission_gate` | 熔断中，存在阻断级预警 | 人工排查后重新判定，不得绕过 |
+| 3 | `check_submission_gate` | 判不了（数据库不可达等） | 按不放行处理，先恢复环境 |
+
+预警规则编码（写进 `ads.ads_fr2052a_alerts`，同时投递 Kafka 告警主题）：
+
+| 规则编码 | 严重度 | 触发条件 | 阻断报送 |
+|----------|--------|----------|----------|
+| `CB-LCR-001` | CRITICAL | LCR 低于监管红线 | 是 |
+| `CB-LCR-002` | WARNING | LCR 低于内部预警线 | 否 |
+| `CB-LCR-003` | WARNING | 净现金流出为零，LCR 算不出来 | 否 |
+| `CB-L2CAP-001` | WARNING | 二级资产占比超上限，认列额已被截断 | 否 |
+| `CB-INFLOW-001` | INFO | 预期流入占流出超上限比例，认列额已被截断 | 否 |
+| `CB-GL-001` | CRITICAL | 总账对账有 Section 未通过 | 是 |
+| `CB-DQ-001` | CRITICAL | 数据质量有 ERROR 级规则失败 | 是 |
+| `RT-LARGE-UNINSURED-001` | WARNING | 单笔未保险存款敞口超过门槛 | 否 |
+
+是否阻断由 `config/liquidity_thresholds.json` 的 `breaker.blocking_severities` 决定，默认只有 CRITICAL 阻断。

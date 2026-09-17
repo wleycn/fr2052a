@@ -724,12 +724,48 @@ DAG 的每个任务只是"SSH 到 Server 2 执行 `run-daily-pipeline.sh` 的某
     ENT002-FR2052A-20260916-02   法人单体  ENT002-FR2052A-20260916-02.xbrl
     ENT003 / ENT004 / ENT005     法人单体  同上
 
+## 收口：一键初始化与文档校正
+
+### 一键初始化环境
+
+新增三个文件，把「清哪里、按什么顺序、清完怎么回到基线」固化下来：
+
+| 文件 | 作用 |
+|---|---|
+| `deploy/reset-demo.sh` | 驱动脚本：默认只列清单（演练），`--apply` 才真清并重跑全链路 |
+| `sql/admin/reset_demo.sql` | PostgreSQL 派生表的清理清单。放 `sql/admin/` 而不是 `sql/postgres/`，因为后者会被 publish-access 每次跑批自动应用 —— 那个清单一进那个目录，每次跑批都会顺手清空演示数据 |
+| `deploy/server2/reset-streaming-state.sh` | 清 Kafka 主题内容与流式消费位点，再重建主题与运行时目录 |
+
+清理范围三层：PostgreSQL 派生表（报表服务层、控制与审计、脱敏对照表、血缘）、Iceberg 的 OWD 版本历史表、Kafka 主题与消费位点。缺任何一层都会重现旧状态。
+
+实测：清完重跑，16 个环节全部通过，耗时 3 分 11 秒。基线状态：报表 5 行、版本历史 0 行、重述登记 0 行、质量日志 20 行（单批次）、脱敏对照 1343 行、血缘 48 条边。
+
+写这个脚本时又踩到两个坑：
+
+1. **`ads.pg_smoke` 是视图不是表**（早期联调的残留）。清理清单里写成 `DROP TABLE` 直接报错，并因 `ON_ERROR_STOP` 中断了后面的清理。
+2. **检查点目录里的文件属主是容器用户**（uid 185），宿主上的 hermes 删不掉：`rm -rf` 报一串 Permission denied 并中途停住，留下半个检查点目录 —— 半个比没有更糟，作业读它会直接失败。改为 `sudo rm -rf`，再由 `prepare-runtime-dirs.sh` 重建目录属主。
+
+### 文档按实现校正
+
+需求期的文档镜像与实现已经拉开距离，本轮逐个对齐：
+
+| 文档 | 校正内容 |
+|---|---|
+| README | 技术栈（去掉 DataHub 与「两套栈」的说法）、快速开始改为可直接执行的命令、E6/E7 状态、目录树、失效链接 |
+| PROJECT | 技术栈版本（Airflow 2.10.5 / dbt 1.12.5 / Iceberg 1.11 / Python 3.11 / 自研规则引擎 / 自研巡检）、端口表去掉 DataHub、目录分层 |
+| DATA-DESIGN | §2.1 分层表清单按实现重写（ref 9 张、bronze 7 张、silver 14 张 + 7 张历史、gold 3 张、控制与审计 11 张）、去掉 DataHub 与 Grafana 的表述 |
+| MODULE-DESIGN | 模块职责表里的 GE / DataHub / 旧表名；主题契约表由 7 条补到 10 条（补 `loan_book`、`custody_positions`、`off_bs_commitments`） |
+| INTERFACE-DESIGN | 日批 DAG 的真实任务流、三个 DAG 的参数与输出、血缘接口的来源、错误码表改为退出码与规则编码 |
+| DOMAIN-LANGUAGE | 术语表去掉 GE 与 DataHub，换成规则引擎与血缘渲染；枚举取值改为实现里的真实枚举 |
+| CHANGELOG | 补 E6 / E7 完成条目与关键修复清单 |
+| ACCEPTANCE-CHECKLIST | 每条判据改为可执行动作并附证据；四条不适用的（pytest 覆盖率、ruff、mypy、CI）改为替代标准并写明原因 |
+
 ## 后续步骤
 
-E4 业务开发 → E5 编排 → E6 合规演示剧本 → E7 治理收口，四段均已完成并实跑取证。
+E4 业务开发 → E5 编排 → E6 合规演示剧本 → E7 治理收口 → 收口（一键初始化 + 文档校正），五段均已完成并实跑取证。
 
 尚待处理：
 
-- `docs/business/DATA-DESIGN.md` 的 §2.1 分层表清单仍是需求期镜像（bronze 表名、gold 表清单与实现不符），需按实现重写；§2.2 与 §2.3 本轮已对齐。
-- `docs/rules/ACCEPTANCE-CHECKLIST.md` 的勾选状态尚未逐项实核（其中「pytest 覆盖率 ≥ 80%」「CI 绿灯」「API p95」三项与本项目形态不符，需按实际验收方式改写）。
 - `requirements/` 保留在仓库内的处置（移入 `references/` 或 `archive/`）仍待决策。
+- KNOWN-ISSUE 的坑锚点只登记了 SCD2 区间这一条；本轮其余十个坑记在构建日志里，若要按「一坑一锚点 + 索引行」的规矩收进 KNOWN-ISSUE，需要再补一遍锚点与 PROJECT.md 索引。
+- 验收清单里仍有 3 条未实核（命名规范逐文件核对、注释质量全量复核、控制表查询的 EXPLAIN），已按未实核标注。

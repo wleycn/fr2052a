@@ -27,8 +27,8 @@ Gold / ADS
   PostgreSQL：FR 2052a 报表、明细、校验日志、GL 对账、报送状态
         │
         ├── 报送文件生成：XBRL / XML / CSV
-        ├── DataHub：技术血缘 + 业务血缘 + 监管映射
-        └── 监控告警：Airflow SLA + Grafana + 邮件/企业微信
+        ├── 血缘与监管映射：dbt meta 声明 + render_lineage.py 渲染
+        └── 巡检：pipeline_health.py（熔断 / 质量 / 报送 / 滞后 / 连接 / 磁盘）
 ```
 
 ### 真源划分
@@ -45,74 +45,99 @@ Gold / ADS
 
 ### 2.1 分层表清单
 
-#### 接入层（Kafka Topics）
+#### 引用数据（Ref，Iceberg）
 
-| Topic | 内容 | 生产者 | 消费者 |
-|-------|------|--------|--------|
-| `core_banking_txns` | 存款、取款、转账 | Core Banking System | Spark Streaming → Bronze |
-| `treasury_deals` | 回购、逆回购、融资 | Treasury System | Spark Streaming → Bronze |
-| `derivatives_trades` | 衍生品交易 | Derivatives System | Spark Streaming → Bronze |
-| `market_data_prices` | 汇率、证券价格 | Market Data Feed | Spark Streaming → 维表 |
-| `gl_entries` | 总账分录 | GL System | 批/流 → GL 对账 |
-| `reference_data_updates` | 主数据变更 | MDM System | 维表更新 |
-| `fr2052a_alerts` | 实时预警 | 校验引擎 | 告警服务 |
+9 张字典表，由批加载写入，不参与流式接入。
+
+| 表 | 说明 |
+|----|------|
+| `ref.ref_entity_hierarchy` | 法人实体层级（并表口径与重要子公司） |
+| `ref.ref_counterparty` | 交易对手主数据 |
+| `ref.ref_maturity_bucket` | 到期分桶定义 |
+| `ref.ref_fr2052a_line_items` | FR 2052a 行项目映射 |
+| `ref.ref_exchange_rates` | 汇率（报告日即期） |
+| `ref.ref_regulatory_mapping` | 监管映射（字段 → Section / Line Item） |
+| `ref.ref_behavior_assumptions` | 行为假设（流出率、HQLA 分类） |
+| `ref.ref_calendar` | 银行营业日 |
+| `ref.ref_validation_rules` | 数据质量规则定义（规则引擎读它执行） |
+
+#### 接入层（Kafka）
+
+10 个主题，其中 7 个有生产者的落 bronze，3 个只作声明保留。
+
+| Topic | 落点 | 生产者 |
+|-------|------|--------|
+| `core_banking_txns` | `bronze.ods_deposits` | 有 |
+| `loan_book` | `bronze.ods_loans` | 有 |
+| `treasury_deals` | `bronze.ods_repo_transactions` | 有 |
+| `custody_positions` | `bronze.ods_securities` | 有 |
+| `derivatives_trades` | `bronze.ods_derivatives` | 有 |
+| `gl_entries` | `bronze.ods_gl_balances` | 有 |
+| `off_bs_commitments` | `bronze.ods_off_bs_commitments` | 有 |
+| `market_data_prices` | 不落表 | 暂作声明保留（本演示未生成对应 ODS 表） |
+| `reference_data_updates` | 不落表 | 暂作声明保留（引用数据走批加载直入 ref） |
+| `fr2052a_alerts` | 不落表 | 熔断判定写入，供告警下游订阅 |
+
+主题清单、落点与是否有生产者的唯一声明在 `config/pipeline_topics.json`。
 
 #### Bronze 层（Iceberg）
 
-| 表 | 说明 | 加载方式 |
-|----|------|----------|
-| `lakehouse.bronze.ods_deposits_stream` | 存款原始流数据 | Kafka → Iceberg |
-| `lakehouse.bronze.ods_treasury_deals` | 资金交易原始 | Kafka → Iceberg |
-| `lakehouse.bronze.ods_derivatives` | 衍生品原始 | Kafka → Iceberg |
-| `lakehouse.bronze.ref_entity_hierarchy` | 法人实体层级（批） | CSV → Iceberg |
-| `lakehouse.bronze.ref_exchange_rates` | 汇率（批） | CSV → Iceberg |
+7 张 ODS 表，字段与源 CSV 表头一一对应（对不上时由 `verify_ods_schema.py` 报错），按 `days(report_date)` 分区。
 
-#### Silver 层（OWD + OWS）
+| 表 | 加载方式 |
+|----|----------|
+| `bronze.ods_deposits` | Kafka → MERGE |
+| `bronze.ods_repo_transactions` | Kafka → MERGE |
+| `bronze.ods_loans` | Kafka → MERGE |
+| `bronze.ods_securities` | Kafka → MERGE |
+| `bronze.ods_derivatives` | Kafka → MERGE |
+| `bronze.ods_gl_balances` | Kafka → MERGE |
+| `bronze.ods_off_bs_commitments` | Kafka → MERGE |
 
-| 表 | 说明 | 来源 |
-|----|------|------|
-| `owd_deposits` | 标准化存款 | `ods_deposits` 清洗 + 汇率转换 |
-| `owd_secured_financing` | 标准化有担保融资 | `ods_repo_transactions` |
-| `owd_loans` | 标准化贷款 | `ods_loans` |
-| `owd_securities` | 标准化证券 | `ods_securities` |
-| `owd_derivatives` | 标准化衍生品 | `ods_derivatives` |
-| `ows_funding_summary` | 融资汇总 | `owd_*` 聚合 + 到期分桶 |
-| `ows_hqla_summary` | HQLA 汇总 | `owd_securities` HQLA 分类 |
-| `ows_cashflow_projection` | 现金流预测 | `owd_*` 现金流计算 |
-
-#### Gold 层（ADS in PG）
+#### Silver 层（Iceberg）
 
 | 表 | 说明 | 来源 |
 |----|------|------|
-| `ads_fr2052a_report` | FR 2052a 报表主表 | `ows_*` 汇总 |
-| `ads_fr2052a_detail` | 报表明细行 | `owd_*` 明细展开 |
-| `ads_gl_reconciliation` | GL 对账结果 | `ows_funding_summary` vs GL |
-| `ads_restatement_log` | 重述日志 | SCD2 版本变更 |
-| `ads_fr2052a_validation_log` | 校验日志 | GE 校验结果 |
-| `ads_fr2052a_submission` | 报送状态 | 报送回执 |
-| `fr2052a_alerts` | 合规告警 | 校验失败 → 熔断 |
+| `silver.stg_fx_rates` | 汇率取数 | `ref.ref_exchange_rates` |
+| `silver.owd_deposits` | 标准化存款（客户标识已脱敏） | `bronze.ods_deposits` 清洗 + 汇率换算 |
+| `silver.owd_secured_financing` | 标准化有担保融资 | `bronze.ods_repo_transactions` |
+| `silver.owd_loans` | 标准化贷款（借款人标识已脱敏） | `bronze.ods_loans` |
+| `silver.owd_securities` | 标准化证券 | `bronze.ods_securities` |
+| `silver.owd_derivatives` | 标准化衍生品 | `bronze.ods_derivatives` |
+| `silver.owd_gl_entries` | 标准化总账余额 | `bronze.ods_gl_balances` |
+| `silver.owd_off_bs` | 标准化表外承诺 | `bronze.ods_off_bs_commitments` |
+| `silver.ows_hqla_summary` | HQLA 汇总（含二级资产 40% 上限截断） | `owd_securities` |
+| `silver.ows_collateral_summary` | 担保品汇总 | `owd_secured_financing` |
+| `silver.ows_cash_position` | 现金头寸 | `owd_*` |
+| `silver.ows_cashflow_projection` | 现金流预测 | `owd_*` 到期分桶 |
+| `silver.ows_funding_summary` | 融资汇总 | `owd_*` 聚合 |
+| `silver.owd_*_history` | 7 张 OWD 的版本历史（SCD2） | `owd_scd2.py` 归并 |
 
-#### 引用数据（Ref）
+#### Gold 层（Iceberg）与 ADS 层（PostgreSQL）
+
+同一份报表数据的两个落点：Gold 在湖里，ADS 由导出作业写进 PostgreSQL，供报送与放行闸读取。
+
+| 表 | 说明 | 来源 |
+|----|------|------|
+| `ads_fr2052a_report` | FR 2052a 报表主表，一个报送主体一行 | `ows_*` 汇总 |
+| `ads_fr2052a_detail` | 报表明细行，用于回溯报表数字 | `owd_*` 明细展开 |
+| `ads_gl_reconciliation` | 总账对账结果，8 个 Section 逐项 PASS / FAIL | 报表 vs 总账 |
+
+#### 控制与审计（PostgreSQL）
 
 | 表 | 说明 |
 |----|------|
-| `ref_entity_hierarchy` | 法人实体层级（合并口径 + 重要子公司） |
-| `ref_maturity_bucket` | 到期分桶定义 |
-| `ref_fr2052a_line_items` | FR 2052a 行项目映射 |
-| `ref_exchange_rates` | 汇率（报告日即期） |
-| `ref_regulatory_mapping` | 监管映射（字段 → Section/Line Item） |
-| `ref_behavior_assumptions` | 行为假设（流出率、HQLA 分类） |
-| `ref_calendar` | 银行营业日 |
-| `ref_validation_rules` | 数据质量规则定义 |
-| `ref_counterparty` | 交易对手主数据 |
-
-#### 审计与治理
-
-| 表 | 说明 |
-|----|------|
-| `audit_change_log` | 变更审计日志 |
-| `audit_access_log` | 访问审计日志 |
-| `audit_data_lineage` | 数据血缘 |
+| `ads.ads_liquidity_metrics` | 每家主体的 LCR 等流动性指标 |
+| `ads.ads_fr2052a_alerts` | 规则状态（一行 = 一条规则的当前状态，重复命中累加次数） |
+| `ads.ads_fr2052a_realtime_alerts` | 实时敞口事件流水（一行 = 一笔事件） |
+| `ads.ads_circuit_breaker` | 熔断闸（全局一行，OPEN / HALTED） |
+| `ads.ads_fr2052a_submission` | 报送台账（一行 = 一个文件，含哈希与回执） |
+| `ads.ads_restatement_log` | 重述登记（原报表 ↔ 新报表） |
+| `ads.ads_fr2052a_report_history` | 报表版本历史 |
+| `ads.ads_fr2052a_validation_log` | 数据质量结论（一行 = 一个批次的一条规则） |
+| `secure.fr2052a_pii_map` | 脱敏对照表，明文唯一落点 |
+| `audit.audit_data_lineage` | 血缘边（表级与列级） |
+| `audit.audit_change_log` / `audit.audit_access_log` | 变更审计与访问审计 |
 
 ### 2.2 关键表结构
 
@@ -226,4 +251,4 @@ Core Banking Deposit Module
   → FR 2052a Section C / Line Item
 ```
 
-完整血缘由 DataHub 摄取 dbt 元数据后自动生成，见 [INTERFACE-DESIGN.md](INTERFACE-DESIGN.md#datahub)。
+完整血缘由 `render_lineage.py` 从 dbt 元数据与 SQL 解析生成，见 [INTERFACE-DESIGN.md](INTERFACE-DESIGN.md#血缘渲染)。
