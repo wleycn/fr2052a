@@ -43,7 +43,7 @@
 | SCD2 | Slowly Changing Dimension Type 2 | 类型 2 缓慢变化维，保留历史版本 | "历史表" |
 | Time Travel | Iceberg Time Travel | 按 snapshot 查询历史数据 | "历史查询" |
 | Kafka KRaft | Kafka Raft Consensus | Kafka 无 ZooKeeper 模式 | "Kafka 集群"（模糊）|
-| dbt model | dbt Transformation Model | dbt 转换模型，SQL 定义数据转换 | "SQL 文件" |
+| dbt model | Data Build Tool Transformation Model | dbt 转换模型，SQL 定义数据转换 | "SQL 文件" |
 | Great Expectations | GE 数据质量框架 | 校验规则引擎 | "校验脚本" |
 | Airflow DAG | Directed Acyclic Graph | 调度依赖图 | "任务"（缺少依赖语义）|
 | DataHub | LinkedIn DataHub | 元数据治理平台 | "血缘工具" |
