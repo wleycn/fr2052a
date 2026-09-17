@@ -116,73 +116,56 @@ Gold / ADS
 
 ### 2.2 关键表结构
 
-#### `fr2052a_db.ads.ads_fr2052a_report`
+#### `ads.ads_fr2052a_report`
+
+列由 dbt 模型产出，完整列清单见 `dbt/models/marts/ads_fr2052a_report.sql`。本文档不复制一份：复制出来的列清单必然在报表加列时漏改一处。
+
+| 项 | 内容 |
+|---|---|
+| 主键 | `report_id`，四段区位码「机构-报表-报告期-口径」，例 `ENT001-FR2052A-20260916-01` |
+| 末段口径码 | `01` = 集团并表，`02` = 法人单体 |
+| 粒度 | 一个报送主体一行，即（报告日 + 实体 + 口径） |
+| 金额列 | Section A–K 的金额与监管上限后的认列额，另有三项汇总指标 |
+
+为什么不用自增序列做主键：本表每轮导出是全量覆盖，序列值属于数据库状态而不是数据，同一个业务报表在不同批次会拿到不同的号。而重述登记要跨批次引用「原报表 / 新报表」，键一旦会变，这层对应关系就不成立。
+
+#### `ads.ads_fr2052a_alerts`（流动性预警，一行一个规则状态）
 
 ```sql
-CREATE TABLE ads.ads_fr2052a_report (
-    report_id BIGSERIAL PRIMARY KEY,
-    report_date DATE NOT NULL,
-    entity_code VARCHAR(20) NOT NULL,
-    is_consolidated BOOLEAN NOT NULL,
-    -- Section A: Wholesale Unsecured Financing
-    sec_a_cp_outstanding NUMERIC(20,2),
-    sec_a_cd_outstanding NUMERIC(20,2),
-    sec_a_unsecured_borrow NUMERIC(20,2),
-    sec_a_total NUMERIC(20,2),
-    -- Section B: Wholesale Secured Financing
-    sec_b_repo_outstanding NUMERIC(20,2),
-    sec_b_total NUMERIC(20,2),
-    -- Section C: Deposits
-    sec_c_retail_demand NUMERIC(20,2),
-    sec_c_retail_savings NUMERIC(20,2),
-    sec_c_total NUMERIC(20,2),
-    -- Section F: Loan Portfolio (Cash Inflows)
-    sec_f_total_inflow NUMERIC(20,2),
-    -- Section G: Securities Portfolio
-    sec_g_hqla_l1_mv NUMERIC(20,2),
-    sec_g_hqla_l2a_mv NUMERIC(20,2),
-    sec_g_hqla_l2b_mv NUMERIC(20,2),
-    sec_g_total_mv NUMERIC(20,2),
-    -- 汇总指标
-    total_funding NUMERIC(20,2),
-    total_hqla NUMERIC(20,2),
-    net_funding_outflow NUMERIC(20,2),
-    created_at TIMESTAMPTZ DEFAULT NOW()
+CREATE TABLE ads.ads_fr2052a_alerts (
+    alert_id BIGSERIAL PRIMARY KEY,                   -- 预警主键，交给序列生成
+    report_date DATE NOT NULL,                        -- 报告日
+    entity_code TEXT NOT NULL,                        -- 法人实体编码
+    alert_code TEXT NOT NULL,                         -- 规则编码，如 CB-LCR-001
+    severity TEXT NOT NULL,                           -- CRITICAL / WARNING / INFO
+    metric_name TEXT,                                 -- 触发指标名
+    metric_value NUMERIC(20, 4),                      -- 触发时指标实际值
+    threshold_value NUMERIC(20, 4),                   -- 判定阈值
+    message TEXT NOT NULL,                            -- 人读说明
+    blocks_submission BOOLEAN NOT NULL DEFAULT FALSE, -- 是否阻断报送
+    occurrence_count INTEGER NOT NULL DEFAULT 1,      -- 同一规则重复触发的累计次数
+    status TEXT NOT NULL DEFAULT 'OPEN',              -- OPEN / CLOSED
+    first_detected_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_detected_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ads_fr2052a_alerts_uk UNIQUE (report_date, entity_code, alert_code),
+    CONSTRAINT ads_fr2052a_alerts_severity_ck CHECK (severity IN ('CRITICAL', 'WARNING', 'INFO')),
+    CONSTRAINT ads_fr2052a_alerts_status_ck CHECK (status IN ('OPEN', 'CLOSED'))
 );
 ```
 
-#### `fr2052a_db.ads.fr2052a_alerts`
-
-```sql
-CREATE TABLE ads.fr2052a_alerts (
-    alert_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    report_date DATE NOT NULL,
-    source_model VARCHAR(255) NOT NULL,
-    rule_id VARCHAR(50),
-    severity VARCHAR(20) NOT NULL CHECK (severity IN ('CRITICAL', 'WARNING', 'INFO')),
-    message TEXT NOT NULL,
-    variance_amount NUMERIC(38,10),
-    context_json JSONB,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    resolved_at TIMESTAMPTZ,
-    is_resolved BOOLEAN DEFAULT FALSE,
-    resolution_note TEXT,
-    airflow_run_id VARCHAR(100),
-    CONSTRAINT chk_resolved_consistency CHECK (NOT is_resolved OR resolved_at IS NOT NULL)
-);
-
-CREATE INDEX idx_alerts_unresolved_critical ON fr2052a_alerts (report_date, severity, is_resolved)
-WHERE severity = 'CRITICAL' AND is_resolved = FALSE;
-```
+规则状态与事件流水分两张表。本表是「规则当前状态」，同一规则重复命中只累加 `occurrence_count`；「一笔事件一行」的流水另住 `ads.ads_fr2052a_realtime_alerts`。混在一张表里会让「一条记录代表什么」说不清。
 
 ### 2.3 落库契约
 
 | 层 | 写入方 | 读取方 | 幂等策略 |
 |----|--------|--------|----------|
-| Bronze | Spark Streaming / 批加载 | OWD 模型 | 追加（append）|
-| Silver | dbt model | OWS 模型 | MERGE（upsert）|
-| Gold (PG) | export_gold_to_pg.py | ADS 报表、DataHub | 先清后写（truncate + insert）|
-| Ref | 批加载 | 所有层 | MERGE（按主键）|
+| Ref | `load_ref_tables.py` 批加载 | 所有层 | 按主键 MERGE |
+| Bronze | `kafka_to_iceberg.py` 消费 Kafka | OWD 模型 | 按主键 MERGE 去重，同一条消息重放不产生第二行 |
+| Silver | dbt 模型（table 物化） | OWS / ADS 模型 | 整表重建，先建后换，不留半成品 |
+| Silver 版本历史 | `owd_scd2.py` | 重述登记与审计 | 全表重算，同一主键的版本号连续 |
+| Gold（Iceberg） | dbt marts 模型 | 导出作业 | 整表重建 |
+| ADS（PG） | `export_gold_to_pg.py` | 报送、预警、对账 | 先清后写，写时开 `truncate=true` 以保留表上的授权与触发器 |
+| 控制与审计（PG） | 各环节脚本 | 放行闸、巡检、审计 | 按业务键 upsert；按批次累积的表先清本批次再追加 |
 
 ## §3 业务规则
 

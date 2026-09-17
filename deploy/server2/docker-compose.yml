@@ -97,6 +97,11 @@ services:
       - ./spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
       - ./spark:/opt/spark/fr2052a:ro
       - ./app:/opt/fr2052a-app:ro
+      # 执行器侧要写流式状态存储，所以这里必须和 master 一样挂检查点目录。
+      # 少了这个挂载时，驱动侧能建检查点、执行器侧建不了，报错是
+      # 「mkdir of file:/opt/fr2052a-checkpoints/... failed」——看着像权限问题，
+      # 实际是执行器进程所在的容器里根本没有这个路径。
+      - ./checkpoints:/opt/fr2052a-checkpoints
     networks:
       - fr2052a_net
 

@@ -11,6 +11,9 @@
 
 结果写入 PostgreSQL 的 `ads.ads_fr2052a_validation_log`，并按批次追加，保留历史。
 
+重跑同一批次前要先清掉该批次旧行，由 python/validators/clear_dq_batch.py 负责 ——
+本脚本跑在 Spark 里，JDBC 能读表、能整表覆盖写，但不能按条件删行。
+
 用法（Server 2，经 spark-submit 包装脚本执行）：
     bash spark-submit-fr2052a.sh \\
         /opt/fr2052a-app/python/validators/run_dq_rules.py --batch-id BATCH-20260916-001

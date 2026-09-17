@@ -3,19 +3,24 @@
 链条（与 requirements/[99] §2.4 的设计一致，按当前已落地的环节展开）：
 
     check_source_arrival → load_ref → replay_ods → load_bronze → dbt_run
-      → dq_validate → export_pg → verify_bronze → verify_silver → verify_ads
+      → pii_vault → lineage → owd_scd2 → dq_validate → export_pg → liquidity_monitor
+      → verify_bronze → verify_silver → verify_ads → pipeline_health
 
 设计要点：
   1. 每个 Task 都是"SSH 到 Server 2 执行 run-daily-pipeline.sh 的某一个环节"，
      编排逻辑只有那一份脚本，DAG 不复制命令 —— 否则改了一处忘另一处必然漂移。
+     这条纪律曾经失守过：跑批脚本在仓库里改成了分环节调度，但没同步到服务器，
+     于是每个任务都跑了一整条链路、DAG 全绿而分环节调度根本没生效。
+     现在服务器上的部署文件由 deploy/sync-deploy.sh 同步并支持漂移检查。
   2. 环节的退出码就是 Task 的成功/失败：核对脚本失败会让批次红，进而阻断下游，
      这是"数据不对就不许报送"的机器保障，不靠人看日志。
   3. **必须显式设置 cmd_timeout**：SSHOperator 的默认命令超时只有 10 秒，
      而单个环节要跑几十秒的 spark-submit，用默认值会以 "SSH command timed out" 失败。
      实测踩过这个坑，故在 ssh_task 工厂里统一设成 1 小时。
-
-尚未纳入本 DAG 的环节（属 E6/E7 范围，不做空壳任务占位）：
-  报表生成 XBRL/XML/CSV、报送 Federal Reserve、DataHub 血缘摄取、实时告警。
+  4. **不在本 DAG 里的环节**：报送（gate / submission / verify-submission）在
+     fr2052a_submission DAG；重述在 fr2052a_backfill_and_restate；
+     实时扫描在 fr2052a_realtime_alert。分开的理由是触发条件不同 ——
+     日批是定时的，报送要等人复核，重述是事件驱动的，实时是高频的。
 """
 
 from __future__ import annotations
@@ -57,6 +62,10 @@ with DAG(
         "owner": "fr2052a",
         "retries": 1,
         "retry_delay": pendulum.duration(minutes=2),
+        # SLA：超过 2 小时还没跑完就记一次 SLA Miss，在 UI 与元数据库里可见。
+        # 06:00 起跑、通常 20 分钟内跑完，2 小时足够宽松 ——
+        # 设得太紧会把正常波动也报成违规，反而没人看。
+        "sla": pendulum.duration(hours=2),
     },
     tags=["fr2052a", "daily", "submission"],
 ) as dag:
@@ -85,6 +94,21 @@ with DAG(
         pipeline_command("dbt-run"),
         "dbt 三层建模：OWD → OWS → ADS（层内依赖由 dbt 自己解析）",
     )
+    pii_vault = ssh_task(
+        "pii_vault",
+        pipeline_command("pii-vault"),
+        "建 PII 明文对照表；OWD 层只有 token，明文只在这一处且受角色限制",
+    )
+    lineage = ssh_task(
+        "lineage",
+        pipeline_command("lineage"),
+        "渲染血缘与监管映射，并写审计血缘表",
+    )
+    owd_scd2 = ssh_task(
+        "owd_scd2",
+        pipeline_command("owd-scd2"),
+        "OWD 版本历史 SCD2 归并（新增/变更/删除分别留痕）",
+    )
     dq_validate = ssh_task(
         "dq_validate",
         pipeline_command("dq-rules"),
@@ -94,6 +118,16 @@ with DAG(
         "export_pg",
         pipeline_command("export-pg"),
         "gold 层报表导出到 PostgreSQL 报送服务层，并回读校验",
+    )
+    publish_access = ssh_task(
+        "publish_access",
+        pipeline_command("publish-access"),
+        "重建库对象：Spark 的覆盖写会 DROP + CREATE 报表表，授权与触发器必须补回",
+    )
+    liquidity_monitor = ssh_task(
+        "liquidity_monitor",
+        pipeline_command("liquidity-monitor"),
+        "算 LCR 与各类上限占比，命中规则即写预警并翻转熔断闸",
     )
     verify_bronze = ssh_task(
         "verify_bronze",
@@ -110,6 +144,16 @@ with DAG(
         pipeline_command("verify-ads"),
         "ADS 层合并口径、明细回溯、监管上限、GL 对账",
     )
+    pipeline_health = ssh_task(
+        "pipeline_health",
+        pipeline_command("health"),
+        "健康巡检：熔断状态、质量失败数、Kafka 滞后、连接与磁盘。恒成功，只报不改判定",
+    )
+    verify_rbac = ssh_task(
+        "verify_rbac",
+        pipeline_command("verify-rbac"),
+        "权限自测：逐角色实读一次，与权限声明比对（授权是否真的生效）",
+    )
 
     (
         check_source_arrival
@@ -117,9 +161,16 @@ with DAG(
         >> replay_ods
         >> load_bronze
         >> dbt_run
+        >> pii_vault
+        >> lineage
+        >> owd_scd2
         >> dq_validate
         >> export_pg
+        >> publish_access
+        >> liquidity_monitor
         >> verify_bronze
         >> verify_silver
         >> verify_ads
+        >> verify_rbac
+        >> pipeline_health
     )

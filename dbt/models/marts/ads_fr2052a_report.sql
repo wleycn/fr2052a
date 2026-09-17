@@ -124,7 +124,7 @@ cashflow_30d as (
 
 entities as (
 
-    select distinct entity_code from {{ ref('owd_deposits') }}
+    select distinct report_date, entity_code from {{ ref('owd_deposits') }}
 
 ),
 
@@ -207,7 +207,10 @@ entity_level as (
         round(
             least(coalesce(cf.raw_inflow, 0), 0.75 * coalesce(cf.total_outflow, 0)) - coalesce(cf.total_outflow, 0),
             2
-        ) as sec_k_cumulative_30d_gap
+        ) as sec_k_cumulative_30d_gap,
+        -- report_date 追加在列尾而不是列首：Iceberg 不支持列重排，
+        -- 把新列插在中途会让 create or replace table 直接失败。
+        e.report_date
     from entities e
     left join deposits d on d.entity_code = e.entity_code
     left join secured_financing f on f.entity_code = e.entity_code
@@ -291,20 +294,53 @@ consolidated as (
         round(
             least(sum(sec_h_expected_inflow_30d), 0.75 * sum(sec_k_total_outflows)) - sum(sec_k_total_outflows),
             2
-        ) as sec_k_cumulative_30d_gap
+        ) as sec_k_cumulative_30d_gap,
+        max(report_date) as report_date
     from entity_level
+
+),
+
+-- is_consolidated 放在最后一列，避免与 entity_level 里已有的 entity_code 重名。
+--
+-- report_id 是业务标识，按「机构-报表-报告期-口径」四段区位码拼装，例如
+--   ENT001-FR2052A-20260916-01
+-- 每一段都有确定含义，读的人不必查表就知道这条报表是谁报的、什么报表、哪一期、什么口径。
+-- 最后一段是口径码：01 = 并表，02 = 法人单体。
+--
+-- 为什么不用自增序列：本表每轮导出是全量覆盖，序列值属于数据库状态而不是数据，
+-- 同一个业务报表在不同批次会拿到不同的号。而重述登记要跨批次引用「原报表 / 新报表」，
+-- 键一旦会变，这层对应关系就不成立。
+--
+-- 为什么不把「第几次报送」编进末段：那等于把版本号塞进主键，而版本已由
+-- ads.ads_fr2052a_report_history.record_version 承担。同一件事写两处，两处必然分叉。
+--
+-- 为什么由模型产出而不是在库里生成：report_id 随 gold 表从 Iceberg 导出，
+-- 库里生成则 Iceberg 侧没有这一列，报送台账、重述登记、血缘都拿不到这个身份。
+-- 且 PostgreSQL 生成列只接受 IMMUTABLE 表达式，而 date 转文本受 DateStyle 会话参数影响，
+-- 实测 cast、concat、to_char、format 四种写法全部被拒。
+unioned as (
+
+    select
+        e.*,
+        false as is_consolidated
+    from entity_level e
+
+    union all
+
+    select
+        c.*,
+        true as is_consolidated
+    from consolidated c
 
 )
 
--- is_consolidated 放在最后一列，避免与 entity_level 里已有的 entity_code 重名
 select
-    e.*,
-    false as is_consolidated
-from entity_level e
-
-union all
-
-select
-    c.*,
-    true as is_consolidated
-from consolidated c
+    u.*,
+    concat_ws(
+        '-',
+        u.entity_code,
+        '{{ var("report_code") }}',
+        date_format(u.report_date, 'yyyyMMdd'),
+        case when u.is_consolidated then '01' else '02' end
+    ) as report_id
+from unioned u

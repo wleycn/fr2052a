@@ -1,0 +1,49 @@
+version: 2
+
+# OWD 层列级契约。
+#
+# 这里登记的不只是说明文字，还有**脱敏事实**：带 meta.pii 的列表示该列在 OWD 层已被
+# mask_pii 宏脱敏，pii_source 指向明文所在的位置（bronze 层「表.列」）。
+# python/governance/build_pii_vault.py 读这份声明来建 PII 对照表 —— 明文只在这张
+# 受权限限制的表里存在一份，其他任何地方都只有 token。
+#
+# 为什么把「哪一列是 PII」写在这里而不是写在脚本里：
+# 写在脚本里，模型新增一个脱敏列时脚本不会知道，对照表就少一列，
+# 而缺一列的表现是「查询查不到这个客户」，不会报错。
+#
+# 脱敏边界（有意保留明文的列也写清楚，避免看起来像漏了）：
+#   脱敏  零售账簿的客户标识与账户标识：deposits 的 customer_id / deposit_id，
+#         loans 的 borrower_id / loan_id。存款客户里含个人（customer_type_raw = IND），
+#         账户号本身也是客户机密。
+#   保留  repo / derivatives / off_bs 的 counterparty_id 与 counterparty_name。
+#         这三条账簿在本演示里只与金融机构往来，标识的是机构不是个人，
+#         属于商业机密而非个人数据；把它们也哈希掉只会让数据无法与外部对账。
+
+models:
+  - name: owd_deposits
+    description: OWD 存款明细，客户与账户标识已脱敏
+    columns:
+      - name: customer_id
+        description: 客户标识，脱敏后为 h_ 前缀的确定性 token
+        meta:
+          pii: true
+          pii_source: ods_deposits.customer_id
+      - name: deposit_id
+        description: 存款账号，脱敏后为 h_ 前缀的确定性 token
+        meta:
+          pii: true
+          pii_source: ods_deposits.account_number
+
+  - name: owd_loans
+    description: OWD 贷款明细，借款人标识与贷款账号已脱敏
+    columns:
+      - name: borrower_id
+        description: 借款人标识，脱敏后为 h_ 前缀的确定性 token
+        meta:
+          pii: true
+          pii_source: ods_loans.borrower_id
+      - name: loan_id
+        description: 贷款账号，脱敏后为 h_ 前缀的确定性 token
+        meta:
+          pii: true
+          pii_source: ods_loans.loan_id

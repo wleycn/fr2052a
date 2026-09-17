@@ -643,6 +643,91 @@ DAG 的每个任务只是"SSH 到 Server 2 执行 `run-daily-pipeline.sh` 的某
 
 ---
 
+## E6 合规演示剧本
+
+**目标**：把「熔断 → 阻断报送 → 重述 → 追溯」做成可实跑的剧本，而不是文档里的流程图。每个环节都是「脚本 + 流水线步骤 + Airflow 任务」三处同名同义。
+
+| 环节 | 载体 | 一句话 |
+|---|---|---|
+| 熔断判定 | `python/alerts/liquidity_monitor.py` | 读 PG 报送服务层算 LCR，按规则产预警，翻转熔断闸，投递 Kafka |
+| 报送放行闸 | `python/validators/check_submission_gate.py` | 退出码 0 放行 / 2 熔断中 / 3 判不了（按不放行处理） |
+| 报送生成 | `python/exporters/generate_submission.py` | 一个报送主体三份文件（XBRL / XML / CSV），文件名即 `report_id` |
+| 报送核对 | `python/validators/verify_submission.py` | 从磁盘重算 SHA-256 与台账逐条比对 |
+| 实时扫描 | `python/alerts/realtime_scanner.py` | 消费核心存款主题，识别大额未保险敞口，一行一个事件 |
+| 版本历史 | `python/lakehouse/owd_scd2.py` | 7 张 OWD 历史表按 `row_hash` 归并版本 |
+| 重述登记 | `python/lakehouse/restate.py` | capture / register 两段式，前后报文快照留痕 |
+| 时间旅行 | `python/audit/time_travel.py` | 列快照 / 比对两个快照 / 逐版追溯一个键 |
+| 表维护 | `python/lakehouse/maintain_tables.py` | 快照保留、元数据清理、文件合并（默认演练，`--apply` 才真做） |
+
+### 实测证据
+
+熔断剧本（`--gl-break-amount 25000000` 造受控缺口）：
+
+    预警判定：命中 3 条
+      [WARNING ] CB-L2CAP-001   ENT004  二级资产占比 46.95% 超过 40% 上限，认列额已被截断。
+      [WARNING ] CB-L2CAP-001   ENT005  二级资产占比 49.45% 超过 40% 上限，认列额已被截断。
+      [CRITICAL] CB-GL-001      GLOBAL  总账对账 1 个 Section 未通过：F(差异 -25000000.01)。未对平不得报送。
+    熔断闸状态：HALTED
+      已投递 3 条预警到 Kafka 主题 fr2052a_alerts
+
+| 判据 | 实测 |
+|---|---|
+| 放行闸 | `gate` 退出码 2，报文列出阻断预警 |
+| 报送被拒 | `submission` 退出码 2，一个文件都没生成 |
+| 事件通道 | 主题 `fr2052a_alerts` 共 23 条消息，其中 `CB-GL-001` 1 条 |
+| 恢复 | 数据回到基线后重跑，熔断闸自动回到 OPEN，闸与报送恢复放行 |
+| 实时扫描 | 重放一轮 ODS 后扫描写入 **47 条**敞口事件（未保险 + USD + ≥ 300 万美元），与离线核对的期望值完全一致 |
+
+报送（基线口径）：5 个报送主体 × 3 种格式 = **15 个文件、5 份回执**；`verify-submission` 15 条台账哈希重算全部相符。
+
+版本历史：`silver.owd_deposits_history` 有 4 个快照；`DEP-000001` 逐版取值 v1 `1,241,020.40`（原始）→ v2 `9,876,543.21`（重述）→ v3 `1,241,020.40`（改回），三条版本各有记录。`verify-scd2` 7 张历史表全部通过。
+
+### 踩到的坑（详见 KNOWN-ISSUE）
+
+1. **对账结果按处理日打标，熔断判定按报告日查询。** `ads_gl_reconciliation` 用 `current_date()` 当报告日，而 `liquidity_monitor` 按 `--report-date` 查，两边永远对不上 —— 对账失败也报不出预警，报送照旧放行。基线数据下对账全 PASS，「查不到行」与「没有失败行」看起来一模一样，只有故意造缺口时才暴露。
+2. **`--gl-break-amount` 把缺口造在权益上。** 权益不参与任何 Section 对账，少记权益只会让「资产 = 负债 + 权益」不成立，分科目对账照旧全 PASS。缺口改落在贷款科目（Section F 的对账对象）：总账借贷仍然平衡，但科目余额与明细对不上。
+3. **GL 与数据质量类预警一投 Kafka 就崩。** 报告日在指标类预警里是 date 对象、在 GL / DQ 类预警里是命令行传入的字符串，直接调 `.isoformat()` 抛 `AttributeError`。只有阻断级预警走这条路，基线跑永远看不到。
+4. **DQ 结果表重跑静默翻倍。** 按批次追加但重跑前不删：同一批次跑 8 次，表里就是 160 行（20 条规则 × 8），「本批次几条 ERROR」随之翻倍。修法：新增 `clear_dq_batch.py`，追加前先清本批次；该表原先靠 Spark 自动建表，本轮补上显式 DDL。
+5. **SCD2 失效日可能早于生效日。** 失效日直接取「本次生效日 - 1」，未与该版本自身生效日比较；重述用处理日、日批用报告日，两个约定一撞就写出反向区间（`owd_deposits` 1 行、`owd_gl_entries` 20 行）。修法：写入侧 `greatest()` 兜底 + 写完自检不变式 + 日批生效日改为报告日次日 + `verify-scd2` 纳入日批环节；存量脏行由 `sql/iceberg/07_fix_reversed_intervals.sql` 修。
+6. **`verify-scd2` 不在日批执行序列里。** 上一条反向了整整一轮，日批仍报「全部通过」—— 因为这条核对只写在环节表里、没进 `STEPS`。
+7. **Spark worker 没挂检查点目录。** 流式作业的状态存储由执行器写，只给驱动侧（master）挂载时，执行器报 `mkdir of file:/opt/fr2052a-checkpoints/... failed` —— 看着像权限问题，实际是执行器所在容器里根本没有这个路径。修法：worker 服务补上同一份挂载。
+8. **实时扫描的解析 schema 把金额声明成 DOUBLE。** 生产者把 CSV 原样序列化成 JSON，金额在消息里是带引号的字符串；声明成 DOUBLE 后该字段解析为 NULL，而 `insured_flag` 这类真字符串字段照常解析，于是「解析没报错、判定一条都不命中」，作业照常打印「无新增大额敞口」。修法：按 STRING 收、显式 cast，并用「转出来的数值是否为空」当解析成功的判据。
+9. **流上的 `dropDuplicates` 会把事件全部吞掉。** 它是有状态算子，历史见过的键长期留在 checkpoint 里；重放同样的样本数据时输出永远为空，而偏移量照常前进，排查时极难看出来。修法：去重下沉到批内，跨批次重复交给事件表主键拦（撞主键即失败，这是有意的）。
+
+## E7 治理收口
+
+| 环节 | 载体 | 结果 |
+|---|---|---|
+| 血缘与监管映射 | `python/governance/render_lineage.py` | 48 条表级边、20 条列级监管映射，落 `audit.audit_data_lineage` 与 `LINEAGE.md` |
+| PII 脱敏 | `dbt/macros/pii.sql` + `build_pii_vault.py` | OWD 明细加盐 SHA-256 单射脱敏；明文唯一落点 `secure.fr2052a_pii_map`（1343 行） |
+| RBAC | `sql/postgres/20_security.sql` + `verify_rbac.py` | 4 角色 × 3 对象 = 12 项权限，逐角色实读核对全部符合预期 |
+| 巡检 | `python/governance/pipeline_health.py` | 熔断、质量、报送、重述、实时事件、Kafka 滞后、PG 连接、磁盘 |
+
+脱敏交叉验证：CSV 明文 `ACC-219071` → `h_6fc2cc8a5376d196`，与 OWD 行中取值逐字符相同，证明 dbt 宏与 Python 用的是同一套算法、没有各写一份。
+
+### 报表主键改为业务区位码
+
+需求写的是 `report_id BIGSERIAL`（自增整数），实现改为四段区位码：
+
+    ENT001-FR2052A-20260916-01
+    机构码   报表码    报告期      口径码（01 并表 / 02 法人单体）
+
+为什么不用自增序列：本表每轮导出是全量覆盖，序列值属于数据库状态而不是数据，同一个业务报表在不同批次会拿到不同的号；而重述登记要跨批次引用「原报表 / 新报表」，键一旦会变，这层对应关系就不成立。
+
+为什么不放库侧生成列：`report_id` 随 gold 表从 Iceberg 导出，库里生成则 Iceberg 侧没有这一列，报送台账、重述登记、血缘都拿不到这个身份。且 PostgreSQL 生成列只接受 IMMUTABLE 表达式，而 date 转文本受 `DateStyle` 会话参数影响，实测 `cast` / `concat` / `to_char` / `format` 四种写法全部被拒（`(report_date - DATE '2000-01-01')::text` 能过，但键会变成不可读的天数编码）。
+
+实测取值与报送文件名：
+
+    ENT001-FR2052A-20260916-01   并表      ENT001-FR2052A-20260916-01.xbrl
+    ENT002-FR2052A-20260916-02   法人单体  ENT002-FR2052A-20260916-02.xbrl
+    ENT003 / ENT004 / ENT005     法人单体  同上
+
 ## 后续步骤
 
-E4 业务开发（数据生成器 → ODS → OWD → OWS → ADS）→ E5 编排 → E6 合规演示剧本 → E7 治理收口。
+E4 业务开发 → E5 编排 → E6 合规演示剧本 → E7 治理收口，四段均已完成并实跑取证。
+
+尚待处理：
+
+- `docs/business/DATA-DESIGN.md` 的 §2.1 分层表清单仍是需求期镜像（bronze 表名、gold 表清单与实现不符），需按实现重写；§2.2 与 §2.3 本轮已对齐。
+- `docs/rules/ACCEPTANCE-CHECKLIST.md` 的勾选状态尚未逐项实核（其中「pytest 覆盖率 ≥ 80%」「CI 绿灯」「API p95」三项与本项目形态不符，需按实际验收方式改写）。
+- `requirements/` 保留在仓库内的处置（移入 `references/` 或 `archive/`）仍待决策。

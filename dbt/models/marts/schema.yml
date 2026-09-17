@@ -1,0 +1,118 @@
+version: 2
+
+models:
+  - name: ads_fr2052a_report
+    description: >
+      FR 2052a 报送报表：按 Section A–K 装配行项目金额。每个法人实体一行
+      （is_consolidated = false），外加一行集团合并口径（ENT001，is_consolidated = true）。
+    meta:
+      owner: Treasury Liquidity Team
+      regulatory_reference: FR 2052a Instructions
+      reporting_frequency: daily
+    columns:
+      - name: report_date
+        description: 报告日，报送数据的归属日
+        meta:
+          rule_id: FR2052A-GEN-00
+
+      - name: entity_code
+        description: 法人实体编码，ENT001 为集团合并口径
+        meta:
+          rule_id: FR2052A-GEN-01
+
+      - name: sec_c_total
+        description: Section C 存款合计，受保存款按限额截断后计入
+        meta:
+          owner: Treasury Liquidity Team
+          regulatory_reference: FR 2052a Instructions Page 18
+          rule_id: FR2052A-C-01
+
+      - name: sec_c_retail_demand
+        description: Section C 零售活期存款，流失率按 ref_behavior_assumptions 匹配
+        meta:
+          rule_id: FR2052A-C-02
+
+      - name: sec_g_hqla_l1_mv
+        description: Section G 一级优质流动性资产市值，无折扣
+        meta:
+          owner: Treasury Liquidity Team
+          regulatory_reference: FR 2052a Instructions Page 42
+          rule_id: FR2052A-G-01
+          haircut_rate: "0%"
+
+      - name: sec_g_hqla_l2a_mv
+        description: Section G 二级 A 类资产市值，计入前按 15% 折扣
+        meta:
+          regulatory_reference: FR 2052a Instructions Page 43
+          rule_id: FR2052A-G-02
+          haircut_rate: "15%"
+
+      - name: sec_g_hqla_l2b_mv
+        description: Section G 二级 B 类资产市值，计入前按 50% 折扣
+        meta:
+          regulatory_reference: FR 2052a Instructions Page 44
+          rule_id: FR2052A-G-03
+          haircut_rate: "50%"
+
+      - name: sec_g_hqla_capped_total_usd
+        description: >
+          HQLA 认列总额 = 一级全额 + 二级资产（2A+2B）按 40% 上限截断后的部分。
+          截断是监管计算，不是数据清洗，故结果独立成列而不是覆盖原始市值。
+        meta:
+          regulatory_reference: FR 2052a Instructions Page 45
+          rule_id: FR2052A-G-04
+
+      - name: sec_h_expected_inflow_30d
+        description: Section H 30 天预期流入（未加限制的原始口径）
+        meta:
+          rule_id: FR2052A-H-01
+
+      - name: sec_k_total_inflows
+        description: Section K 认列流入 = 原始流入与流出的 75% 二者取小
+        meta:
+          regulatory_reference: FR 2052a Instructions Page 52
+          rule_id: FR2052A-K-01
+
+      - name: sec_k_net_funding_gap
+        description: Section K 净资金缺口 = 认列流入 − 流出
+        meta:
+          rule_id: FR2052A-K-02
+
+      - name: is_consolidated
+        description: 是否集团合并口径行
+        meta:
+          rule_id: FR2052A-GEN-02
+
+  - name: ads_fr2052a_detail
+    description: 报送明细，支撑报表每一行的回溯核对
+    meta:
+      owner: Treasury Liquidity Team
+      regulatory_reference: FR 2052a Instructions
+    columns:
+      - name: line_item
+        description: 行项目编号，与报表的 sec_* 列一一对应
+        meta:
+          rule_id: FR2052A-DET-01
+
+      - name: maturity_bucket
+        description: 到期分桶，与 ref_maturity_bucket 的编码一致
+        meta:
+          owner: Treasury Liquidity Team
+          regulatory_reference: FR 2052a Instructions Page 8
+          rule_id: FR2052A-DET-02
+
+  - name: ads_gl_reconciliation
+    description: 总账与报送口径的对账结果，未对平时阻断报送
+    meta:
+      owner: Finance Control
+      regulatory_reference: FR 2052a Instructions (GL reconciliation)
+    columns:
+      - name: status
+        description: 对账状态，PASS 表示差异在容差内
+        meta:
+          rule_id: FR2052A-REC-01
+
+      - name: variance
+        description: 差异额 = 总账金额 − 报送金额
+        meta:
+          rule_id: FR2052A-REC-02

@@ -4,8 +4,38 @@
 PostgreSQL 只承载报送服务层。dbt 在数据湖里算出报表，再由本作业导出到关系库，
 供报送服务与下游查询使用。
 
-PG 侧表结构由 Spark 按 gold 模型的结构自动创建（overwrite 模式），不手写一份 DDL ——
+PG 侧表结构由本作业按 gold 模型的结构自动创建，不手写一份 DDL ——
 两处各写一份结构定义必然漂移。
+
+关于覆盖写的两种模式（这是本文件最需要读懂的一段）：
+
+Spark 的 JDBC 覆盖写有两个分支，由 `truncate` 选项决定，默认走**删除重建**：
+
+    truncate=false（默认）  DROP TABLE + CREATE TABLE，再灌数
+                            → 表被换掉，挂在表上的东西（授权、触发器、索引、
+                              库侧加的列）全部消失，且不报任何错
+    truncate=true           TRUNCATE TABLE，再灌数
+                            → 表本身不动，只有数据被换掉，上述元数据全部保留
+
+文档出处：Spark SQL Guide / JDBC To Other Databases 的 Data Source Option 表，
+`truncate` 一项写明「causes Spark to truncate an existing table instead of dropping
+and recreating it. This can be more efficient, and prevents the table metadata
+(e.g., indices) from being removed」。
+
+实测（本机 Spark 3.5.9 + PostgreSQL 18 探测，表上有额外列 + 一个角色授权）：
+    默认      → 额外列消失、角色授权消失
+    truncate=true → 额外列保留、角色授权保留、新行取到列的默认值
+                    （能取到默认值恰好证明写的是 INSERT 而不是重建后的全新表）
+
+同一份文档也写明 truncate=true 的代价：「it will not work in some cases, such as
+when the new data has a different schema」。实测确认：模型多一列时直接报
+`Column extra not found in schema` 并中止，**表与授权原样保留**。
+这个失败方式是可接受的 —— 报错、不破坏；比起「悄悄把授权清掉」要好得多。
+
+所以本作业的选择是：truncate=true 保住元数据，代价是模型结构变了必须走显式迁移。
+本作业在写入前先比对模型列与目标表列，不一致就带着「该补哪条迁移」的提示直接失败，
+而不是把这个错留给 Spark 的原始报错。这与仓库红线「schema evolution 只走迁移，
+禁止隐式加列」是同一条纪律。
 
 导出后逐表回读行数，作为对"确实写进去了"的独立验证。
 
@@ -19,7 +49,7 @@ from __future__ import annotations
 import os
 import sys
 
-from pyspark.sql import SparkSession
+from pyspark.sql import DataFrame, SparkSession
 
 GOLD_SCHEMA = "gold"
 ADS_SCHEMA = "ads"
@@ -45,6 +75,21 @@ def connection_properties() -> dict[str, str]:
     }
 
 
+def target_columns(spark: SparkSession, url: str, table: str, properties: dict) -> list[str] | None:
+    """取目标表现有列；表还不存在时返回 None。"""
+    try:
+        return spark.read.jdbc(url, f"(SELECT * FROM {table} WHERE 1 = 0) AS probe", properties).columns
+    except Exception:  # noqa: BLE001 - 表不存在是正常情况（首次导出）
+        return None
+
+
+def schema_diff(frame: DataFrame, existing: list[str]) -> tuple[list[str], list[str]]:
+    """返回 (模型有而表没有的列, 表有而模型没有的列)。"""
+    missing = [name for name in frame.columns if name not in existing]
+    extra = [name for name in existing if name not in frame.columns]
+    return missing, extra
+
+
 def main() -> int:
     url = jdbc_url()
     properties = connection_properties()
@@ -59,7 +104,29 @@ def main() -> int:
         try:
             frame = spark.table(f"{GOLD_SCHEMA}.{table}")
             source_rows = frame.count()
-            frame.write.jdbc(url, target, mode="overwrite", properties=properties)
+
+            existing = target_columns(spark, url, target, properties)
+            if existing is not None:
+                missing, extra = schema_diff(frame, existing)
+                if missing or extra:
+                    print(
+                        f"  [FAIL] {target:<28} 模型结构与目标表不一致，"
+                        f"需要先写迁移（sql/postgres/ 下加 ALTER TABLE）"
+                    )
+                    if missing:
+                        print(f"           模型独有列：{missing} → 目标表需 ADD COLUMN")
+                    if extra:
+                        print(f"           目标表独有列：{extra} → 确认是否 DROP COLUMN 或补进模型")
+                    failures.append(target)
+                    continue
+
+            # truncate=true：保留表上的授权/触发器/索引与库侧列，只换数据。
+            # 不加这个选项就是默认的 DROP + CREATE，会让上面那些东西全部消失。
+            (
+                frame.write.mode("overwrite")
+                .option("truncate", "true")
+                .jdbc(url, target, properties=properties)
+            )
             # 独立回读：写成功不等于写对了
             written_rows = spark.read.jdbc(url, target, properties=properties).count()
             ok = source_rows == written_rows

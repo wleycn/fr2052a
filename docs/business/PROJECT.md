@@ -123,4 +123,6 @@ demo-fr2052a/
 - `#gl-reconciliation-mismatch` — GL 对账需按 Section 汇总后比对
 - `#hqla-cap-not-applied` — HQLA 二级资产 40% 上限需显式截断
 - `#python314-incompatible` — Python 3.14 不兼容 GE 与 pyspark
+- `#dockerhub-image-removed` — minio/spark 官方镜像已从 Docker Hub 下架
 - `#detail-report-mismatch` — 明细与报表口径不一致（正回购/30天过滤）
+- `#scd2-reversed-interval` — 版本区间不得反向（失效日早于生效日）

@@ -98,10 +98,21 @@ report_amounts as (
         round(-sum(case when mtm_value_usd < 0 then mtm_value_usd else 0 end), 2) as report_amount
     from {{ ref('owd_derivatives') }}
 
+),
+
+-- 报告日取数据自身的报告日，不用 current_date()：
+-- 对账结果由熔断判定按报告日查询（liquidity_monitor 传 --report-date），
+-- 用处理日打标会让两边日期对不上，查询永远查不到行 —— 于是对账失败也报不出预警，
+-- 报送闸照旧放行。这条静默失效只能在「故意造一个缺口」时才暴露。
+report_date as (
+
+    select max(report_date) as report_date
+    from {{ ref('owd_gl_entries') }}
+
 )
 
 select
-    current_date() as report_date,
+    d.report_date,
     g.section_code,
     g.gl_account_group as gl_account_id,
     g.comparison_basis as account_name,
@@ -117,5 +128,6 @@ select
     end as status
 
 from gl_by_section g
+cross join report_date d
 left join report_amounts r
     on r.section_code = g.section_code

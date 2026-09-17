@@ -39,9 +39,9 @@
 | 1 | 表结构一致 | DDL 与 DATA-DESIGN.md 一致 | ⬜ |
 | 2 | 索引已创建 | 关键查询有索引 | ⬜ |
 | 3 | 外键约束 | 引用完整性有保证 | ⬜ |
-| 4 | 数据质量 | GE 校验通过 | ⬜ |
-| 5 | GL 对账 | 差异 ≤ 阈值 | ⬜ |
-| 6 | 血缘完整 | DataHub 可展示 | ⬜ |
+| 4 | 数据质量 | 自研规则引擎结果落 `ads.ads_fr2052a_validation_log`（规则取自 `ref.ref_validation_rules`） | ⬜ |
+| 5 | GL 对账 | 8 个 Section 全 PASS（`verify-ads` 核对，未平则 `CB-GL-001` 阻断报送） | ⬜ |
+| 6 | 血缘完整 | `LINEAGE.md` 可展示，且 `audit.audit_data_lineage` 有边 | ⬜ |
 
 ## 性能验收
 

@@ -387,8 +387,13 @@ def generate_gl_balances(ods_dir: Path, gl_break_amount: float = 0.0) -> int:
 
     资产负债表本就是"资产 = 负债 + 权益"，权益作轧差后借贷天然相等。
 
-    gl_break_amount 给正值时故意让权益少记这么多（USD），制造受控的对账缺口，
-    供合规剧本演示 GL 对账阻断。
+    gl_break_amount 给正值时故意让贷款科目（2100）少记这么多（USD），制造受控的分科目缺口：
+    总账整体借贷仍然平衡（权益是轧差项，替它吸收），但 2100 科目余额小于贷款明细合计，
+    与 Section F 对不上，供合规剧本演示 GL 对账阻断。
+
+    为什么缺口落在科目侧而不是权益侧：权益不参与任何 Section 对账，
+    少记权益只会让「资产 = 负债 + 权益」不成立，而分科目对账照旧全 PASS ——
+    剧本里什么都抓不到。异常要造在能被判据碰到的地方。
     """
     rng = table_rng("ods_gl_balances")
     clock = EventClock(REPORT_DATE)
@@ -415,7 +420,8 @@ def generate_gl_balances(ods_dir: Path, gl_break_amount: float = 0.0) -> int:
         "1500": round(
             sum(_amount_usd(row, "mark_to_market") for row in derivatives if float(row["mark_to_market"]) > 0), 2
         ),
-        "2100": round(sum(_amount_usd(row, "outstanding_amount") for row in loans), 2),
+        # 演示缺口落在贷款科目：它是 Section F 的对账对象，动它才能被分科目对账抓到。
+        "2100": round(sum(_amount_usd(row, "outstanding_amount") for row in loans) - gl_break_amount, 2),
         "2001": demand_deposits,
         "2002": time_deposits,
         "2010": round(sum(_amount_usd(row, "cash_amount") for row in repo if row["repo_type"] == "REPO"), 2),
@@ -429,7 +435,8 @@ def generate_gl_balances(ods_dir: Path, gl_break_amount: float = 0.0) -> int:
     liabilities = round(
         sum(balances[account] for account, _, side in GL_ACCOUNTS if side == "CREDIT" and account in balances), 2
     )
-    equity = round(assets - liabilities - gl_break_amount, 2)
+    # 权益仍是轧差项：缺口留在科目侧，总账借贷因此仍然平衡。
+    equity = round(assets - liabilities, 2)
     if equity < 0:
         raise ValueError(f"倒推出的权益为负（{equity}），请检查业务明细规模与现金比例假设")
     balances["5001"] = equity
@@ -488,14 +495,52 @@ def generate_off_bs_commitments(ods_dir: Path, ref: ReferenceData) -> int:
     return write_csv(ods_dir / "ods_off_bs_commitments.csv", _header(business_columns), rows)
 
 
-def generate_all(ods_dir: Path, ref: ReferenceData, gl_variance_pct: float = 0.0) -> dict[str, int]:
-    """生成全部 7 张 ODS 表，返回各表行数。"""
-    return {
+def apply_deposit_correction(ods_dir: Path, record_id: str, new_amount: float) -> None:
+    """演示用：对单笔存款的本金做一笔修正，用于重述剧本。
+
+    为什么做成生成器的一个开关，而不是手工改 CSV：
+    手工改出来的样本与生成器的输出不再一致，下一次重跑生成器就被抹掉了，剧本不可复现。
+    修正必须发生在总账倒推之前 —— 总账余额是由业务明细倒推的，
+    若在总账生成之后再改明细，就会凭空造出一个对账缺口，重述剧本会误报成对账失败。
+    """
+    path = ods_dir / "ods_deposits.csv"
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        fieldnames = list(reader.fieldnames or [])
+        rows = list(reader)
+
+    matched = [row for row in rows if row["source_record_id"] == record_id]
+    if not matched:
+        raise ValueError(f"ods_deposits 里没有 source_record_id = {record_id} 的记录")
+    for row in matched:
+        row["principal_amount"] = f"{new_amount:.4f}"
+
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def generate_all(
+    ods_dir: Path,
+    ref: ReferenceData,
+    gl_variance_pct: float = 0.0,
+    correction: tuple[str, float] | None = None,
+) -> dict[str, int]:
+    """生成全部 7 张 ODS 表，返回各表行数。
+
+    correction 给定时，先修正单笔存款本金再倒推总账，保证总账与业务明细仍然自洽。
+    """
+    counts = {
         "ods_deposits": generate_deposits(ods_dir, ref),
         "ods_repo_transactions": generate_repo_transactions(ods_dir, ref),
         "ods_loans": generate_loans(ods_dir, ref),
         "ods_securities": generate_securities(ods_dir, ref),
         "ods_derivatives": generate_derivatives(ods_dir, ref),
-        "ods_gl_balances": generate_gl_balances(ods_dir, gl_variance_pct),
+        "ods_gl_balances": 0,
         "ods_off_bs_commitments": generate_off_bs_commitments(ods_dir, ref),
     }
+    if correction is not None:
+        apply_deposit_correction(ods_dir, correction[0], correction[1])
+    counts["ods_gl_balances"] = generate_gl_balances(ods_dir, gl_variance_pct)
+    return counts

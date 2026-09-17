@@ -53,8 +53,12 @@ select
         when 'CORP' then 'LEVEL_2B'
         else 'NON_HQLA'
     end as collateral_hqla_level,
-    r.start_date,
-    r.end_date,
+    -- 这两列是回购合约的起止日。原来的列名是 start_date / end_date，
+    -- 与 SCD2 版本列 end_date 撞名 —— 同名会让版本化作业在建历史表时直接失败
+    -- （同一张表里不允许两个 end_date）。改成语义完整的 deal_* 前缀既避开撞名，
+    -- 也顺手说清了「这是哪一段的起止」。
+    r.start_date as deal_start_date,
+    r.end_date as deal_end_date,
     datediff(r.end_date, r.report_date) as days_to_maturity,
     {{ maturity_bucket('datediff(r.end_date, r.report_date)') }} as maturity_bucket,
     case when r.end_date is null then true else false end as is_open_ended,

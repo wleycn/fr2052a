@@ -1,0 +1,20 @@
+{
+  "_comment": "流动性预警与报送熔断的唯一阈值声明。liquidity_monitor.py（判定）与 check_submission_gate.py（放行）都读这一份，避免两处各写一套数。",
+  "lcr": {
+    "regulatory_min": 1.0,
+    "internal_warning_min": 1.1,
+    "_note": "两条线都按监管口径设置，不为迁就演示数据而下调。本数据集的 LCR 基线远高于两条线（各实体 7.5 至 21.8 倍），因此 LCR 类规则在演示中不会触发 —— 这是事实，不是故障。熔断剧本的实测走 GL 差异与数据质量 ERROR 两条可造的真实异常。"
+  },
+  "l2_cap_ratio_max": 0.4,
+  "inflow_cap_ratio_max": 0.75,
+  "large_exposure": {
+    "uninsured_deposit_min_usd": 3000000,
+    "undrawn_commitment_min_usd": 2000000,
+    "_note": "实时扫描的绝对门槛，用于识别单笔大额敞口；不设占比门槛，避免小额实体被微小金额触发。"
+  },
+  "breaker": {
+    "blocking_severities": ["CRITICAL"],
+    "scope": "GLOBAL",
+    "_note": "出现任一 blocking 严重度的未关闭预警即熔断，报送环节拒绝生成文件。"
+  }
+}

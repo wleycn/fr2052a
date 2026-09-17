@@ -247,7 +247,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=0.0,
         help="让总账故意少记这么多（USD），供合规剧本演示对账阻断；默认 0 表示严格平衡",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--correct-deposit-record",
+        default=None,
+        help="演示重述剧本：指定要修正的存款记录号（source_record_id）",
+    )
+    parser.add_argument(
+        "--correct-deposit-amount",
+        type=float,
+        default=None,
+        help="演示重述剧本：把该记录的本金改为这个数（USD 记账币种原币金额）",
+    )
+    args = parser.parse_args(argv)
+    if (args.correct_deposit_record is None) != (args.correct_deposit_amount is None):
+        parser.error(
+            "--correct-deposit-record 与 --correct-deposit-amount 必须同时给出："
+            "只给一个不知道要改成多少，也不知道改哪一条。"
+        )
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -266,7 +283,16 @@ def main(argv: list[str] | None = None) -> int:
     print("=" * 72)
     print(f"生成 ODS 层业务数据 → {ods_dir}")
     print("=" * 72)
-    ods_counts = ods_data.generate_all(ods_dir, ref, args.gl_break_amount)
+    ods_counts = ods_data.generate_all(
+        ods_dir,
+        ref,
+        args.gl_break_amount,
+        correction=(
+            None
+            if args.correct_deposit_record is None
+            else (args.correct_deposit_record, args.correct_deposit_amount)
+        ),
+    )
     for table_name, count in ods_counts.items():
         print(f"  [WRITE] {table_name:<28} {count} 行")
 

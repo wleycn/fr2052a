@@ -13,6 +13,24 @@ clean-targets:
   - target
   - dbt_packages
 
+# ---- PII 脱敏策略（单一来源）----
+# dbt 的 mask_pii 宏与 python/governance/build_pii_vault.py 都读这里的模板，不各写一份。
+# 两处各写一份必然漂移，而漂移的表现是「同一个客户在两个地方算出两个 token」——
+# 不报错、不显眼，但会静默毁掉所有按客户维度的关联分析。
+#
+# 为什么用带盐的 SHA-256 而不是直接截断后 4 位：
+#   客户号是低熵的（CUST-0001 这种），不加盐的哈希可以暴力穷举反推出来，等于没脱敏。
+#   加盐后不可逆，同时保持确定性 —— 同一个客户在同一批数据里仍然是同一个 token，
+#   聚合与关联仍然成立。盐从环境变量来，不进版本库。
+vars:
+  # 报表标识：区位码第 2 段（报表类型码）。
+  # report_id 的形状是「机构-报表-报告期-口径」，报表码放变量里而不是写死在 SQL 里，
+  # 将来接入第二种监管报表时只换变量或按报表拆模型，不必去 SQL 里找散落的字面量。
+  report_code: "FR2052A"
+
+  # PII 脱敏模板：dbt 的 mask_pii 宏与 python/governance/build_pii_vault.py 都读这里，不各写一份
+  pii_mask_template: "concat('h_', substr(sha2(concat_ws('|', '{salt}', cast({column} as string)), 256), 1, 16))"
+
 models:
   fr2052a:
     # 连通性自检模型，正式跑批时可 --exclude tag:smoke 排除

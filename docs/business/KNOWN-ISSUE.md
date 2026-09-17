@@ -15,6 +15,7 @@
 | #python314-incompatible | 09-16 | Python 3.14.4 装不上 Great Expectations 与 pyspark | GE 要求 `>=3.10,<3.14`；pyspark 3.5.0 不支持 3.14 | ✅ 在服务器上用 uv 装独立 Python 3.12 venv | Server 2 环境 | BUILD-LOG E0 |
 | #dockerhub-image-removed | 09-16 | `minio/minio` 与 `bitnami/spark` 从 Docker Hub 下架 | 镜像源失效 | ✅ MinIO 改走 `quay.io/minio/minio`；Spark 改用官方 `apache/spark` | Server 1/2 部署 | BUILD-LOG E0 |
 | #detail-report-mismatch | 09-16 | Section B 明细与报表口径不一致，差 25 亿；Section F 明细 13 亿 vs 报表 0 | 明细把正回购与逆回购混在一起，报表只算正回购；明细没按 30 天过滤 | ✅ 明细按 `line_item` 拆开，30 天过滤下沉到明细 | OWD/OWS 模型 | BUILD-LOG E4.1 |
+| #scd2-reversed-interval | 09-17 | 版本历史表出现「失效日早于生效日」的反向区间（owd_deposits 1 行、owd_gl_entries 20 行） | 写失效日时直接取「本次生效日 - 1」，未与该版本自己的生效日比较。两个调用方的生效日约定一旦不一致（重述用处理日 2026-09-17、日批用报告日 2026-09-16），后跑的那次必然算出反向区间 | ✅ 修法：写入侧用 `greatest(生效日 - 1, 该版本生效日)` 兜底并写完自检不变式；日批生效日改为报告日次日；`verify-scd2` 纳入日批环节；存量脏行由 `sql/iceberg/07_fix_reversed_intervals.sql` 修 | SCD2 版本历史 | BUILD-LOG E6.2 |
 
 <!-- PROJECT.md 索引行（复制区）：
 - `#pg18-data-dir-change` — PG 18 改了数据目录约定
@@ -24,6 +25,7 @@
 - `#python314-incompatible` — Python 3.14 不兼容 GE 与 pyspark
 - `#dockerhub-image-removed` — minio/spark 官方镜像已从 Docker Hub 下架
 - `#detail-report-mismatch` — 明细与报表口径不一致（正回购/30天过滤）
+- `#scd2-reversed-interval` — 版本区间不得反向（失效日早于生效日）
 -->
 
 ## 规范偏离（本项目 vs 上游）
@@ -44,13 +46,30 @@
 | 双轨制（Core/Advanced） | 单一技术栈 | Core（PG+dbt+Airflow）+ Advanced（Kafka+Iceberg+Spark）并行 | ✅ 决策：演示需要展示两种架构，见 `[01]架构设计.md` §1.5 |
 | 存储分工（ODS 进 Iceberg 不进 PG） | ODS 通常进 PG | ODS/OWD/OWS 进 Iceberg，仅 ADS 进 PG | ✅ 决策：湖仓一体架构，见 `[04]环境设计.md` §4.3 存储分工 |
 | requirements/ 不落九文档 | 原始需求应归档 | 保留 requirements/ 参考，待收尾阶段处理 | ⏳ 待决策：收尾时移入 references/ 或 archive/ |
+| 报表主键用区位码而非自增序列 | `[99]详细材料.md` 要求 `report_id BIGSERIAL PRIMARY KEY`，子表 `BIGINT` 外键 | 「机构-报表-报告期-口径」四段文本码，由 dbt 模型产出，例 `ENT001-FR2052A-20260916-01` | ✅ 决策：自增号随每轮全量覆盖重编号，撑不起跨批次的重述引用；见 `dbt/models/marts/ads_fr2052a_report.sql` 列注释 |
+| 明细表不带报表身份外键 | `[99]详细材料.md` 要求 `ads_fr2052a_detail.report_id` 引用报表表 | 明细用「报告日 + 实体」定位，不设 report_id 列 | ✅ 决策：明细是一个主体的多行下钻，报表身份由主体唯一确定 |
+| 版本历史放独立表 | 上游未定义版本历史 | `silver.owd_*_history` 与 `ads.ads_fr2052a_report_history`，OWD 物化方式不动 | ✅ 决策：改 OWD 为增量物化要重写 7 个已验证模型；见 `[04]环境设计.md` §4.3 |
+| 报送文件按报送主体出 | 上游只要求生成 XBRL / XML / CSV | 一个报送主体三份文件，文件名即 report_id | ✅ 决策：FR 2052a 按法人实体分别报送，集团口径由母公司另报 |
+| 覆盖写显式开 `truncate=true` | Spark JDBC 写库默认 `truncate=false`，即 DROP + CREATE | 导出作业显式 `truncate=true`，写前比对模型列与目标表列 | ✅ 决策：默认行为会静默清掉授权、触发器与库侧列 |
+| 数据质量用自研规则引擎 | `[99]详细材料.md` 指定 Great Expectations | 规则定义已在 `ref.ref_validation_rules`，由 `run_dq_rules.py` 执行 | ✅ 决策：转成 GX suite 等于规则定义存两份，必然漂移 |
+| 血缘用 dbt meta 自渲染 | `[99]详细材料.md` 指定 DataHub | `dbt/models/**/schema.yml` 的 meta 声明 + `render_lineage.py` 渲染 | ✅ 决策：DataHub 部署成本高，演示价值等价 |
+| DQ 结果日志按批次先清后写 | 上游未定义日志粒度 | 一行 = 一个批次的一条规则，重跑前由 `clear_dq_batch.py` 清该批次 | ✅ 决策：不清则重跑静默翻倍，「本批次几条 ERROR」随之翻倍 |
 
 **适用边界**（条件条目为什么不在表里、本项目实际取了哪条路）：
 
 - 双轨制：演示项目需要展示 Core 稳定版 + Advanced 技术深度版，非生产约束
 - 存储分工：湖仓一体是现代数据栈标准做法，PG 只做报表输出层
+- 报表主键：区位码要求「每一段都有业务含义」，因此末段只放口径码；把版本号编进主键会与 `record_version` 形成两份定义
 
 **代价与回退汇总**（每行偏离一条）：
 
 - **双轨制**（✅ 决策）——代价：维护两套部署清单；回退：保留 Core 版即可，Advanced 版可下线
 - **存储分工**（✅ 决策）——代价：ODS 不可直接用 PG 查询，需走 Spark/Iceberg CLI；回退：把 ODS 建到 PG 需改 deploy 脚本
+- **报表主键区位码**（✅ 决策）——代价：键比整数长，人工手写易错；回退：业务码加唯一约束，另立整数代理键
+- **明细表不带报表身份外键**（✅ 决策）——代价：查明细要带两个条件；回退：加回 report_id 列并按主体回填
+- **版本历史放独立表**（✅ 决策）——代价：当前快照与历史两条路径各自维护；回退：OWD 改增量物化并合并历史
+- **报送文件按主体出**（✅ 决策）——代价：文件数为主体数乘三；回退：合并回整批一份，台账按整批一行
+- **覆盖写开 truncate**（✅ 决策）——代价：模型结构变更时导出直接失败，须先补迁移；回退：回到默认删除重建并每次重放授权
+- **自研 DQ 引擎**（✅ 决策）——代价：GX 现成的算子与报告不可用；回退：把 ref 表规则翻译成 GX suite
+- **血缘自渲染**（✅ 决策）——代价：没有 DataHub 的搜索与影响面分析界面；回退：接入 DataHub 并导入 dbt manifest
+- **DQ 日志先清后写**（✅ 决策）——代价：日志环节多一步前置脚本；回退：改日志表为只留最近一次

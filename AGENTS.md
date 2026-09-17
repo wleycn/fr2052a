@@ -14,16 +14,16 @@
 
 ## 1. 技术栈
 
-- 语言与运行环境：Python 3.12（uv venv）、SQL
+- 语言与运行环境：Python 3.11（uv venv）、SQL
 - 存储引擎：PostgreSQL 18.6（ADS/审计）、MinIO（Iceberg 对象存储）
-- 计算引擎：Apache Spark 3.5.9（Standalone）
-- 消息队列：Apache Kafka 4.3.1（KRaft）
-- 调度编排：Apache Airflow 2.7+
-- 转换：dbt-postgres + dbt-spark[PySpark]
-- 数据质量：Great Expectations 0.17+
-- 元数据治理：DataHub 2023+
-- 开放表格式：Apache Iceberg 1.4+
-- 监控：Prometheus + Grafana + Airflow SLA
+- 计算引擎：Apache Spark 3.5.9（Standalone，容器内 JDK 17）
+- 消息队列：Apache Kafka 4.3.1（KRaft 单节点）
+- 调度编排：Apache Airflow 2.10.5（LocalExecutor）
+- 转换：dbt-postgres + dbt-spark[PySpark]（dbt 1.12.5）
+- 数据质量：自研规则引擎，规则落 `ref.ref_validation_rules`，由 `run_dq_rules.py` 执行
+- 元数据治理：dbt `schema.yml` 的 meta 声明 + `render_lineage.py` 渲染血缘
+- 开放表格式：Apache Iceberg 1.11（JDBC catalog：元数据在 PG，数据在 MinIO）
+- 巡检：`pipeline_health.py` 检查熔断、质量、报送、Kafka 滞后、连接与磁盘
 
 ## 2. 上下文加载（动手前必做）
 
