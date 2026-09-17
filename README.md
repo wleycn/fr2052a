@@ -1,5 +1,7 @@
 # FR 2052a — 监管流动性报表数据处理演示项目
 
+[![lint](https://github.com/wleycn/fr2052a/actions/workflows/lint.yml/badge.svg)](https://github.com/wleycn/fr2052a/actions/workflows/lint.yml)
+
 > 一句话定位：演示如何从源系统采集 FR 2052a（美联储流动性监控报告）数据，经 ODS/OWD/OWS/ADS 四层处理后产出合规报送文件，并支持 GL 对账、重述、Time Travel 与血缘追溯。
 
 ## 为什么需要它
