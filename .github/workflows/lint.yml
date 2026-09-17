@@ -1,0 +1,29 @@
+# 代码质量闸的第二道。
+#
+# 为什么还需要它：本地那道闸放在 .githooks/，每个克隆要手工执行一次
+# `git config core.hooksPath .githooks` 才生效，没配的克隆等于没有闸。
+# 推送后由这里兜底，规则与本地完全一致 —— 都调用 make，不另写一份命令。
+#
+# 版本口径的唯一来源是 Makefile 的 RUFF_VERSION / MYPY_VERSION，本文件不写版本号。
+name: lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装工具链
+        run: make deps-dev
+
+      - name: 跑质量闸
+        run: make lint

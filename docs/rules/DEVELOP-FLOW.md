@@ -40,7 +40,7 @@
 
 | 检查项 | 命令 | 频率 |
 |--------|------|------|
-| Lint + 格式 + 类型 | `make lint` | 每次提交前，由 `.githooks/pre-commit` 自动跑 |
+| Lint + 格式 + 类型 | `make lint` | 每次提交前由 `.githooks/pre-commit` 自动跑；推送后由 GitHub Actions 再跑一遍（`.github/workflows/lint.yml`） |
 | 数据层核对 | `bash deploy/server2/run-daily-pipeline.sh verify-bronze verify-silver verify-scd2 verify-ads verify-rbac` | 每次跑批后 |
 | dbt 模型 | `bash deploy/server2/run-daily-pipeline.sh dbt-run` | 每次模型变更后 |
 | 端到端重跑 | `bash deploy/reset-demo.sh --apply` | 交付前 |
