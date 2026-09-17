@@ -35,7 +35,7 @@ VOLUMES: dict[str, int] = {
     "ods_loans": 300,
     "ods_securities": 200,
     "ods_derivatives": 150,
-    "ods_gl_balances": 50,
+    "ods_gl_balances": 55,
     "ods_off_bs_commitments": 100,
 }
 

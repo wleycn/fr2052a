@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import csv
 import random
 import string
 from dataclasses import dataclass
@@ -32,7 +33,7 @@ from .config import (
     weighted_choice,
     write_csv,
 )
-from .ref_data import ReferenceData
+from .ref_data import FX_RATES, ReferenceData
 
 # 产品代码与存款类型的对应关系：避免出现"活期产品挂在定期类型下"这类不实数据
 PRODUCT_DEPOSIT_TYPES: dict[str, str] = {
@@ -53,24 +54,28 @@ INSTRUMENT_TYPES = ("IRS", "CDS", "FX_FWD", "FX_SWAP", "OPTION", "FUTURES")
 COMMITMENT_TYPES = ("CREDIT_COMMITMENT", "LETTER_OF_CREDIT", "GUARANTEE")
 CREDIT_RATINGS = ("AAA", "AA", "A", "BBB", "BB")
 
-# 集团总账科目：(科目号, 科目名, 余额方向)。GL 站在集团（ENT001）视角记账
+# 集团总账科目：(科目号, 科目名, 余额方向)。
+# 科目金额由业务明细倒推（见 generate_gl_balances），权益是轧差项 —— 这正是资产负债表的
+# 平衡关系，因此借贷天然相等，不需要用"待清算"科目兜底。
 GL_ACCOUNTS: tuple[tuple[str, str, str], ...] = (
     ("1001", "Cash and Cash Equivalents", "DEBIT"),
     ("1100", "Due from Banks", "DEBIT"),
-    ("1200", "Trading Securities", "DEBIT"),
+    ("1200", "Investment Securities", "DEBIT"),
+    ("1300", "Reverse Repo Receivable", "DEBIT"),
+    ("1500", "Derivative Assets", "DEBIT"),
     ("2100", "Loans and Leases", "DEBIT"),
     ("2001", "Demand Deposits", "CREDIT"),
     ("2002", "Time Deposits", "CREDIT"),
     ("2010", "Securities Sold under Repo", "CREDIT"),
-    ("2200", "Trading Liabilities", "CREDIT"),
+    ("2200", "Derivative Liabilities", "CREDIT"),
     ("5001", "Shareholders Equity", "CREDIT"),
 )
-# 待清算科目：真实总账里用来挂未达账项，本生成器用它承载平账分录
-GL_SUSPENSE_ACCOUNT = "9001"
-GL_SUSPENSE_NAME = "Suspense Clearing"
-GL_ROWS_PER_ACCOUNT = 5  # 9 个科目 × 5 行 = 45 行
-GL_SUSPENSE_ROWS = 5  # 前 4 行随机流水 + 第 5 行平账，合计 50 行
+GL_ROWS_PER_ACCOUNT = 5
 GL_ENTITY = "ENT001"
+
+# 现金与同业存放没有对应的业务明细表，按存款余额的一个比例设定（演示假设）
+CASH_TO_DEPOSIT_RATIO = 0.08
+DUE_FROM_BANKS_TO_DEPOSIT_RATIO = 0.04
 
 
 @dataclass(frozen=True)
@@ -247,7 +252,9 @@ def generate_loans(ods_dir: Path, ref: ReferenceData) -> int:
             round(rng.uniform(0.01, 0.12), 6),
             rng.choice(("FIXED", "FLOAT")),
             _business_day_before(rng, 90, 1500),
-            _business_day_after(rng, 30, 1800),
+            # 到期日从 1 天起：贷款簿里必然有 30 天内到期的余额，
+            # 否则 Section F（30 天流入）恒为 0，报表会失真
+            _business_day_after(rng, 1, 1800),
             _business_day_after(rng, 1, 120),
             rng.choice(("Y", "N")),
             rng.choice(("CORP", "IND", "FI")),
@@ -345,60 +352,89 @@ def _split_amount(rng: random.Random, total: float, parts: int) -> list[float]:
     return shares
 
 
+def _amount_usd(row: dict[str, str], amount_column: str) -> float:
+    """把一行明细的指定金额按其币种折算成 USD。"""
+    return float(row[amount_column]) * FX_RATES.get(row["currency"], 1.0)
+
+
+def _read_ods_rows(ods_dir: Path, table_name: str) -> list[dict[str, str]]:
+    """读回已经写出的 ODS 明细，供总账倒推使用。"""
+    with (ods_dir / f"{table_name}.csv").open(newline="", encoding="utf-8") as handle:
+        return list(csv.DictReader(handle))
+
+
 def generate_gl_balances(ods_dir: Path, gl_break_amount: float = 0.0) -> int:
-    """集团总账余额，用于 GL 对账。
+    """集团总账余额：由业务明细倒推，而不是独立随机生成。
 
-    先记满借方科目，再把等额总量按权重分摊到贷方科目，使资产与负债权益两侧
-    天然相等；待清算科目只承载未达账项，不背负整个账簿的差额。
-    平账分录只补在余额不足的一侧，因此任何一行都不会出现负数金额。
+    为什么必须倒推：GL 对账是把总账余额与报送口径逐科目比对，若总账是另一套随机数字，
+    对账永远不平，这个环节就只是个摆设。
 
-    gl_break_amount 给正值时故意让账簿少记这么多（USD），供合规剧本演示 GL 对账阻断；
-    实际差额会原样体现在自检结论里，不做掩饰。
+    倒推关系：
+        资产  1001 现金、1100 同业存放（按存款余额比例设定，属演示假设）
+              1200 证券、1300 逆回购、1500 衍生品资产、2100 贷款
+        负债  2001/2002 存款、2010 正回购、2200 衍生品负债
+        权益  5001 = 资产 - 负债（轧差项）
+
+    资产负债表本就是"资产 = 负债 + 权益"，权益作轧差后借贷天然相等。
+
+    gl_break_amount 给正值时故意让权益少记这么多（USD），制造受控的对账缺口，
+    供合规剧本演示 GL 对账阻断。
     """
     rng = table_rng("ods_gl_balances")
     clock = EventClock(REPORT_DATE)
-    ledger: list[GlEntry] = []
 
-    debit_accounts = [account for account in GL_ACCOUNTS if account[2] == "DEBIT"]
-    credit_accounts = [account for account in GL_ACCOUNTS if account[2] == "CREDIT"]
+    deposits = _read_ods_rows(ods_dir, "ods_deposits")
+    repo = _read_ods_rows(ods_dir, "ods_repo_transactions")
+    loans = _read_ods_rows(ods_dir, "ods_loans")
+    securities = _read_ods_rows(ods_dir, "ods_securities")
+    derivatives = _read_ods_rows(ods_dir, "ods_derivatives")
 
-    debit_total = 0.0
-    for account_id, account_name, _ in debit_accounts:
-        amounts = [round(rng.uniform(1_000_000, 200_000_000), 2) for _ in range(GL_ROWS_PER_ACCOUNT)]
-        debit_total += sum(amounts)
-        ledger.extend(GlEntry(account_id, account_name, debit=amount, credit=0.0) for amount in amounts)
-
-    weights = [rng.uniform(1.0, 3.0) for _ in credit_accounts]
-    weight_total = sum(weights)
-    for (account_id, account_name, _), weight in zip(credit_accounts, weights):
-        account_total = round(debit_total * weight / weight_total, 2)
-        ledger.extend(
-            GlEntry(account_id, account_name, debit=0.0, credit=amount)
-            for amount in _split_amount(rng, account_total, GL_ROWS_PER_ACCOUNT)
-        )
-
-    for _ in range(GL_SUSPENSE_ROWS - 1):
-        ledger.append(
-            GlEntry(
-                account_id=GL_SUSPENSE_ACCOUNT,
-                account_name=GL_SUSPENSE_NAME,
-                debit=round(rng.uniform(1_000_000, 20_000_000), 2),
-                credit=0.0,
-            )
-        )
-
-    gap = round(sum(entry.debit for entry in ledger) - sum(entry.credit for entry in ledger), 2)
-    plug_amount = abs(gap)
-    if gl_break_amount:
-        plug_amount = max(0.0, round(plug_amount - gl_break_amount, 2))
-    ledger.append(
-        GlEntry(
-            account_id=GL_SUSPENSE_ACCOUNT,
-            account_name=GL_SUSPENSE_NAME,
-            debit=plug_amount if gap < 0 else 0.0,
-            credit=plug_amount if gap > 0 else 0.0,
-        )
+    demand_deposits = round(
+        sum(_amount_usd(row, "principal_amount") for row in deposits if row["deposit_type"] in ("CHK", "SAV", "MMDA")), 2
     )
+    time_deposits = round(
+        sum(_amount_usd(row, "principal_amount") for row in deposits if row["deposit_type"] in ("CD", "TIME")), 2
+    )
+    total_deposits = round(demand_deposits + time_deposits, 2)
+
+    balances = {
+        "1001": round(total_deposits * CASH_TO_DEPOSIT_RATIO, 2),
+        "1100": round(total_deposits * DUE_FROM_BANKS_TO_DEPOSIT_RATIO, 2),
+        "1200": round(sum(_amount_usd(row, "market_value") for row in securities), 2),
+        "1300": round(sum(_amount_usd(row, "cash_amount") for row in repo if row["repo_type"] == "REVERSE_REPO"), 2),
+        "1500": round(
+            sum(_amount_usd(row, "mark_to_market") for row in derivatives if float(row["mark_to_market"]) > 0), 2
+        ),
+        "2100": round(sum(_amount_usd(row, "outstanding_amount") for row in loans), 2),
+        "2001": demand_deposits,
+        "2002": time_deposits,
+        "2010": round(sum(_amount_usd(row, "cash_amount") for row in repo if row["repo_type"] == "REPO"), 2),
+        "2200": round(
+            -sum(_amount_usd(row, "mark_to_market") for row in derivatives if float(row["mark_to_market"]) < 0), 2
+        ),
+    }
+
+    assets = round(sum(balances[account] for account, _, side in GL_ACCOUNTS if side == "DEBIT"), 2)
+    # 权益尚未入表（它是下面的轧差项），因此只累加已算出的负债科目
+    liabilities = round(
+        sum(balances[account] for account, _, side in GL_ACCOUNTS if side == "CREDIT" and account in balances), 2
+    )
+    equity = round(assets - liabilities - gl_break_amount, 2)
+    if equity < 0:
+        raise ValueError(f"倒推出的权益为负（{equity}），请检查业务明细规模与现金比例假设")
+    balances["5001"] = equity
+
+    ledger: list[GlEntry] = []
+    for account_id, account_name, normal_side in GL_ACCOUNTS:
+        for amount in _split_amount(rng, balances[account_id], GL_ROWS_PER_ACCOUNT):
+            ledger.append(
+                GlEntry(
+                    account_id=account_id,
+                    account_name=account_name,
+                    debit=amount if normal_side == "DEBIT" else 0.0,
+                    credit=amount if normal_side == "CREDIT" else 0.0,
+                )
+            )
 
     rows = [
         _assemble(

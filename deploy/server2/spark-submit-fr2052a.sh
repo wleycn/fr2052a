@@ -29,7 +29,11 @@ if [ "$#" -lt 1 ]; then
   exit 1
 fi
 
-exec docker exec fr2052a_spark_master /opt/spark/bin/spark-submit \
+# 把凭据与连接信息透传进容器：作业里读 os.environ，避免口令出现在命令行参数中（ps 可见）。
+exec docker exec \
+  -e SERVER1_HOST -e SERVER2_HOST -e POSTGRES_DB -e POSTGRES_USER -e POSTGRES_PASSWORD \
+  -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD \
+  fr2052a_spark_master /opt/spark/bin/spark-submit \
   --master "spark://spark-master:7077" \
   --conf "spark.sql.catalog.lakehouse.uri=jdbc:postgresql://${SERVER1_HOST}:5432/${POSTGRES_DB}?currentSchema=iceberg_catalog" \
   --conf "spark.sql.catalog.lakehouse.jdbc.user=${POSTGRES_USER}" \
