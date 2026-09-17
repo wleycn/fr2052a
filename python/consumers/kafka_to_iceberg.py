@@ -52,7 +52,15 @@ def payload_schema(spark: SparkSession, table: str) -> StructType:
 
 
 def upsert_batch(batch: DataFrame, batch_id: int, table: str) -> None:
-    """一个微批：解析失败的消息丢弃并留痕，其余按主键 MERGE。"""
+    """一个微批：解析失败的消息丢弃并留痕，按主键去重后 MERGE。
+
+    批内必须先按主键去重再 MERGE：Kafka 是至少一次投递，主题被重放时同一个主键
+    会在一批里出现多次，而 MERGE 的匹配基数要求 1 对 1 —— 重复主键会让整个作业报
+    MERGE_CARDINALITY_VIOLATION 直接失败。实测踩过：样本数据重放几轮之后跑批红在
+    bronze 这一环，而报错只说"匹配到多行"，看不出根因是重放。
+
+    去重取同一主键里 Kafka 偏移量最大的那条：偏移量大的后写入，是较新的一版。
+    """
     if batch.isEmpty():
         return
     spark = batch.sparkSession
@@ -64,7 +72,22 @@ def upsert_batch(batch: DataFrame, batch_id: int, table: str) -> None:
     if valid.isEmpty():
         return
 
-    valid.createOrReplaceTempView("staging")
+    # 辅助列不进 MERGE：建视图时只保留目标表的列，免得 MERGE ... SET * 多带一列。
+    columns = [name for name in valid.columns if name != "_kafka_offset"]
+    valid.createOrReplaceTempView("staging_raw")
+    spark.sql(
+        f"""
+        CREATE OR REPLACE TEMPORARY VIEW staging AS
+        SELECT {", ".join(columns)}
+        FROM (
+            SELECT *, row_number() OVER (
+                PARTITION BY source_system, source_record_id ORDER BY _kafka_offset DESC
+            ) AS _rank
+            FROM staging_raw
+        )
+        WHERE _rank = 1
+        """
+    )
     spark.sql(MERGE_TEMPLATE.format(table=table))
     print(f"    [{table}] 微批 {batch_id}：本批 {valid.count()} 行，表内合计 {spark.table(table).count()} 行")
 
@@ -98,7 +121,11 @@ def main(argv: list[str]) -> int:
             .option("failOnDataLoss", "false")
             .load()
         )
-        parsed = frame.select(F.from_json(F.col("value").cast("string"), payload_schema(spark, table)).alias("payload"))
+        # 带上 Kafka 偏移量：批内按主键去重时用它挑出较新的那条（见 upsert_batch）。
+        parsed = frame.select(
+            F.col("offset").alias("_kafka_offset"),
+            F.from_json(F.col("value").cast("string"), payload_schema(spark, table)).alias("payload"),
+        )
 
         def write_batch(batch: DataFrame, batch_id: int, table_name: str = table) -> None:
             upsert_batch(batch, batch_id, table_name)
@@ -109,7 +136,7 @@ def main(argv: list[str]) -> int:
         load_timestamp = F.to_timestamp(F.concat(F.date_add(F.col("report_date"), 1), F.lit(" 02:00:00")))
 
         query = (
-            parsed.select("payload.*")
+            parsed.select("payload.*", "_kafka_offset")
             .withColumn("etl_load_timestamp", load_timestamp)
             .writeStream.format("iceberg")
             .outputMode("append")

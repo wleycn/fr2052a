@@ -693,6 +693,8 @@ DAG 的每个任务只是"SSH 到 Server 2 执行 `run-daily-pipeline.sh` 的某
 7. **Spark worker 没挂检查点目录。** 流式作业的状态存储由执行器写，只给驱动侧（master）挂载时，执行器报 `mkdir of file:/opt/fr2052a-checkpoints/... failed` —— 看着像权限问题，实际是执行器所在容器里根本没有这个路径。修法：worker 服务补上同一份挂载。
 8. **实时扫描的解析 schema 把金额声明成 DOUBLE。** 生产者把 CSV 原样序列化成 JSON，金额在消息里是带引号的字符串；声明成 DOUBLE 后该字段解析为 NULL，而 `insured_flag` 这类真字符串字段照常解析，于是「解析没报错、判定一条都不命中」，作业照常打印「无新增大额敞口」。修法：按 STRING 收、显式 cast，并用「转出来的数值是否为空」当解析成功的判据。
 9. **流上的 `dropDuplicates` 会把事件全部吞掉。** 它是有状态算子，历史见过的键长期留在 checkpoint 里；重放同样的样本数据时输出永远为空，而偏移量照常前进，排查时极难看出来。修法：去重下沉到批内，跨批次重复交给事件表主键拦（撞主键即失败，这是有意的）。
+10. **bronze 入湖的 MERGE 撞上批内重复主键。** Kafka 是至少一次投递，主题被重放时同一个主键会在一批里出现多次，而 MERGE 的匹配基数要求 1 对 1 —— 重复即报 `MERGE_CARDINALITY_VIOLATION`，整个作业失败。报错只说「匹配到多行」，看不出根因是重放。修法：MERGE 前按主键去重（同一主键取 Kafka 偏移量最大的一条），解析框架相应带上偏移量。
+11. **实时预警的汇总任务落错了机器。** 任务经 ssh 落到 Server 2，却在那里 `docker exec` Server 1 的 PostgreSQL 容器，报 `No such container` —— 看着像容器没了，其实是跨机器 exec 打不到。修法：改走 venv 直连数据库，跨机器只走网络。
 
 ## E7 治理收口
 
