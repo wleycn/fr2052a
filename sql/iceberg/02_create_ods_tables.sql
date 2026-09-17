@@ -11,8 +11,6 @@
 --   entity_code  记账法人实体，支撑合并口径与子公司口径
 --   event_time   源系统事件时间，Kafka 重放与乱序判断用
 
-CREATE NAMESPACE IF NOT EXISTS bronze;
-
 -- 存款头寸：零售、对公、同业存款，含活期与定期
 CREATE TABLE IF NOT EXISTS bronze.ods_deposits (
     source_system STRING COMMENT '来源系统编码',

@@ -18,3 +18,15 @@ models:
     # 连通性自检模型，正式跑批时可 --exclude tag:smoke 排除
     smoke:
       +tags: ["smoke"]
+    # staging  → OWD 层（明细标准化：汇率折算、口径归一、到期分桶）
+    # intermediate → OWS 层（业务汇总：HQLA、融资、现金流）
+    # marts    → ADS 层（报送报表，落 Iceberg gold 命名空间后导出 PostgreSQL）
+    staging:
+      +materialized: table
+      +schema: silver
+    intermediate:
+      +materialized: table
+      +schema: silver
+    marts:
+      +materialized: table
+      +schema: gold

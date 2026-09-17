@@ -43,6 +43,7 @@ if [ -n "$PYSPARK_JARS" ] && [ -d "$PYSPARK_JARS" ]; then
   cp -u "$BASE_DIR"/spark/jars/*.jar "$PYSPARK_JARS/"
 fi
 
+# dbt 工程也从同步过来的 app 目录读，避免与 ~/fr2052a-infra/dbt 形成两份副本互相漂移。
 exec "$BASE_DIR/venv/bin/dbt" "$@" \
-  --profiles-dir "$BASE_DIR/dbt" \
-  --project-dir "$BASE_DIR/dbt"
+  --profiles-dir "$BASE_DIR/app/dbt" \
+  --project-dir "$BASE_DIR/app/dbt"

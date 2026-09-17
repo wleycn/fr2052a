@@ -413,6 +413,50 @@ Iceberg 的**表元数据落 PostgreSQL**（JDBC catalog），**数据文件落 
 
 ---
 
+## E4.4a dbt 项目骨架 + OWD 标准化层（2026-09-17）
+
+**目标**：把 ODS 明细加工成 FR 2052a 口径的标准化明细（外币折算 USD、口径归一、到期分桶、HQLA 分级）。
+
+**产出**
+
+| 位置 | 内容 |
+|---|---|
+| dev `dbt/macros/fr2052a_rules.sql` | 监管口径宏：到期分桶、HQLA 分级与折扣率、客户细分、存款产品归一 |
+| dev `dbt/macros/generate_schema_name.sql` | 覆盖 dbt 默认 schema 命名（否则 silver + gold 会拼成 silver_gold） |
+| dev `dbt/models/sources.yml` | 声明 ref 与 bronze 两层上游 |
+| dev `dbt/models/staging/` | 7 张 OWD 模型 + 汇率基准 |
+| dev `python/lakehouse/verify_silver.py` | OWD 层核对：行数、分桶合法性、折算逐行重算 |
+| dev `sql/iceberg/00_create_namespaces.sql` | 三个命名空间独立成脚本（silver 归 dbt 写） |
+
+**逐层配置**：`staging` 与 `intermediate` 落 Iceberg `silver` 命名空间，`marts` 落 `gold`。
+
+**顺带修掉的配置漂移**：`dbt/profiles.yml` 里的 spark target 仍指向 E4.2 已废弃的 SessionCatalog，
+不改会在下一跑 dbt 时报表找不到。同步改成 `lakehouse` catalog + `defaultCatalog`。
+`run-dbt.sh` 的工程目录也从 `~/fr2052a-infra/dbt` 改指同步过来的 `app/dbt`，并删除旧副本 ——
+否则两份 dbt 工程会互相漂移。
+
+**OWD 模型的取舍**：需求文档 `[99] §3.4` 的列比本演示的 ODS 字段多（如 `yield_to_maturity`、
+`pd_pct`、`lgd_pct`、`ccp_name`）。这些列没有数据来源，我不建空列充数，只实现能从 ODS + REF
+推导出来的部分。缺口记录在此，避免以后误以为已经覆盖。
+
+**验证证据**
+
+| 判据 | 实测 |
+|---|---|
+| dbt 运行 | 8 个模型全部成功（13.5 秒） |
+| 行数 | 7 张 OWD 与各自 ODS 上游逐表一致（1500 行） |
+| 到期分桶 | 各表分桶取值全部落在 `ref_maturity_bucket` 定义内 |
+| 汇率折算 | 逐行按 ref 汇率重算后与 USD 金额比对：1450 行，0 条偏差 |
+| 口径落地 | 存款 `principal_amount_usd` 已按实体本位币折算，HQLA 分级与折扣率由宏统一产出 |
+
+**踩到的坑**
+
+- 核对脚本把总账表也纳入到期分桶检查，而总账没有到期日概念，直接报列不存在。
+  改为按表声明能力，而不是对所有表套同一套检查。
+- `.groupBy(...).collect()` 是错的写法，Spark 会返回 `GroupedData` 而非结果集。改用 `select().distinct()`。
+
+---
+
 ## 后续步骤
 
 E4 业务开发（数据生成器 → ODS → OWD → OWS → ADS）→ E5 编排 → E6 合规演示剧本 → E7 治理收口。

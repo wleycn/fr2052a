@@ -6,8 +6,6 @@
 -- REF 是小表，不做分区；Iceberg format-version 2 支持行级删除与 Time Travel，
 -- 后续重述（restatement）与审计回溯都依赖它。
 
-CREATE NAMESPACE IF NOT EXISTS ref;
-
 -- 法人实体层级：报送主体与子公司，合并口径的基础
 CREATE TABLE IF NOT EXISTS ref.ref_entity_hierarchy (
     entity_code STRING COMMENT '法人实体编码',

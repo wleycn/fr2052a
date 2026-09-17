@@ -1,0 +1,41 @@
+version: 2
+
+# 数据湖里的两层上游表。两者都在 Iceberg，由 python/lakehouse 下的作业写入：
+#   ref    批加载（load_ref_tables.py）
+#   bronze Kafka 流入（kafka_to_iceberg.py）
+
+sources:
+  - name: ref
+    description: 引用数据层，静态字典表
+    schema: ref
+    tables:
+      - name: ref_entity_hierarchy
+        description: 法人实体层级，合并口径的基础
+      - name: ref_counterparty
+        description: 交易对手主数据
+      - name: ref_maturity_bucket
+        description: 到期分桶定义
+      - name: ref_fr2052a_line_items
+        description: FR 2052a 行项目字典
+      - name: ref_exchange_rates
+        description: 汇率，外币金额折算 USD 的唯一依据
+      - name: ref_regulatory_mapping
+        description: 字段到监管行项目的映射
+      - name: ref_behavior_assumptions
+        description: 行为假设（流失率、流入率）
+      - name: ref_calendar
+        description: 交易日历
+      - name: ref_validation_rules
+        description: 校验规则定义
+
+  - name: bronze
+    description: ODS 层，源系统明细经 Kafka 流入，不做事务加工
+    schema: bronze
+    tables:
+      - name: ods_deposits
+      - name: ods_repo_transactions
+      - name: ods_loans
+      - name: ods_securities
+      - name: ods_derivatives
+      - name: ods_gl_balances
+      - name: ods_off_bs_commitments

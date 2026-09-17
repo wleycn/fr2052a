@@ -27,7 +27,8 @@ fr2052a:
       type: spark
       method: session
       # dbt-spark 要求 database 与 schema 一致，故不设 database。
-      # 未限定的 db.table 由 Iceberg SessionCatalog 承接，schema=silver 即 Iceberg 的 silver 命名空间。
+      # 未限定的 db.table 由 spark.sql.defaultCatalog 指向的 Iceberg catalog 承接，
+      # schema=silver 即 Iceberg 的 silver 命名空间。
       schema: silver
       host: "{{ env_var('SERVER2_HOST') }}"
       port: 7077
@@ -42,17 +43,21 @@ fr2052a:
         # 必须随应用配置一起下发给执行器，容器默认配置在这里不生效。
         spark.executor.extraJavaOptions: -XX:-UseContainerSupport
         spark.sql.extensions: org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
-        # 用 Iceberg 的 SessionCatalog 接管 spark_catalog，未限定的表名才会落到 Iceberg
-        spark.sql.catalog.spark_catalog: org.apache.iceberg.spark.SparkSessionCatalog
-        spark.sql.catalog.spark_catalog.type: jdbc
-        spark.sql.catalog.spark_catalog.uri: "jdbc:postgresql://{{ env_var('SERVER1_HOST') }}:5432/{{ env_var('POSTGRES_DB') }}?currentSchema=iceberg_catalog"
-        spark.sql.catalog.spark_catalog.jdbc.user: "{{ env_var('POSTGRES_USER') }}"
-        spark.sql.catalog.spark_catalog.jdbc.password: "{{ env_var('POSTGRES_PASSWORD') }}"
-        spark.sql.catalog.spark_catalog.warehouse: s3://fr2052a-bucket/warehouse
-        spark.sql.catalog.spark_catalog.io-impl: org.apache.iceberg.aws.s3.S3FileIO
-        spark.sql.catalog.spark_catalog.s3.endpoint: "http://{{ env_var('SERVER1_HOST') }}:9000"
-        spark.sql.catalog.spark_catalog.s3.path-style-access: "true"
-        spark.sql.catalog.spark_catalog.client.region: us-east-1
-        spark.sql.catalog.spark_catalog.s3.access-key-id: "{{ env_var('MINIO_ROOT_USER') }}"
-        spark.sql.catalog.spark_catalog.s3.secret-access-key: "{{ env_var('MINIO_ROOT_PASSWORD') }}"
+        # 独立命名 catalog + 默认 catalog 指向它：
+        # 未限定的 db.table 落到 Iceberg，同时 SHOW NAMESPACES / SHOW TABLES 自省正常。
+        # 不能用 SparkSessionCatalog 接管 spark_catalog —— 它会把命名空间管理交给 Spark 自身，
+        # 命名空间不落 JDBC catalog，重启会话后目录自省全失效。
+        spark.sql.defaultCatalog: lakehouse
+        spark.sql.catalog.lakehouse: org.apache.iceberg.spark.SparkCatalog
+        spark.sql.catalog.lakehouse.type: jdbc
+        spark.sql.catalog.lakehouse.uri: "jdbc:postgresql://{{ env_var('SERVER1_HOST') }}:5432/{{ env_var('POSTGRES_DB') }}?currentSchema=iceberg_catalog"
+        spark.sql.catalog.lakehouse.jdbc.user: "{{ env_var('POSTGRES_USER') }}"
+        spark.sql.catalog.lakehouse.jdbc.password: "{{ env_var('POSTGRES_PASSWORD') }}"
+        spark.sql.catalog.lakehouse.warehouse: s3://fr2052a-bucket/warehouse
+        spark.sql.catalog.lakehouse.io-impl: org.apache.iceberg.aws.s3.S3FileIO
+        spark.sql.catalog.lakehouse.s3.endpoint: "http://{{ env_var('SERVER1_HOST') }}:9000"
+        spark.sql.catalog.lakehouse.s3.path-style-access: "true"
+        spark.sql.catalog.lakehouse.client.region: us-east-1
+        spark.sql.catalog.lakehouse.s3.access-key-id: "{{ env_var('MINIO_ROOT_USER') }}"
+        spark.sql.catalog.lakehouse.s3.secret-access-key: "{{ env_var('MINIO_ROOT_PASSWORD') }}"
         spark.sql.shuffle.partitions: "8"
