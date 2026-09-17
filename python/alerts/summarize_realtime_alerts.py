@@ -25,12 +25,14 @@ TABLE = "ads.ads_fr2052a_realtime_alerts"
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数。"""
     parser = argparse.ArgumentParser(description="实时敞口事件汇总")
     parser.add_argument("--report-date", required=True, help="报告日，格式 YYYY-MM-DD")
     return parser.parse_args()
 
 
-def pg_connection():
+def pg_connection() -> psycopg2.extensions.connection:
+    """连接 Server 1 的 PostgreSQL。"""
     return psycopg2.connect(
         host=os.environ["SERVER1_HOST"],
         port=int(os.environ.get("POSTGRES_PORT", "5432")),
@@ -41,6 +43,7 @@ def pg_connection():
 
 
 def main() -> int:
+    """汇总某报告日的实时敞口事件：条数、金额与最大单笔。"""
     args = parse_args()
     connection = pg_connection()
     try:

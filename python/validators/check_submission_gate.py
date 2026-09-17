@@ -30,13 +30,15 @@ EXIT_UNKNOWN = 3
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数。"""
     parser = argparse.ArgumentParser(description="报送放行闸")
     parser.add_argument("--report-date", required=True, help="报告日，格式 YYYY-MM-DD")
     parser.add_argument("--scope", default="GLOBAL", help="熔断范围")
     return parser.parse_args()
 
 
-def pg_connection():
+def pg_connection() -> psycopg2.extensions.connection:
+    """连接 Server 1 的 PostgreSQL。"""
     return psycopg2.connect(
         host=os.environ["SERVER1_HOST"],
         port=int(os.environ.get("POSTGRES_PORT", "5432")),
@@ -47,21 +49,18 @@ def pg_connection():
 
 
 def main() -> int:
+    """报送放行闸：熔断或对账未平即不放行。退出码 0 放行、2 阻断、3 取不到状态。"""
     args = parse_args()
     connection = pg_connection()
     try:
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT state, reason, trip_count, updated_at "
-                "FROM ads.ads_circuit_breaker WHERE scope = %s",
+                "SELECT state, reason, trip_count, updated_at FROM ads.ads_circuit_breaker WHERE scope = %s",
                 (args.scope,),
             )
             breaker = cursor.fetchone()
             if breaker is None:
-                print(
-                    f"[UNKNOWN] 熔断闸无 {args.scope} 的记录，说明预警环节还没跑过。"
-                    "无法判定是否放行，按不放行处理。"
-                )
+                print(f"[UNKNOWN] 熔断闸无 {args.scope} 的记录，说明预警环节还没跑过。无法判定是否放行，按不放行处理。")
                 return EXIT_UNKNOWN
 
             state, reason, trip_count, updated_at = breaker

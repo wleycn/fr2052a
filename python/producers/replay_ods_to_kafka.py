@@ -1,4 +1,4 @@
-"""把 ODS 样本 CSV 重放进 Kafka，模拟各源系统的实时上报。
+r"""把 ODS 样本 CSV 重放进 Kafka，模拟各源系统的实时上报。
 
 为什么用 Spark 而不是 Python Kafka 客户端：消费侧本来就要 Spark（Structured Streaming），
 复用同一套 Kafka 连接器 jar 即可，不必在服务器上再维护一套 Python 客户端依赖。
@@ -7,9 +7,9 @@
 消息一律按字符串写入，类型转换统一在入湖侧做（与 ref 批加载同一套规则）。
 
 用法（Server 2，经 spark-submit 包装脚本执行）：
-    bash spark-submit-fr2052a.sh \\
-        /opt/fr2052a-app/python/producers/replay_ods_to_kafka.py \\
-        --data-dir /opt/fr2052a-app/sample_data/ods \\
+    bash spark-submit-fr2052a.sh \
+        /opt/fr2052a-app/python/producers/replay_ods_to_kafka.py \
+        --data-dir /opt/fr2052a-app/sample_data/ods \
         --config   /opt/fr2052a-app/config/pipeline_topics.json
 """
 
@@ -19,6 +19,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
@@ -27,7 +28,8 @@ DEFAULT_DATA_DIR = Path("/opt/fr2052a-app/sample_data/ods")
 DEFAULT_CONFIG = Path("/opt/fr2052a-app/config/pipeline_topics.json")
 
 
-def load_config(config_path: Path) -> dict:
+def load_config(config_path: Path) -> dict[str, Any]:
+    """读「主题到表」的映射配置，与消费端共用这一份。"""
     return json.loads(config_path.read_text(encoding="utf-8"))
 
 
@@ -46,6 +48,7 @@ def build_messages(spark: SparkSession, csv_path: Path) -> DataFrame:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    """解析命令行参数。"""
     parser = argparse.ArgumentParser(description="重放 ODS 样本数据到 Kafka")
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
@@ -53,6 +56,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str]) -> int:
+    """把 ODS 样本 CSV 按行投递到 Kafka，模拟各源系统的上报。"""
     args = parse_args(argv[1:])
     config = load_config(args.config)
     bootstrap_servers = config["kafka"]["bootstrap_servers_internal"]

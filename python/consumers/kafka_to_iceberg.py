@@ -1,4 +1,4 @@
-"""把 Kafka 各主题的 ODS 消息流入 Iceberg bronze 层。
+r"""把 Kafka 各主题的 ODS 消息流入 Iceberg bronze 层。
 
 投递语义：Kafka 是至少一次，因此这里按主键做 MERGE 去重
 （source_system + source_record_id），重复消息不会把 bronze 层写重。
@@ -8,8 +8,8 @@
 行为可预期、可验证；改成连续消费只需去掉这个 trigger。
 
 用法（Server 2，经 spark-submit 包装脚本执行）：
-    bash spark-submit-fr2052a.sh \\
-        /opt/fr2052a-app/python/consumers/kafka_to_iceberg.py \\
+    bash spark-submit-fr2052a.sh \
+        /opt/fr2052a-app/python/consumers/kafka_to_iceberg.py \
         --config /opt/fr2052a-app/config/pipeline_topics.json
 """
 
@@ -19,6 +19,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
@@ -40,15 +41,14 @@ WHEN NOT MATCHED THEN INSERT *
 """
 
 
-def load_config(config_path: Path) -> dict:
+def load_config(config_path: Path) -> dict[str, Any]:
+    """读「主题到表」的映射配置，生产与消费两端共用这一份。"""
     return json.loads(config_path.read_text(encoding="utf-8"))
 
 
 def payload_schema(spark: SparkSession, table: str) -> StructType:
     """消息体的结构 = bronze 表结构去掉 loader 侧列。"""
-    return StructType(
-        [field for field in spark.table(table).schema.fields if field.name not in LOADER_MANAGED_COLUMNS]
-    )
+    return StructType([field for field in spark.table(table).schema.fields if field.name not in LOADER_MANAGED_COLUMNS])
 
 
 def upsert_batch(batch: DataFrame, batch_id: int, table: str) -> None:
@@ -93,12 +93,14 @@ def upsert_batch(batch: DataFrame, batch_id: int, table: str) -> None:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    """解析命令行参数。"""
     parser = argparse.ArgumentParser(description="把 Kafka 的 ODS 消息流入 Iceberg bronze 层")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     return parser.parse_args(argv)
 
 
 def main(argv: list[str]) -> int:
+    """消费各主题的 ODS 消息，去重后 MERGE 进 bronze 层。"""
     args = parse_args(argv[1:])
     config = load_config(args.config)
     bootstrap_servers = config["kafka"]["bootstrap_servers_internal"]
@@ -128,6 +130,7 @@ def main(argv: list[str]) -> int:
         )
 
         def write_batch(batch: DataFrame, batch_id: int, table_name: str = table) -> None:
+            """落一个微批。批内先去重再 MERGE，否则同一主键重复出现会触发基数冲突。"""
             upsert_batch(batch, batch_id, table_name)
 
         # 入湖时间按数据自身的时间线打标（报告日 T+1 凌晨 2 点），而不是真实时钟：

@@ -47,12 +47,15 @@ CONSOLIDATION_COLUMNS = (
 
 @dataclass
 class CheckResult:
+    """一条核对结论：名称、是否通过、以及给人看的证据。"""
+
     name: str
     passed: bool
     detail: str
 
 
 def check_row_shape(spark: SparkSession) -> list[CheckResult]:
+    """核对报表行形状：每个实体一行，合并行只有一行。"""
     entity_rows = spark.table(REPORT).filter("not is_consolidated").count()
     consolidated_rows = spark.table(REPORT).filter("is_consolidated").count()
     return [
@@ -67,12 +70,8 @@ def check_row_shape(spark: SparkSession) -> list[CheckResult]:
 def check_consolidation(spark: SparkSession) -> list[CheckResult]:
     """合并口径必须等于各实体口径之和（同一列逐列验算）。"""
     sums = ", ".join(f"round(sum({column}), 2) as {column}" for column in CONSOLIDATION_COLUMNS)
-    entity_totals = spark.sql(
-        f"select {sums} from {REPORT} where not is_consolidated"
-    ).collect()[0]
-    consolidated = (
-        spark.table(REPORT).filter("is_consolidated").select(*CONSOLIDATION_COLUMNS).collect()[0]
-    )
+    entity_totals = spark.sql(f"select {sums} from {REPORT} where not is_consolidated").collect()[0]
+    consolidated = spark.table(REPORT).filter("is_consolidated").select(*CONSOLIDATION_COLUMNS).collect()[0]
 
     mismatched = []
     for column in CONSOLIDATION_COLUMNS:
@@ -98,10 +97,13 @@ def check_detail_rollup(spark: SparkSession) -> list[CheckResult]:
     consolidated = spark.table(REPORT).filter("is_consolidated").collect()[0]
     for section, (report_column, detail_column, line_item) in SECTION_AMOUNTS.items():
         line_filter = f" and line_item = '{line_item}'" if line_item else ""
-        detail_total = spark.sql(
-            f"select round(sum({detail_column}), 2) as total from {DETAIL} "
-            f"where section_code = '{section}'{line_filter}"
-        ).collect()[0]["total"] or 0
+        detail_total = (
+            spark.sql(
+                f"select round(sum({detail_column}), 2) as total from {DETAIL} "
+                f"where section_code = '{section}'{line_filter}"
+            ).collect()[0]["total"]
+            or 0
+        )
         report_total = consolidated[report_column] or 0
         variance = round(float(detail_total) - float(report_total), 2)
         results.append(
@@ -141,8 +143,7 @@ def check_l2_cap(spark: SparkSession) -> CheckResult:
         passed=abs(capped - expected) <= 0.05,
         detail=(
             f"认列总额 {capped:,.2f}，按 40% 上限应为 {expected:,.2f}；"
-            f"二级资产原始占比 {ratio:.2%}"
-            + ("（上限已截断）" if cap_triggered else "（未触发上限）")
+            f"二级资产原始占比 {ratio:.2%}" + ("（上限已截断）" if cap_triggered else "（未触发上限）")
         ),
     )
 
@@ -186,6 +187,7 @@ def check_gl_reconciliation(spark: SparkSession) -> CheckResult:
 
 
 def main() -> int:
+    """跑 ADS 层全部核对项，任一不通过即以退出码 1 结束。"""
     spark = SparkSession.builder.appName("fr2052a-verify-gold").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
 

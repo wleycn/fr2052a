@@ -48,6 +48,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
@@ -70,6 +71,7 @@ COMPARABLE_CURRENCY = "USD"
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数。"""
     parser = argparse.ArgumentParser(description="实时大额敞口扫描")
     parser.add_argument("--report-date", required=True, help="报告日，随预警一并落库")
     parser.add_argument("--config", default="/opt/fr2052a-app/config/liquidity_thresholds.json")
@@ -77,11 +79,13 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_config(path: str) -> dict:
+def load_config(path: str) -> dict[str, Any]:
+    """读扫描配置：大额敞口阈值等。"""
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 def jdbc_options() -> tuple[str, dict[str, str]]:
+    """拼 PostgreSQL 的 JDBC 连接串与凭据，供 Spark 直接写控制表。"""
     host = os.environ["SERVER1_HOST"]
     database = os.environ["POSTGRES_DB"]
     url = f"jdbc:postgresql://{host}:5432/{database}"
@@ -103,8 +107,7 @@ def detect(frame: DataFrame, report_date: str, threshold: float) -> DataFrame:
     parsed = frame.select(payload.alias("p")).select("p.*")
 
     return (
-        parsed
-        .withColumn("amount_num", F.col(AMOUNT_FIELD).cast("double"))
+        parsed.withColumn("amount_num", F.col(AMOUNT_FIELD).cast("double"))
         .withColumn("payload_parsed", F.col("amount_num").isNotNull())
         .withColumn(
             "is_candidate",
@@ -160,6 +163,7 @@ def detect(frame: DataFrame, report_date: str, threshold: float) -> DataFrame:
 
 
 def main() -> int:
+    """扫描入口：从交易主题识别大额未保险存款，落库并投递预警。"""
     args = parse_args()
     config = load_config(args.config)
     topics = load_config(args.topics_config)
@@ -181,6 +185,7 @@ def main() -> int:
     alerts = detect(raw, args.report_date, threshold)
 
     def write_batch(batch: DataFrame, batch_id: int) -> None:
+        """落一个微批并投递预警。先报读入条数与命中条数，让「零命中」与「读不到」分得开。"""
         total = batch.count()
         if total == 0:
             print(f"  批次 {batch_id}：无新消息")
@@ -201,27 +206,21 @@ def main() -> int:
         # 批内去重 + 事件表主键，就是完整的去重：跨批次重复会撞主键让作业报错，
         # 这是有意的（宁可红，也不重复报）。
         candidates = (
-            batch.filter(F.col("is_candidate"))
-            .drop("is_candidate", "payload_parsed")
-            .dropDuplicates(["event_id"])
+            batch.filter(F.col("is_candidate")).drop("is_candidate", "payload_parsed").dropDuplicates(["event_id"])
         )
         rows = candidates.collect()
         if not rows:
             print(f"  批次 {batch_id}：读到 {total} 条消息，无新增大额敞口")
             return
 
-        candidates.write.jdbc(
-            jdbc_url, "ads.ads_fr2052a_realtime_alerts", mode="append", properties=properties
-        )
+        candidates.write.jdbc(jdbc_url, "ads.ads_fr2052a_realtime_alerts", mode="append", properties=properties)
         print(f"  批次 {batch_id}：写入 {len(rows)} 条敞口预警")
         for row in rows[:5]:
             print(f"    {row['entity_code']}  {row['amount_usd']:>16,.2f}  {row['source_record_id']}")
         # 同时发到告警主题，供告警平台订阅
         candidates.select(
             F.to_json(F.struct(*[F.col(name) for name in candidates.columns])).alias("value")
-        ).write.format("kafka").option("kafka.bootstrap.servers", bootstrap).option(
-            "topic", ALERT_TOPIC
-        ).save()
+        ).write.format("kafka").option("kafka.bootstrap.servers", bootstrap).option("topic", ALERT_TOPIC).save()
 
     query = (
         alerts.writeStream.foreachBatch(write_batch)

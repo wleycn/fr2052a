@@ -17,6 +17,7 @@
 | 结果库 | PostgreSQL | 18.6 |
 | 脱敏 | dbt 宏 + PostgreSQL secure schema（加盐 SHA-256） | - |
 | 巡检 | 自研 `pipeline_health.py`（熔断 / 质量 / 报送 / 滞后 / 连接 / 磁盘） | - |
+| 代码质量闸 | ruff（检查 + 格式化）+ mypy，配置在项目根 `pyproject.toml` | ruff 0.14.4 / mypy 1.18.2 |
 
 ## 目录分层
 
@@ -108,6 +109,8 @@ demo-fr2052a/
 | Spark Master | 8081 | `curl -I http://192.168.17.24:8081` |
 
 没有独立的元数据平台与监控面板：血缘由 `render_lineage.py` 渲染成 Markdown 报告，巡检由 `pipeline_health.py` 直接输出结论。
+
+代码质量闸在 dev 机跑：`make lint`（ruff 检查 + 格式检查 + mypy）。执行一次 `git config core.hooksPath .githooks` 后，每次提交前自动跑。
 
 详细验证清单见 [docs/business/PROJECT.md](PROJECT.md#运行环境) 与 [docs/build-log.md](../build-log.md)。
 

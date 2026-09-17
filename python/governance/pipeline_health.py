@@ -28,6 +28,7 @@ import json
 import os
 import subprocess
 import sys
+from typing import Any
 
 import psycopg2
 import psycopg2.extras
@@ -39,12 +40,14 @@ WARN_DISK_PERCENT = 80
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数。"""
     parser = argparse.ArgumentParser(description="跑批健康巡检")
     parser.add_argument("--json", action="store_true", help="以 JSON 输出")
     return parser.parse_args()
 
 
-def pg_connection():
+def pg_connection() -> psycopg2.extensions.connection:
+    """连接 Server 1 的 PostgreSQL。"""
     return psycopg2.connect(
         host=os.environ["SERVER1_HOST"],
         port=int(os.environ.get("POSTGRES_PORT", "5432")),
@@ -55,11 +58,13 @@ def pg_connection():
 
 
 def shell(command: list[str]) -> tuple[int, str]:
+    """执行一条命令，返回退出码与合并后的输出。"""
     completed = subprocess.run(command, capture_output=True, text=True, check=False)
     return completed.returncode, (completed.stdout or completed.stderr).strip()
 
 
-def collect_pg(connection) -> dict:
+def collect_pg(connection: psycopg2.extensions.connection) -> dict[str, Any]:
+    """收集库侧信号：熔断状态、质量结果、预警、报送台账、重述与连接数。"""
     with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
         cursor.execute("SELECT state, trip_count, updated_at FROM ads.ads_circuit_breaker WHERE scope = 'GLOBAL'")
         breaker = cursor.fetchone()
@@ -75,14 +80,11 @@ def collect_pg(connection) -> dict:
         quality = cursor.fetchone()
 
         cursor.execute(
-            "SELECT count(*) AS blocking FROM ads.ads_fr2052a_alerts "
-            "WHERE status = 'OPEN' AND blocks_submission"
+            "SELECT count(*) AS blocking FROM ads.ads_fr2052a_alerts WHERE status = 'OPEN' AND blocks_submission"
         )
         blocking_alerts = cursor.fetchone()["blocking"]
 
-        cursor.execute(
-            "SELECT count(*) AS open_total FROM ads.ads_fr2052a_alerts WHERE status = 'OPEN'"
-        )
+        cursor.execute("SELECT count(*) AS open_total FROM ads.ads_fr2052a_alerts WHERE status = 'OPEN'")
         open_alerts = cursor.fetchone()["open_total"]
 
         cursor.execute(
@@ -96,9 +98,7 @@ def collect_pg(connection) -> dict:
         cursor.execute("SELECT count(*) AS total FROM ads.ads_restatement_log")
         restatements = cursor.fetchone()["total"]
 
-        cursor.execute(
-            "SELECT count(*) AS total, max(detected_at) AS last_event FROM ads.ads_fr2052a_realtime_alerts"
-        )
+        cursor.execute("SELECT count(*) AS total, max(detected_at) AS last_event FROM ads.ads_fr2052a_realtime_alerts")
         realtime = cursor.fetchone()
 
         cursor.execute("SELECT count(*) AS n FROM pg_stat_activity")
@@ -119,10 +119,19 @@ def collect_pg(connection) -> dict:
     }
 
 
-def collect_kafka() -> dict:
+def collect_kafka() -> dict[str, Any]:
+    """收集 Kafka 侧信号：消费滞后。"""
     code, output = shell(
-        ["docker", "exec", KAFKA_CONTAINER, "/opt/kafka/bin/kafka-consumer-groups.sh",
-         "--bootstrap-server", "localhost:9092", "--describe", "--all-groups"]
+        [
+            "docker",
+            "exec",
+            KAFKA_CONTAINER,
+            "/opt/kafka/bin/kafka-consumer-groups.sh",
+            "--bootstrap-server",
+            "localhost:9092",
+            "--describe",
+            "--all-groups",
+        ]
     )
     if code != 0:
         return {"error": output[:200]}
@@ -148,7 +157,8 @@ def collect_kafka() -> dict:
     return {"lag": groups, "max_lag": max(groups.values(), default=0)}
 
 
-def collect_disk() -> dict:
+def collect_disk() -> dict[str, Any]:
+    """收集磁盘占用。"""
     code, output = shell(["df", "-P", "/home/hermes"])
     if code != 0:
         return {"error": output[:200]}
@@ -157,6 +167,7 @@ def collect_disk() -> dict:
 
 
 def main() -> int:
+    """跑全部巡检项并打印；退出码恒为 0，观察不做闸。"""
     args = parse_args()
     connection = pg_connection()
     try:
@@ -194,16 +205,20 @@ def main() -> int:
     print(f"  熔断闸        {breaker.get('state', '无记录')}（累计熔断 {breaker.get('trip_count', 0)} 次）")
     if breaker.get("state") == "HALTED":
         findings.append("熔断闸处于 HALTED，报送被阻断")
-    print(f"  最近批次      {quality.get('batch_id', '无记录')}  校验 {quality.get('total', 0)} 条"
-          f"（ERROR {quality.get('errors', 0)} / WARNING {quality.get('warnings', 0)}）"
-          f"  跑于 {quality.get('last_run')}")
+    print(
+        f"  最近批次      {quality.get('batch_id', '无记录')}  校验 {quality.get('total', 0)} 条"
+        f"（ERROR {quality.get('errors', 0)} / WARNING {quality.get('warnings', 0)}）"
+        f"  跑于 {quality.get('last_run')}"
+    )
     if quality.get("errors"):
         findings.append(f"最近批次有 {quality['errors']} 条 ERROR 级校验失败")
     print(f"  预警          未关闭 {pg['open_alerts']} 条，其中阻断级 {pg['blocking_alerts']} 条")
     if pg["blocking_alerts"]:
         findings.append(f"存在 {pg['blocking_alerts']} 条未关闭的阻断级预警")
-    print(f"  报送          {submission.get('report_date', '无记录')}  {submission.get('files', 0)} 个文件"
-          f"  状态 {submission.get('status', '-')}  提交于 {submission.get('submitted_at')}")
+    print(
+        f"  报送          {submission.get('report_date', '无记录')}  {submission.get('files', 0)} 个文件"
+        f"  状态 {submission.get('status', '-')}  提交于 {submission.get('submitted_at')}"
+    )
     print(f"  重述          累计 {pg['restatements']} 次")
     print(f"  实时事件      {realtime.get('total', 0)} 条，最近 {realtime.get('last_event')}")
 

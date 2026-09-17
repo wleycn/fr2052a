@@ -1,4 +1,4 @@
-"""把 Iceberg gold 层的报送报表导出到 Server 1 的 PostgreSQL（ADS 服务层）。
+r"""把 Iceberg gold 层的报送报表导出到 Server 1 的 PostgreSQL（ADS 服务层）。
 
 为什么需要这一步：架构上 Iceberg 承载数据湖（ref / ODS / OWD / OWS / Gold），
 PostgreSQL 只承载报送服务层。dbt 在数据湖里算出报表，再由本作业导出到关系库，
@@ -40,7 +40,7 @@ when the new data has a different schema」。实测确认：模型多一列时�
 导出后逐表回读行数，作为对"确实写进去了"的独立验证。
 
 用法（Server 2，经 spark-submit 包装脚本执行，环境变量由包装脚本透传）：
-    bash spark-submit-fr2052a.sh \\
+    bash spark-submit-fr2052a.sh \
         /opt/fr2052a-app/python/exporters/export_gold_to_pg.py
 """
 
@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import Any
 
 from pyspark.sql import DataFrame, SparkSession
 
@@ -62,12 +63,14 @@ TABLES = (
 
 
 def jdbc_url() -> str:
+    """拼 PostgreSQL 的 JDBC 连接串。"""
     host = os.environ["SERVER1_HOST"]
     database = os.environ["POSTGRES_DB"]
     return f"jdbc:postgresql://{host}:5432/{database}"
 
 
 def connection_properties() -> dict[str, str]:
+    """JDBC 连接属性。凭据从环境变量取，不写进代码。"""
     return {
         "user": os.environ["POSTGRES_USER"],
         "password": os.environ["POSTGRES_PASSWORD"],
@@ -75,7 +78,7 @@ def connection_properties() -> dict[str, str]:
     }
 
 
-def target_columns(spark: SparkSession, url: str, table: str, properties: dict) -> list[str] | None:
+def target_columns(spark: SparkSession, url: str, table: str, properties: dict[str, Any]) -> list[str] | None:
     """取目标表现有列；表还不存在时返回 None。"""
     try:
         return spark.read.jdbc(url, f"(SELECT * FROM {table} WHERE 1 = 0) AS probe", properties).columns
@@ -91,6 +94,7 @@ def schema_diff(frame: DataFrame, existing: list[str]) -> tuple[list[str], list[
 
 
 def main() -> int:
+    """把 gold 层的报送表导出到 PostgreSQL 的 ads 层，覆盖写以保住表上的授权与约束。"""
     url = jdbc_url()
     properties = connection_properties()
 
@@ -110,8 +114,7 @@ def main() -> int:
                 missing, extra = schema_diff(frame, existing)
                 if missing or extra:
                     print(
-                        f"  [FAIL] {target:<28} 模型结构与目标表不一致，"
-                        f"需要先写迁移（sql/postgres/ 下加 ALTER TABLE）"
+                        f"  [FAIL] {target:<28} 模型结构与目标表不一致，需要先写迁移（sql/postgres/ 下加 ALTER TABLE）"
                     )
                     if missing:
                         print(f"           模型独有列：{missing} → 目标表需 ADD COLUMN")
@@ -122,11 +125,7 @@ def main() -> int:
 
             # truncate=true：保留表上的授权/触发器/索引与库侧列，只换数据。
             # 不加这个选项就是默认的 DROP + CREATE，会让上面那些东西全部消失。
-            (
-                frame.write.mode("overwrite")
-                .option("truncate", "true")
-                .jdbc(url, target, properties=properties)
-            )
+            (frame.write.mode("overwrite").option("truncate", "true").jdbc(url, target, properties=properties))
             # 独立回读：写成功不等于写对了
             written_rows = spark.read.jdbc(url, target, properties=properties).count()
             ok = source_rows == written_rows

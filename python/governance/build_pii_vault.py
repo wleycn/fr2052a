@@ -35,12 +35,14 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import psycopg2
 import yaml
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数。"""
     parser = argparse.ArgumentParser(description="建立 PII 明文对照表")
     parser.add_argument("--manifest", required=True, help="dbt manifest.json")
     parser.add_argument("--data-dir", required=True, help="ODS 落地目录（含 *.csv）")
@@ -53,6 +55,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def mask_template(project_path: Path) -> str:
+    """从 dbt 工程读脱敏模板。模板只此一份，Python 与 dbt 宏共用，避免两边算法漂移。"""
     config = yaml.safe_load(project_path.read_text(encoding="utf-8"))
     template = (config.get("vars") or {}).get("pii_mask_template")
     if not template:
@@ -60,7 +63,7 @@ def mask_template(project_path: Path) -> str:
     return template
 
 
-def pii_columns(manifest: dict) -> list[tuple[str, str, str]]:
+def pii_columns(manifest: dict[str, Any]) -> list[tuple[str, str, str]]:
     """从 manifest 取 (模型, 列, 明文来源) 三元组。"""
     found: list[tuple[str, str, str]] = []
     for node in manifest.get("nodes", {}).values():
@@ -71,10 +74,7 @@ def pii_columns(manifest: dict) -> list[tuple[str, str, str]]:
             if meta.get("pii"):
                 source = meta.get("pii_source")
                 if not source:
-                    raise SystemExit(
-                        f"{node['name']}.{column} 标了 pii 但没写 pii_source，"
-                        "无法确定明文在哪，停止执行"
-                    )
+                    raise SystemExit(f"{node['name']}.{column} 标了 pii 但没写 pii_source，无法确定明文在哪，停止执行")
                 found.append((node["name"], column, source))
     if not found:
         raise SystemExit(
@@ -104,15 +104,14 @@ def compute_token(template: str, salt: str, value: str) -> str:
 
 
 def source_file(data_dir: Path, table: str) -> Path:
+    """找到某张表对应的落地 CSV；找不到直接报错，不静默跳过。"""
     path = data_dir / f"{table}.csv"
     if not path.is_file():
         raise SystemExit(f"落地数据里找不到 {path}")
     return path
 
 
-def rows_for(
-    data_dir: Path, source: str, salt: str, template: str
-) -> list[tuple[str, str, str, str, str | None]]:
+def rows_for(data_dir: Path, source: str, salt: str, template: str) -> list[tuple[str, str, str, str, str | None]]:
     """读一个明文来源，产出 (token, 明文, 来源对象, 列名, 实体) 行。"""
     table, column = source.split(".", 1)
     path = source_file(data_dir, table)
@@ -131,25 +130,19 @@ def rows_for(
 
 
 def main() -> int:
+    """按 dbt 里声明的 PII 列取明文，建立 token 到明文的对照表。"""
     args = parse_args()
     manifest_path = Path(args.manifest).expanduser()
     if not manifest_path.is_file():
         print(f"找不到 manifest：{manifest_path}，先在 Server 2 上跑一次 dbt")
         return 1
 
-    project_path = (
-        Path(args.project).expanduser()
-        if args.project
-        else manifest_path.parent.parent / "dbt_project.yml"
-    )
+    project_path = Path(args.project).expanduser() if args.project else manifest_path.parent.parent / "dbt_project.yml"
     template = mask_template(project_path)
 
     salt = os.environ.get("FR2052A_PII_SALT")
     if not salt:
-        print(
-            "缺少环境变量 FR2052A_PII_SALT。没有盐的哈希对低熵客户号可被穷举反推，"
-            "等于没脱敏，故拒绝执行。"
-        )
+        print("缺少环境变量 FR2052A_PII_SALT。没有盐的哈希对低熵客户号可被穷举反推，等于没脱敏，故拒绝执行。")
         return 1
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

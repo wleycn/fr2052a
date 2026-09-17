@@ -16,6 +16,7 @@ from __future__ import annotations
 import csv
 import random
 import string
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -103,11 +104,13 @@ class EventClock:
     """按报告日派生确定性递增的事件时间，保证同一份种子每次得到相同结果。"""
 
     def __init__(self, report_date: date, step_seconds: int = 3) -> None:
+        """记下报告日与时间步长，事件时间由这两者推出。"""
         self._base = datetime.combine(report_date, time(2, 0, 0))
         self._step_seconds = step_seconds
         self._index = 0
 
     def next(self) -> str:
+        """返回下一个事件时间戳，每调一次前进一个步长。"""
         stamp = self._base + timedelta(seconds=self._index * self._step_seconds)
         self._index += 1
         return stamp.strftime("%Y-%m-%d %H:%M:%S")
@@ -146,7 +149,7 @@ def _assemble(
     table_name: str,
     source_record_id: str,
     entity_code: str,
-    business_values: list[object],
+    business_values: Sequence[object],
     event_time: str,
 ) -> list[object]:
     """拼一行 ODS 记录：前缀列 + 业务列 + ETL 尾部列（列序与表头一致）。"""
@@ -198,9 +201,19 @@ def generate_deposits(ods_dir: Path, ref: ReferenceData) -> int:
         rows.append(_assemble("ods_deposits", f"DEP-{index:06d}", entity_code, business, clock.next()))
 
     business_columns = [
-        "account_number", "customer_id", "product_code", "deposit_type", "currency",
-        "principal_amount", "accrued_interest", "interest_rate", "open_date",
-        "maturity_date", "branch_code", "customer_type_raw", "insured_flag",
+        "account_number",
+        "customer_id",
+        "product_code",
+        "deposit_type",
+        "currency",
+        "principal_amount",
+        "accrued_interest",
+        "interest_rate",
+        "open_date",
+        "maturity_date",
+        "branch_code",
+        "customer_type_raw",
+        "insured_flag",
     ]
     return write_csv(ods_dir / "ods_deposits.csv", _header(business_columns), rows)
 
@@ -234,9 +247,19 @@ def generate_repo_transactions(ods_dir: Path, ref: ReferenceData) -> int:
         rows.append(_assemble("ods_repo_transactions", f"REPO-{index:06d}", entity_code, business, clock.next()))
 
     business_columns = [
-        "deal_id", "counterparty_id", "repo_type", "currency", "cash_amount",
-        "collateral_market_value", "haircut_pct", "interest_rate", "start_date",
-        "end_date", "collateral_isin", "collateral_type_raw", "netting_agreement_id",
+        "deal_id",
+        "counterparty_id",
+        "repo_type",
+        "currency",
+        "cash_amount",
+        "collateral_market_value",
+        "haircut_pct",
+        "interest_rate",
+        "start_date",
+        "end_date",
+        "collateral_isin",
+        "collateral_type_raw",
+        "netting_agreement_id",
     ]
     return write_csv(ods_dir / "ods_repo_transactions.csv", _header(business_columns), rows)
 
@@ -273,9 +296,20 @@ def generate_loans(ods_dir: Path, ref: ReferenceData) -> int:
         rows.append(_assemble("ods_loans", f"LOAN-{index:06d}", entity_code, business, clock.next()))
 
     business_columns = [
-        "loan_id", "borrower_id", "loan_type", "facility_amount", "outstanding_amount",
-        "undrawn_amount", "currency", "interest_rate", "rate_type", "origination_date",
-        "maturity_date", "next_payment_date", "collateral_flag", "borrower_type_raw",
+        "loan_id",
+        "borrower_id",
+        "loan_type",
+        "facility_amount",
+        "outstanding_amount",
+        "undrawn_amount",
+        "currency",
+        "interest_rate",
+        "rate_type",
+        "origination_date",
+        "maturity_date",
+        "next_payment_date",
+        "collateral_flag",
+        "borrower_type_raw",
         "credit_grade_raw",
     ]
     return write_csv(ods_dir / "ods_loans.csv", _header(business_columns), rows)
@@ -310,9 +344,21 @@ def generate_securities(ods_dir: Path, ref: ReferenceData) -> int:
         rows.append(_assemble("ods_securities", f"SEC-{index:06d}", entity_code, business, clock.next()))
 
     business_columns = [
-        "security_id", "isin", "cusip", "security_type", "portfolio_code", "issuer_id",
-        "currency", "face_amount", "market_value", "book_value", "coupon_rate",
-        "purchase_date", "maturity_date", "credit_rating_raw", "pledged_flag",
+        "security_id",
+        "isin",
+        "cusip",
+        "security_type",
+        "portfolio_code",
+        "issuer_id",
+        "currency",
+        "face_amount",
+        "market_value",
+        "book_value",
+        "coupon_rate",
+        "purchase_date",
+        "maturity_date",
+        "credit_rating_raw",
+        "pledged_flag",
     ]
     return write_csv(ods_dir / "ods_securities.csv", _header(business_columns), rows)
 
@@ -344,9 +390,20 @@ def generate_derivatives(ods_dir: Path, ref: ReferenceData) -> int:
         rows.append(_assemble("ods_derivatives", f"DRV-{index:06d}", entity_code, business, clock.next()))
 
     business_columns = [
-        "trade_id", "counterparty_id", "instrument_type", "notional_amount", "currency",
-        "currency_pair", "trade_date", "maturity_date", "mark_to_market", "mtm_currency",
-        "is_central_cleared", "csa_agreement_id", "collateral_posted", "collateral_received",
+        "trade_id",
+        "counterparty_id",
+        "instrument_type",
+        "notional_amount",
+        "currency",
+        "currency_pair",
+        "trade_date",
+        "maturity_date",
+        "mark_to_market",
+        "mtm_currency",
+        "is_central_cleared",
+        "csa_agreement_id",
+        "collateral_posted",
+        "collateral_received",
     ]
     return write_csv(ods_dir / "ods_derivatives.csv", _header(business_columns), rows)
 
@@ -405,7 +462,8 @@ def generate_gl_balances(ods_dir: Path, gl_break_amount: float = 0.0) -> int:
     derivatives = _read_ods_rows(ods_dir, "ods_derivatives")
 
     demand_deposits = round(
-        sum(_amount_usd(row, "principal_amount") for row in deposits if row["deposit_type"] in ("CHK", "SAV", "MMDA")), 2
+        sum(_amount_usd(row, "principal_amount") for row in deposits if row["deposit_type"] in ("CHK", "SAV", "MMDA")),
+        2,
     )
     time_deposits = round(
         sum(_amount_usd(row, "principal_amount") for row in deposits if row["deposit_type"] in ("CD", "TIME")), 2
@@ -489,8 +547,13 @@ def generate_off_bs_commitments(ods_dir: Path, ref: ReferenceData) -> int:
         rows.append(_assemble("ods_off_bs_commitments", f"OFFBS-{index:06d}", entity_code, business, clock.next()))
 
     business_columns = [
-        "commitment_id", "counterparty_id", "commitment_type", "facility_amount",
-        "undrawn_amount", "currency", "maturity_date",
+        "commitment_id",
+        "counterparty_id",
+        "commitment_type",
+        "facility_amount",
+        "undrawn_amount",
+        "currency",
+        "maturity_date",
     ]
     return write_csv(ods_dir / "ods_off_bs_commitments.csv", _header(business_columns), rows)
 

@@ -31,6 +31,7 @@ from pyspark.sql import SparkSession
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数。"""
     parser = argparse.ArgumentParser(description="Iceberg 时间旅行审计")
     parser.add_argument("--table", required=True, help="表名，如 silver.owd_deposits")
     parser.add_argument("--list-snapshots", action="store_true", help="列出快照")
@@ -46,6 +47,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def list_snapshots(spark: SparkSession, table: str) -> None:
+    """列出表的全部快照：快照号、提交时间、操作类型。"""
     frame = spark.sql(
         f"""
         SELECT snapshot_id, parent_id, committed_at, operation
@@ -57,8 +59,7 @@ def list_snapshots(spark: SparkSession, table: str) -> None:
     print(f"{table} 共有 {len(rows)} 个快照：")
     for row in rows:
         print(
-            f"  {row['committed_at']}  id={row['snapshot_id']}  "
-            f"operation={row['operation']}  parent={row['parent_id']}"
+            f"  {row['committed_at']}  id={row['snapshot_id']}  operation={row['operation']}  parent={row['parent_id']}"
         )
     current = spark.sql(f"SELECT snapshot_id FROM {table}.snapshots ORDER BY committed_at DESC LIMIT 1")
     current_rows = current.collect()
@@ -67,13 +68,10 @@ def list_snapshots(spark: SparkSession, table: str) -> None:
 
 
 def diff_snapshots(spark: SparkSession, table: str, args: argparse.Namespace) -> None:
+    """比较两个快照的主键差异：新增、删除、变更。"""
     snapshot_a, snapshot_b = args.diff
-    keys_a = spark.sql(
-        f"SELECT {args.key_column} AS k FROM {table} VERSION AS OF {snapshot_a}"
-    ).cache()
-    keys_b = spark.sql(
-        f"SELECT {args.key_column} AS k FROM {table} VERSION AS OF {snapshot_b}"
-    ).cache()
+    keys_a = spark.sql(f"SELECT {args.key_column} AS k FROM {table} VERSION AS OF {snapshot_a}").cache()
+    keys_b = spark.sql(f"SELECT {args.key_column} AS k FROM {table} VERSION AS OF {snapshot_b}").cache()
 
     count_a, count_b = keys_a.count(), keys_b.count()
     added = keys_b.subtract(keys_a).count()
@@ -82,15 +80,13 @@ def diff_snapshots(spark: SparkSession, table: str, args: argparse.Namespace) ->
     print(f"{table} 快照 {snapshot_a} → {snapshot_b}")
     print(f"  行数：{count_a} → {count_b}")
     print(f"  新增键：{added}    消失键：{removed}    两侧都在：{count_b - added}")
-    print(
-        "  注意：键集合相同不代表内容相同。内容级差异看 *_history 表的 row_hash，"
-        "快照层只回答行数与键集合。"
-    )
+    print("  注意：键集合相同不代表内容相同。内容级差异看 *_history 表的 row_hash，快照层只回答行数与键集合。")
     keys_a.unpersist()
     keys_b.unpersist()
 
 
 def trace_key(spark: SparkSession, table: str, args: argparse.Namespace) -> None:
+    """追踪单个主键在各快照里的取值变化。"""
     columns = None if args.columns is None else [name.strip() for name in args.columns.split(",")]
     snapshots = spark.sql(
         f"SELECT snapshot_id, committed_at, operation FROM {table}.snapshots ORDER BY committed_at"
@@ -100,7 +96,7 @@ def trace_key(spark: SparkSession, table: str, args: argparse.Namespace) -> None
     for snapshot in snapshots:
         frame = spark.sql(
             f"""
-            SELECT * FROM {table} VERSION AS OF {snapshot['snapshot_id']}
+            SELECT * FROM {table} VERSION AS OF {snapshot["snapshot_id"]}
             WHERE {args.key_column} = '{args.trace_key}'
             """
         )
@@ -116,6 +112,7 @@ def trace_key(spark: SparkSession, table: str, args: argparse.Namespace) -> None
 
 
 def main() -> int:
+    """时间旅行审计入口，按参数分派到列快照、比快照、追主键三种用法。"""
     args = parse_args()
     spark = SparkSession.builder.appName("fr2052a-time-travel").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")

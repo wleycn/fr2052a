@@ -105,9 +105,7 @@ def check_table(spark: SparkSession, table: str) -> list[str]:
     if version_gaps:
         failures.append(f"版本号不连续（最大版本号 ≠ 版本条数）：{version_gaps} 个键")
 
-    no_begin = spark.sql(
-        "SELECT count(*) AS n FROM history_rows WHERE begin_date IS NULL"
-    ).first()["n"]
+    no_begin = spark.sql("SELECT count(*) AS n FROM history_rows WHERE begin_date IS NULL").first()["n"]
     if no_begin:
         failures.append(f"缺生效日：{no_begin} 行")
 
@@ -128,6 +126,7 @@ def check_table(spark: SparkSession, table: str) -> list[str]:
 
 
 def main() -> int:
+    """核对历史表的 SCD2 不变式：区间、唯一性、版本连续。"""
     spark = SparkSession.builder.appName("fr2052a-verify-scd2").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
 

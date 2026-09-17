@@ -1,11 +1,11 @@
-"""把 REF 层 CSV 批量加载进 Iceberg 的 ref 命名空间。
+r"""把 REF 层 CSV 批量加载进 Iceberg 的 ref 命名空间。
 
 REF 是静态字典表，量小、变动少，用整表覆盖写（INSERT OVERWRITE）保证幂等：
 重复跑任意多次，结果一致，不会翻倍。
 
 用法（Server 2，经 spark-submit 包装脚本执行）：
-    bash spark-submit-fr2052a.sh \\
-        /opt/fr2052a-app/python/lakehouse/load_ref_tables.py \\
+    bash spark-submit-fr2052a.sh \
+        /opt/fr2052a-app/python/lakehouse/load_ref_tables.py \
         /opt/fr2052a-app/sample_data/ref
 """
 
@@ -23,7 +23,8 @@ if TYPE_CHECKING:  # pyspark 只在 Server 2 上装，dev 侧静态检查时用�
 
 NAMESPACE = "ref"
 
-def align_columns(spark: SparkSession, csv_path: Path, table: str) -> "DataFrame":
+
+def align_columns(spark: SparkSession, csv_path: Path, table: str) -> DataFrame:
     """读 CSV 成 DataFrame，把列名、列序与列类型一并对齐到目标表。
 
     不按列做特殊处理：CSV 是文本载体，Spark 的类型推断并不可靠 —— 整列全空时
@@ -48,6 +49,7 @@ def align_columns(spark: SparkSession, csv_path: Path, table: str) -> "DataFrame
 
 
 def main(argv: list[str]) -> int:
+    """把 ref 目录下每张 CSV 覆盖写入 Iceberg 的 ref 命名空间。"""
     ref_dir = Path(argv[1]) if len(argv) > 1 else Path("/opt/fr2052a-app/sample_data/ref")
     if not ref_dir.is_dir():
         print(f"REF 目录不存在: {ref_dir}", file=sys.stderr)

@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+# 提交前闸：lint 不过就不让提交。
+#
+# 启用（每个克隆各做一次）：git config core.hooksPath .githooks
+# 确知后果时跳过：git commit --no-verify
+#
+# 放在版本库里而不是 .git/hooks/，是为了让闸跟代码一起走：新克隆只要执行上面那条
+# 命令就能拿到同一套规则，不依赖口头约定。
+set -e
+
+if ! make -s lint; then
+    echo ""
+    echo "提交被拦下：上面的 lint 结果要先修掉（可自动修的先跑 make lint-fix）。"
+    exit 1
+fi

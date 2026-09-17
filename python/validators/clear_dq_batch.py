@@ -32,12 +32,14 @@ LOG_TABLE = "ads.ads_fr2052a_validation_log"
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数。"""
     parser = argparse.ArgumentParser(description="清掉某批次的数据质量结果")
     parser.add_argument("--batch-id", required=True, help="要清空的批次号")
     return parser.parse_args()
 
 
-def pg_connection():
+def pg_connection() -> psycopg2.extensions.connection:
+    """连接 Server 1 的 PostgreSQL。"""
     return psycopg2.connect(
         host=os.environ["SERVER1_HOST"],
         port=int(os.environ.get("POSTGRES_PORT", "5432")),
@@ -48,6 +50,7 @@ def pg_connection():
 
 
 def main() -> int:
+    """清掉某批次的质量结果，避免重跑后同一规则留下两行。"""
     args = parse_args()
     connection = pg_connection()
     try:
@@ -61,8 +64,7 @@ def main() -> int:
         connection.close()
 
     print(
-        f"批次 {args.batch_id}：删除 {deleted} 行；"
-        f"审计表剩余 {counted[0] if counted else 0} 行（其他批次的历史保留）。"
+        f"批次 {args.batch_id}：删除 {deleted} 行；审计表剩余 {counted[0] if counted else 0} 行（其他批次的历史保留）。"
     )
     return 0
 

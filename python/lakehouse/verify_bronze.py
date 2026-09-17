@@ -1,12 +1,12 @@
-"""核对 bronze 层行数与样本 CSV 行数是否一致。
+r"""核对 bronze 层行数与样本 CSV 行数是否一致。
 
 入湖是"看得见才敢用"的一步：CSV 有多少行，bronze 就必须有多少行，
 多一行少一行都要在进 OWD 之前暴露出来。
 
 用法（Server 2，经 spark-submit 包装脚本执行）：
-    bash spark-submit-fr2052a.sh \\
-        /opt/fr2052a-app/python/lakehouse/verify_bronze.py \\
-        --data-dir /opt/fr2052a-app/sample_data/ods \\
+    bash spark-submit-fr2052a.sh \
+        /opt/fr2052a-app/python/lakehouse/verify_bronze.py \
+        --data-dir /opt/fr2052a-app/sample_data/ods \
         --config   /opt/fr2052a-app/config/pipeline_topics.json
 """
 
@@ -25,11 +25,13 @@ DEFAULT_CONFIG = Path("/opt/fr2052a-app/config/pipeline_topics.json")
 
 
 def count_csv_rows(path: Path) -> int:
+    """数 CSV 的数据行数，不含表头。"""
     with path.open(newline="", encoding="utf-8") as handle:
         return sum(1 for _ in csv.DictReader(handle))
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    """解析命令行参数。"""
     parser = argparse.ArgumentParser(description="核对 bronze 层与样本 CSV 的行数")
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
@@ -37,6 +39,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str]) -> int:
+    """核对 bronze 层每张表的行数与样本 CSV 是否一致。"""
     args = parse_args(argv[1:])
     config = json.loads(args.config.read_text(encoding="utf-8"))
     targets = [topic for topic in config["topics"] if topic.get("has_producer")]

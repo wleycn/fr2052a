@@ -28,6 +28,7 @@ SSH_TIMEOUT_SECONDS = 3600
 
 
 def pipeline_command(step: str) -> str:
+    """拼出「在 Server 2 上按某一步跑批」的远端命令。"""
     return f"cd {REMOTE_DIR} && REPORT_DATE={{{{ params.report_date }}}} bash run-daily-pipeline.sh {step}"
 
 

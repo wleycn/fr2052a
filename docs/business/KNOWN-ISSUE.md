@@ -54,6 +54,9 @@
 | 数据质量用自研规则引擎 | `[99]详细材料.md` 指定 Great Expectations | 规则定义已在 `ref.ref_validation_rules`，由 `run_dq_rules.py` 执行 | ✅ 决策：转成 GX suite 等于规则定义存两份，必然漂移 |
 | 血缘用 dbt meta 自渲染 | `[99]详细材料.md` 指定 DataHub | `dbt/models/**/schema.yml` 的 meta 声明 + `render_lineage.py` 渲染 | ✅ 决策：DataHub 部署成本高，演示价值等价 |
 | DQ 结果日志按批次先清后写 | 上游未定义日志粒度 | 一行 = 一个批次的一条规则，重跑前由 `clear_dq_batch.py` 清该批次 | ✅ 决策：不清则重跑静默翻倍，「本批次几条 ERROR」随之翻倍 |
+| lint 口径排除 4 类规则 | 上游要求 `ruff check .`、`ruff format .`、`mypy .` 全过 | 配置收在项目根 `pyproject.toml`，排除 `D415`、`N812`、`RUF001`、`RUF002`、`RUF003` | ✅ 决策：前两类与中文写作冲突（`D415` 只认 ASCII 句末标点、`RUF001-003` 把全角标点当歧义字符），`N812` 与 PySpark 的 `functions as F` 写法冲突。逐条理由与命中数写在 `pyproject.toml` 注释里；无命中的 `D401`/`D202` 不排除，继续管事 |
+| 提交闸用 git 钩子而非 CI | 上游要求「等待 CI 通过」后合并 | 两个远程只做代码托管，没有 runner；闸放在 `.githooks/pre-commit`，跑 `make lint` | ✅ 决策：闸要在本地就拦住，不能等推送；CI 起来后可把它作为第二道 |
+| 不建单元测试套件 | 上游要求覆盖率 ≥ 80% | 未建 pytest 套件，判据改为数据层核对脚本全绿加端到端重跑 | ✅ 决策：本项目的风险在数据与编排，不在函数分支；核对脚本要能区分「零命中」与「读不到」 |
 
 **适用边界**（条件条目为什么不在表里、本项目实际取了哪条路）：
 
@@ -73,3 +76,6 @@
 - **自研 DQ 引擎**（✅ 决策）——代价：GX 现成的算子与报告不可用；回退：把 ref 表规则翻译成 GX suite
 - **血缘自渲染**（✅ 决策）——代价：没有 DataHub 的搜索与影响面分析界面；回退：接入 DataHub 并导入 dbt manifest
 - **DQ 日志先清后写**（✅ 决策）——代价：日志环节多一步前置脚本；回退：改日志表为只留最近一次
+- **lint 排除 4 类规则**（✅ 决策）——代价：这几类问题不再有机器兜底，只能靠评审看；回退：删掉 `pyproject.toml` 里对应的 `ignore` 项并批量整改
+- **提交闸走 git 钩子**（✅ 决策）——代价：每个克隆要手工执行一次 `git config core.hooksPath .githooks`，没配的克隆等于没有闸；回退：接上 CI runner 后改由 CI 拦
+- **不建单元测试套件**（✅ 决策）——代价：函数级回归只能靠核对脚本与端到端重跑，粒度偏粗；回退：补 pytest 套件并接进 `make lint`

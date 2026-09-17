@@ -19,6 +19,7 @@ SPOT_CHECK_TABLE = "ref.ref_calendar"
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数。"""
     parser = argparse.ArgumentParser(description="巡检数据湖目录")
     parser.add_argument(
         "--describe",
@@ -36,6 +37,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def describe_tables(spark: SparkSession, tables: list[str], sample: int = 0) -> None:
+    """打印每张表的列结构与若干样例行，供人工巡检。"""
     for table in tables:
         try:
             columns = spark.table(table).columns
@@ -58,6 +60,7 @@ def describe_tables(spark: SparkSession, tables: list[str], sample: int = 0) -> 
 
 
 def main() -> int:
+    """列出命名空间与表，或按 --describe 细看某张表。"""
     args = parse_args()
     spark = SparkSession.builder.appName("fr2052a-inspect-catalog").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")

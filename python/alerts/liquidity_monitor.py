@@ -40,6 +40,7 @@ import subprocess
 import sys
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import psycopg2
 import psycopg2.extras
@@ -53,6 +54,7 @@ KAFKA_PRODUCER = "/opt/kafka/bin/kafka-console-producer.sh"
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数：报告日与阈值配置文件位置。"""
     parser = argparse.ArgumentParser(description="流动性指标与预警判定")
     parser.add_argument("--report-date", required=True, help="报告日，格式 YYYY-MM-DD")
     parser.add_argument("--batch-id", required=True, help="批次号，用于关联数据质量结果")
@@ -62,7 +64,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_thresholds(path: str) -> dict:
+def load_thresholds(path: str) -> dict[str, Any]:
+    """读阈值配置。阈值只此一份，监控与放行闸都从这里取，避免两处各写一套。"""
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
@@ -72,7 +75,8 @@ def kafka_bootstrap(path: str) -> str:
     return config["kafka"]["bootstrap_servers_internal"]
 
 
-def pg_connection():
+def pg_connection() -> psycopg2.extensions.connection:
+    """连接 Server 1 的 PostgreSQL：报表与控制表都在那一侧。"""
     return psycopg2.connect(
         host=os.environ["SERVER1_HOST"],
         port=int(os.environ.get("POSTGRES_PORT", "5432")),
@@ -82,12 +86,12 @@ def pg_connection():
     )
 
 
-def number(value) -> float:
+def number(value: Any) -> float:
     """把 NUMERIC 列读出来的 Decimal/None 统一成 float。"""
     return 0.0 if value is None else float(value)
 
 
-def compute_metrics(row: dict, regulatory_min: float) -> dict:
+def compute_metrics(row: dict[str, Any], regulatory_min: float) -> dict[str, Any]:
     """把一条报表行换算成 LCR 口径的指标。"""
     l1 = number(row["sec_i_unencumbered_hqla_l1"])
     l2a = number(row["sec_i_unencumbered_hqla_l2a"])
@@ -122,16 +126,14 @@ def compute_metrics(row: dict, regulatory_min: float) -> dict:
         "expected_outflow_30d_usd": Decimal(f"{outflow:.2f}"),
         "net_cash_outflow_30d_usd": Decimal(f"{nco:.2f}"),
         "lcr_ratio": None if nco <= 0 else Decimal(f"{hqla_capped / nco:.4f}"),
-        "l2_cap_ratio": (
-            None if total_hqla <= 0 else Decimal(f"{(g2a + g2b) / total_hqla:.4f}")
-        ),
+        "l2_cap_ratio": (None if total_hqla <= 0 else Decimal(f"{(g2a + g2b) / total_hqla:.4f}")),
         "inflow_cap_ratio": None if outflow <= 0 else Decimal(f"{inflow_raw / outflow:.4f}"),
         "regulatory_min_ratio": Decimal(f"{regulatory_min:.4f}"),
         "headroom_usd": Decimal(f"{hqla_capped - regulatory_min * nco:.2f}"),
     }
 
 
-def metric_alerts(metrics: list[dict], thresholds: dict) -> list[dict]:
+def metric_alerts(metrics: list[dict[str, Any]], thresholds: dict[str, Any]) -> list[dict[str, Any]]:
     """逐条评估指标类规则。"""
     lcr_config = thresholds["lcr"]
     regulatory_min = float(lcr_config["regulatory_min"])
@@ -140,10 +142,10 @@ def metric_alerts(metrics: list[dict], thresholds: dict) -> list[dict]:
     inflow_max = float(thresholds["inflow_cap_ratio_max"])
     blocking = set(thresholds["breaker"]["blocking_severities"])
 
-    alerts: list[dict] = []
+    alerts: list[dict[str, Any]] = []
 
     def add(
-        row: dict,
+        row: dict[str, Any],
         code: str,
         severity: str,
         metric: str,
@@ -151,6 +153,7 @@ def metric_alerts(metrics: list[dict], thresholds: dict) -> list[dict]:
         threshold: float | None,
         message: str,
     ) -> None:
+        """追加一条预警候选，连判定用的实际值与阈值一起记下，便于事后复核。"""
         alerts.append(
             {
                 "report_date": row["report_date"],
@@ -227,7 +230,9 @@ def metric_alerts(metrics: list[dict], thresholds: dict) -> list[dict]:
     return alerts
 
 
-def fetch_gl_alerts(connection, report_date, blocking: set[str]) -> list[dict]:
+def fetch_gl_alerts(
+    connection: psycopg2.extensions.connection, report_date: str, blocking: set[str]
+) -> list[dict[str, Any]]:
     """总账对账未通过的行，汇总成一条 CRITICAL 预警。"""
     with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
         cursor.execute(
@@ -254,7 +259,9 @@ def fetch_gl_alerts(connection, report_date, blocking: set[str]) -> list[dict]:
     ]
 
 
-def fetch_dq_alerts(connection, report_date, batch_id, blocking: set[str]) -> list[dict]:
+def fetch_dq_alerts(
+    connection: psycopg2.extensions.connection, report_date: str, batch_id: str, blocking: set[str]
+) -> list[dict[str, Any]]:
     """数据质量 ERROR 级失败，汇总成一条 CRITICAL 预警。"""
     with connection.cursor() as cursor:
         cursor.execute(
@@ -284,7 +291,7 @@ def fetch_dq_alerts(connection, report_date, batch_id, blocking: set[str]) -> li
     ]
 
 
-def write_metrics(connection, metrics: list[dict]) -> None:
+def write_metrics(connection: psycopg2.extensions.connection, metrics: list[dict[str, Any]]) -> None:
     """指标按 (报告日, 实体) 覆盖写，保持一报告日一张快照。"""
     columns = [
         "report_date",
@@ -319,7 +326,7 @@ def write_metrics(connection, metrics: list[dict]) -> None:
     connection.commit()
 
 
-def write_alerts(connection, alerts: list[dict], report_date) -> None:
+def write_alerts(connection: psycopg2.extensions.connection, alerts: list[dict[str, Any]], report_date: str) -> None:
     """预警按 (报告日, 实体, 规则) 去重；本轮未命中的关闭，避免残留阻断。"""
     with connection.cursor() as cursor:
         for row in alerts:
@@ -370,14 +377,15 @@ def write_alerts(connection, alerts: list[dict], report_date) -> None:
             )
         else:
             cursor.execute(
-                "UPDATE ads.ads_fr2052a_alerts SET status = 'CLOSED' "
-                "WHERE report_date = %s AND status = 'OPEN'",
+                "UPDATE ads.ads_fr2052a_alerts SET status = 'CLOSED' WHERE report_date = %s AND status = 'OPEN'",
                 (report_date,),
             )
     connection.commit()
 
 
-def update_breaker(connection, alerts: list[dict], scope: str) -> tuple[str, str]:
+def update_breaker(
+    connection: psycopg2.extensions.connection, alerts: list[dict[str, Any]], scope: str
+) -> tuple[str, str]:
     """按阻断级预警翻转熔断闸。只记状态，不做动作 —— 动作由 gate 负责。"""
     blocking = [row for row in alerts if row["blocks_submission"]]
     state = "HALTED" if blocking else "OPEN"
@@ -423,7 +431,7 @@ def update_breaker(connection, alerts: list[dict], scope: str) -> tuple[str, str
     return state, reason
 
 
-def publish_alerts(alerts: list[dict], bootstrap: str) -> None:
+def publish_alerts(alerts: list[dict[str, Any]], bootstrap: str) -> None:
     """把预警发到 Kafka。消费端可以是告警平台，也可以是下一轮跑批的前置检查。"""
     if not alerts:
         print("  无预警，跳过 Kafka 投递")
@@ -472,6 +480,7 @@ def publish_alerts(alerts: list[dict], bootstrap: str) -> None:
 
 
 def main() -> int:
+    """算 LCR 与各口径比例，判定预警、翻熔断，并把预警投到 Kafka 主题。"""
     args = parse_args()
     thresholds = load_thresholds(args.config)
     blocking = set(thresholds["breaker"]["blocking_severities"])
@@ -481,8 +490,7 @@ def main() -> int:
     try:
         with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
             cursor.execute(
-                "SELECT * FROM ads.ads_fr2052a_report WHERE report_date = %s "
-                "ORDER BY entity_code",
+                "SELECT * FROM ads.ads_fr2052a_report WHERE report_date = %s ORDER BY entity_code",
                 (args.report_date,),
             )
             report_rows = cursor.fetchall()
@@ -490,12 +498,7 @@ def main() -> int:
             print(f"ads.ads_fr2052a_report 无 {args.report_date} 的数据，先跑上游导出")
             return 1
 
-        metrics = [
-            compute_metrics(
-                dict(row), float(thresholds["lcr"]["regulatory_min"])
-            )
-            for row in report_rows
-        ]
+        metrics = [compute_metrics(dict(row), float(thresholds["lcr"]["regulatory_min"])) for row in report_rows]
         write_metrics(connection, metrics)
 
         alerts = metric_alerts(metrics, thresholds)
@@ -515,10 +518,7 @@ def main() -> int:
 
         print(f"\n预警判定：命中 {len(alerts)} 条")
         for row in alerts:
-            print(
-                f"  [{row['severity']:<8}] {row['alert_code']:<14} "
-                f"{row['entity_code']:<7} {row['message']}"
-            )
+            print(f"  [{row['severity']:<8}] {row['alert_code']:<14} {row['entity_code']:<7} {row['message']}")
 
         write_alerts(connection, alerts, args.report_date)
         state, reason = update_breaker(connection, alerts, scope)

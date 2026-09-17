@@ -41,6 +41,7 @@ MIN_INPUT_FILES_FOR_COMPACTION = "5"
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数：默认只演练，加 --apply 才真正动手。"""
     parser = argparse.ArgumentParser(description="Iceberg 表维护")
     parser.add_argument("--apply", action="store_true", help="真正执行；不加只演练")
     parser.add_argument("--namespaces", nargs="*", default=list(NAMESPACES))
@@ -53,6 +54,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def list_tables(spark: SparkSession, namespaces: list[str]) -> list[str]:
+    """列出目标命名空间下的全部表。"""
     tables: list[str] = []
     for namespace in namespaces:
         rows = spark.sql(f"SHOW TABLES IN {namespace}").collect()
@@ -62,9 +64,9 @@ def list_tables(spark: SparkSession, namespaces: list[str]) -> list[str]:
 
 
 def snapshot_summary(spark: SparkSession, table: str) -> tuple[int, str | None, str | None]:
+    """返回快照条数、最早与最新快照时间，作为保留策略的输入。"""
     rows = spark.sql(
-        f"SELECT count(*) AS n, min(committed_at) AS oldest, max(committed_at) AS newest "
-        f"FROM {table}.snapshots"
+        f"SELECT count(*) AS n, min(committed_at) AS oldest, max(committed_at) AS newest FROM {table}.snapshots"
     ).collect()
     if not rows:
         return 0, None, None
@@ -73,14 +75,17 @@ def snapshot_summary(spark: SparkSession, table: str) -> tuple[int, str | None, 
 
 
 def main() -> int:
+    """对 Iceberg 表做快照保留、元数据清理与小文件合并。"""
     args = parse_args()
     spark = SparkSession.builder.appName("fr2052a-maintain-tables").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
 
     mode = "执行" if args.apply else "演练（不改动，加 --apply 才真做）"
     print(f"Iceberg 表维护：{mode}")
-    print(f"保留策略：快照 {RETENTION_DAYS} 天 / 至少 {MIN_SNAPSHOTS_TO_KEEP} 个，"
-          f"元数据最多 {METADATA_PREVIOUS_VERSIONS_MAX} 版\n")
+    print(
+        f"保留策略：快照 {RETENTION_DAYS} 天 / 至少 {MIN_SNAPSHOTS_TO_KEEP} 个，"
+        f"元数据最多 {METADATA_PREVIOUS_VERSIONS_MAX} 版\n"
+    )
 
     tables = list_tables(spark, args.namespaces)
     print(f"待处理 {len(tables)} 张表")

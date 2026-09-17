@@ -38,7 +38,8 @@ EXPECTATIONS: tuple[tuple[str, str, bool], ...] = (
 )
 
 
-def pg_connection():
+def pg_connection() -> psycopg2.extensions.connection:
+    """连接 Server 1 的 PostgreSQL。"""
     return psycopg2.connect(
         host=os.environ["SERVER1_HOST"],
         port=int(os.environ.get("POSTGRES_PORT", "5432")),
@@ -48,7 +49,7 @@ def pg_connection():
     )
 
 
-def try_read(connection, role: str, obj: str) -> tuple[bool, str]:
+def try_read(connection: psycopg2.extensions.connection, role: str, obj: str) -> tuple[bool, str]:
     """以指定角色试读一个对象。返回 (是否读到了, 说明)。"""
     connection.rollback()
     with connection.cursor() as cursor:
@@ -69,6 +70,7 @@ def try_read(connection, role: str, obj: str) -> tuple[bool, str]:
 
 
 def main() -> int:
+    """以每个角色的身份实读三张对象，把结果与预期权限逐条比对。"""
     connection = pg_connection()
     failures: list[str] = []
     try:

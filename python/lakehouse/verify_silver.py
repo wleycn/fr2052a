@@ -43,12 +43,15 @@ TOLERANCE = 0.02
 
 @dataclass
 class CheckResult:
+    """一条核对结论：名称、是否通过、以及给人看的证据。"""
+
     name: str
     passed: bool
     detail: str
 
 
 def check_row_counts(spark: SparkSession) -> list[CheckResult]:
+    """核对 OWD 表与其上游 ODS 表的行数是否一致。"""
     results = []
     for owd_table, ods_table in OWD_TO_ODS.items():
         upstream = spark.table(ods_table).count()
@@ -70,7 +73,9 @@ def check_maturity_buckets(spark: SparkSession) -> list[CheckResult]:
     for owd_table in OWD_TO_ODS:
         if owd_table in TABLES_WITHOUT_MATURITY:
             continue
-        observed = {row["maturity_bucket"] for row in spark.table(owd_table).select("maturity_bucket").distinct().collect()}
+        observed = {
+            row["maturity_bucket"] for row in spark.table(owd_table).select("maturity_bucket").distinct().collect()
+        }
         unknown = observed - defined
         results.append(
             CheckResult(
@@ -117,6 +122,7 @@ def check_fx_conversion(spark: SparkSession) -> list[CheckResult]:
 
 
 def main() -> int:
+    """跑 OWD 层全部核对项：行数、到期分桶、汇率重算。"""
     spark = SparkSession.builder.appName("fr2052a-verify-silver").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
 

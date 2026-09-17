@@ -1,0 +1,32 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+src = ["python", "deploy"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "C4", "DTZ", "G", "BLE", "N", "D", "RUF"]
+ignore = [
+  "D415",   # 首行须以 . ? ! 结尾：只认 ASCII 标点，本项目 docstring 用中文，句末是「。」（234 条命中）
+  "N812",   # 小写名导入成大写名：PySpark 全生态的写法就是 functions as F，改名反而更难读（5 条命中）
+  "RUF001", # 字符串里的歧义字符：中文全角标点被当成歧义（479 条命中）
+  "RUF002", # docstring 里的歧义字符：同上（1065 条命中）
+  "RUF003", # 注释里的歧义字符：同上（245 条命中）
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.11"
+files = ["python", "deploy"]
+disallow_untyped_defs = true
+disallow_any_generics = true
+warn_unused_ignores = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = [
+  "pyspark", "pyspark.*", "psycopg2", "psycopg2.*", "yaml", "sqlglot", "sqlglot.*",
+  "airflow", "airflow.*", "pendulum",
+]
+ignore_missing_imports = true

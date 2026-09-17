@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pendulum
 from airflow import DAG
 from airflow.operators.python import PythonOperator
@@ -20,7 +22,7 @@ REMOTE_DIR = "/home/hermes/fr2052a-infra"
 POSTGRES_CONN_ID = "postgres_default"
 
 
-def check_reconciliation(**context) -> None:
+def check_reconciliation(**context: Any) -> None:
     """读对账表，有 FAIL 行就抛异常让任务失败。"""
     from airflow.providers.postgres.hooks.postgres import PostgresHook
 
@@ -37,8 +39,10 @@ def check_reconciliation(**context) -> None:
 
     failures = [row for row in rows if row[5] != "PASS"]
     for section, accounts, gl_amount, report_amount, variance, status in rows:
-        print(f"  [{status}] Section {section:<3} 科目 {accounts:<12} 总账 {gl_amount:>18,.2f} "
-              f"报送 {report_amount:>18,.2f} 差异 {variance:>14,.2f}")
+        print(
+            f"  [{status}] Section {section:<3} 科目 {accounts:<12} 总账 {gl_amount:>18,.2f} "
+            f"报送 {report_amount:>18,.2f} 差异 {variance:>14,.2f}"
+        )
 
     print()
     if failures:

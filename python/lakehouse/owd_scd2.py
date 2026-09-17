@@ -89,6 +89,7 @@ TABLE_PROPERTIES = (
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数：处理日决定版本区间，缺省用今天。"""
     parser = argparse.ArgumentParser(description="OWD 层 SCD2 版本化")
     parser.add_argument("--report-date", required=True, help="报告日，作为版本生效日")
     parser.add_argument(
@@ -107,6 +108,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def history_table(table: str) -> str:
+    """返回某张 OWD 表对应的版本历史表名。"""
     return f"silver.{table}_history"
 
 
@@ -155,9 +157,7 @@ def migrate_legacy_columns(spark: SparkSession, history: str) -> None:
             spark.sql(f"ALTER TABLE {history} RENAME COLUMN {old_name} TO {new_name}")
     if any(old in existing for old, _ in renames):
         # 哨兵值换成空值：只有当前有效版本带哨兵值，其余版本本来就有真实失效日
-        spark.sql(
-            f"UPDATE {history} SET end_date = NULL WHERE is_active AND end_date IS NOT NULL"
-        )
+        spark.sql(f"UPDATE {history} SET end_date = NULL WHERE is_active AND end_date IS NOT NULL")
 
 
 def table_columns(spark: SparkSession, table: str) -> tuple[str, ...]:
@@ -204,10 +204,7 @@ def version_table(spark: SparkSession, table: str, args: argparse.Namespace) -> 
 
     business = ", ".join(columns)
     incoming = f"SELECT {business}, {hash_expression(hashed)} AS row_hash FROM silver.{table}"
-    active = (
-        f"SELECT {', '.join(list(columns) + list(VERSION_COLUMNS))} "
-        f"FROM {history} WHERE is_active"
-    )
+    active = f"SELECT {', '.join(list(columns) + list(VERSION_COLUMNS))} FROM {history} WHERE is_active"
     match_ai = " AND ".join(f"a.{name} = i.{name}" for name in KEY_COLUMNS)
     match_ia = " AND ".join(f"i.{name} = a.{name}" for name in KEY_COLUMNS)
     key0 = KEY_COLUMNS[0]
@@ -237,7 +234,7 @@ def version_table(spark: SparkSession, table: str, args: argparse.Namespace) -> 
 
     spark.sql(
         f"""
-        INSERT OVERWRITE {history} ({', '.join(history_columns)})
+        INSERT OVERWRITE {history} ({", ".join(history_columns)})
         WITH incoming AS ({incoming}),
         active AS ({active}),
         -- 需要关闭的当前版本：内容变了，或来源里已经没有了
@@ -251,7 +248,7 @@ def version_table(spark: SparkSession, table: str, args: argparse.Namespace) -> 
         ),
         snapshot AS (
             -- 一、已失效的历史版本：原样保留，历史不可改
-            SELECT {', '.join(history_columns)} FROM {history} WHERE NOT is_active
+            SELECT {", ".join(history_columns)} FROM {history} WHERE NOT is_active
             UNION ALL
             -- 二、未受影响的当前版本：原样保留（键仍在、内容未变）
             SELECT {business_a}, a.begin_date, a.end_date, a.is_active,
@@ -274,7 +271,8 @@ def version_table(spark: SparkSession, table: str, args: argparse.Namespace) -> 
             JOIN expiring e ON {match_ga}
             UNION ALL
             -- 四、新版本：新键与已变更键
-            SELECT {business_i}, date '{effective_date}' AS begin_date, CAST(NULL AS DATE) AS end_date, true AS is_active,
+            SELECT {business_i}, date '{effective_date}' AS begin_date,
+                   CAST(NULL AS DATE) AS end_date, true AS is_active,
                    CASE WHEN a.record_version IS NULL THEN 'ORIGINAL' ELSE '{args.reason}' END AS last_modified_reason,
                    coalesce(a.record_version, 0) + 1 AS record_version, i.row_hash
             FROM incoming i
@@ -296,13 +294,12 @@ def version_table(spark: SparkSession, table: str, args: argparse.Namespace) -> 
         f"SELECT count(*) AS n FROM {history} WHERE end_date IS NOT NULL AND end_date < begin_date"
     ).first()["n"]
     if reversed_rows:
-        raise ValueError(
-            f"{history} 有 {reversed_rows} 行「失效日早于生效日」，版本区间被算反了，先修数据再继续"
-        )
+        raise ValueError(f"{history} 有 {reversed_rows} 行「失效日早于生效日」，版本区间被算反了，先修数据再继续")
     return counts
 
 
 def main() -> int:
+    """对 7 张 OWD 表逐个做 SCD2 版本化，写完后自检区间不变式。"""
     args = parse_args()
     spark = SparkSession.builder.appName("fr2052a-owd-scd2").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")

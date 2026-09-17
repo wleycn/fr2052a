@@ -22,6 +22,7 @@ EXPECTED_ROWS = 3
 
 
 def main() -> int:
+    """E3 阶段的一次性连通性探针：确认 Spark 能读写 Iceberg 与 MinIO。"""
     spark = SparkSession.builder.appName("fr2052a-e3-smoke").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
 
@@ -31,9 +32,7 @@ def main() -> int:
     print(f"[1/3] 命名空间: {found}")
 
     spark.sql(f"DROP TABLE IF EXISTS {TABLE}")
-    spark.sql(
-        f"CREATE TABLE {TABLE} (id INT, payload STRING, loaded_at TIMESTAMP) USING iceberg"
-    )
+    spark.sql(f"CREATE TABLE {TABLE} (id INT, payload STRING, loaded_at TIMESTAMP) USING iceberg")
     spark.sql(
         f"INSERT INTO {TABLE} VALUES "
         "(1, 'alpha', current_timestamp()), "

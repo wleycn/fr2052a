@@ -28,18 +28,34 @@
 
 ### 依赖管理
 
-```bash
-# 使用 venv，不用系统 Python
-python3 -m venv ~/fr2052a_venv
-source ~/fr2052a_venv/bin/activate
-pip install -r requirements.txt
-```
+- 虚拟环境在 Server 2 的 `~/fr2052a-infra/venv`，由 `deploy/server2/setup-venv.sh` 用 uv 创建，Python 3.11。
+  为什么是 3.11：dbt-spark 与 PySpark 3.5.9 的官方支持区间到 3.11，理由写在那个脚本的头部注释里。
+- 依赖在那个脚本里声明，本项目不维护 `requirements.txt`：环境只有一个，两处声明必然漂移。
+- Spark 侧第三方 jar 由 `deploy/server2/fetch-deps.sh` 下载并校验，不进版本库。
 
 ### 代码风格
 
-- 使用 ruff 格式化（config 见项目根）
-- 类型注解必须添加
-- docstring 必须添加（Google 风格）
+三条都由机器闸强制，配置只此一份（项目根 `pyproject.toml`），跑 `make lint` 即全部生效。
+
+| 要求 | 由谁强制 | 现状 |
+|------|----------|------|
+| ruff 检查与格式化 | `ruff check` 与 `ruff format --check` | 39 个 Python 文件零告警、格式已统一 |
+| 类型注解必须添加 | `mypy`，开了「禁未注解函数」与「禁裸泛型」 | 39 个文件零错误 |
+| docstring 必须添加（Google 风格） | `ruff` 的 `D` 规则，`pydocstyle` 走 google 约定 | 全仓零告警 |
+
+被排除的规则与理由都写在 `pyproject.toml` 里，改口径只能改那一处：
+
+| 规则 | 命中 | 排除理由 |
+|------|------|----------|
+| `D415` | 234 | 只认 `.` `?` `!` 结尾。本项目 docstring 用中文，句末是「。」，规则表达不了 |
+| `N812` | 5 | 禁止 `import functions as F`，而这是 PySpark 全生态的写法 |
+| `RUF001` | 479 | 把字符串里的中文全角标点判成「歧义字符」 |
+| `RUF002` | 1065 | 同 `RUF001`，对象是 docstring |
+| `RUF003` | 245 | 同 `RUF001`，对象是注释 |
+
+只排除有命中的规则：`D401` 与 `D202` 在本仓当前 0 命中，就不列进排除表，留着它们继续管事。
+
+提交闸：执行一次 `git config core.hooksPath .githooks` 后，`.githooks/pre-commit` 会在每次提交前跑 `make lint`，不过就拦下提交。
 
 ### 示例
 

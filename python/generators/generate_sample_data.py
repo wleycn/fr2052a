@@ -27,15 +27,16 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     __package__ = "generators"
 
-from .config import (  # noqa: E402
+from . import ods_data
+from .config import (
     DEFAULT_OUTPUT_DIR,
     ODS_SUBDIR,
     REF_SUBDIR,
     REPORT_DATE,
     VOLUMES,
 )
-from .ref_data import ReferenceData, generate_all as generate_ref  # noqa: E402
-from . import ods_data  # noqa: E402
+from .ref_data import ReferenceData
+from .ref_data import generate_all as generate_ref
 
 # 各表参与外键校验的交易对手类字段
 COUNTERPARTY_FIELDS: dict[str, tuple[str, ...]] = {
@@ -79,11 +80,13 @@ class CheckResult:
 
 
 def read_csv_rows(path: Path) -> list[dict[str, str]]:
+    """读一张样本 CSV，按表头取成字典行。"""
     with path.open(newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))
 
 
 def check_row_counts(output_dir: Path) -> list[CheckResult]:
+    """核对每张表的行数与设定值是否一致。"""
     results = []
     for table_name, expected in {**EXPECTED_REF_ROWS, **VOLUMES}.items():
         subdir = REF_SUBDIR if table_name.startswith("ref_") else ODS_SUBDIR
@@ -100,6 +103,7 @@ def check_row_counts(output_dir: Path) -> list[CheckResult]:
 
 
 def check_report_date(output_dir: Path) -> list[CheckResult]:
+    """核对每行的报告日都等于约定的报告日。"""
     results = []
     expected = REPORT_DATE.isoformat()
     for table_name in VOLUMES:
@@ -116,6 +120,7 @@ def check_report_date(output_dir: Path) -> list[CheckResult]:
 
 
 def check_references(output_dir: Path, ref: ReferenceData) -> list[CheckResult]:
+    """核对交易对手、币种等字段都能在 ref 层找到。"""
     results: list[CheckResult] = []
     entity_set = set(ref.entity_codes)
     currency_set = set(ref.currencies)
@@ -137,10 +142,18 @@ def check_references(output_dir: Path, ref: ReferenceData) -> list[CheckResult]:
                     counterparty_offenders.append(row["source_record_id"])
 
     results.append(
-        CheckResult("实体引用", not entity_offenders, f"悬空 {len(entity_offenders)} 条" if entity_offenders else "全部命中 REF")
+        CheckResult(
+            "实体引用",
+            not entity_offenders,
+            f"悬空 {len(entity_offenders)} 条" if entity_offenders else "全部命中 REF",
+        )
     )
     results.append(
-        CheckResult("币种引用", not currency_offenders, f"悬空 {len(currency_offenders)} 条" if currency_offenders else "全部命中 REF 汇率表")
+        CheckResult(
+            "币种引用",
+            not currency_offenders,
+            f"悬空 {len(currency_offenders)} 条" if currency_offenders else "全部命中 REF 汇率表",
+        )
     )
     results.append(
         CheckResult(
@@ -153,6 +166,7 @@ def check_references(output_dir: Path, ref: ReferenceData) -> list[CheckResult]:
 
 
 def check_date_ordering(output_dir: Path) -> list[CheckResult]:
+    """核对日期先后：业务日期不晚于报告日，到期日不早于起始日。"""
     results = []
     for table_name, rules in DATE_RULES.items():
         rows = read_csv_rows(output_dir / ODS_SUBDIR / f"{table_name}.csv")
@@ -163,9 +177,9 @@ def check_date_ordering(output_dir: Path) -> list[CheckResult]:
                 if not raw:
                     continue  # 活期存款等无到期日，允许为空
                 value = date.fromisoformat(raw)
-                if rule == "le" and value > REPORT_DATE:
-                    bad.append(f"{row['source_record_id']}.{field}={raw}")
-                elif rule == "gt" and value <= REPORT_DATE:
+                too_late = rule == "le" and value > REPORT_DATE
+                too_early = rule == "gt" and value <= REPORT_DATE
+                if too_late or too_early:
                     bad.append(f"{row['source_record_id']}.{field}={raw}")
         results.append(
             CheckResult(
@@ -178,6 +192,7 @@ def check_date_ordering(output_dir: Path) -> list[CheckResult]:
 
 
 def check_gl_balanced(output_dir: Path) -> CheckResult:
+    """核对总账借贷平衡：借方合计等于贷方合计。"""
     rows = read_csv_rows(output_dir / ODS_SUBDIR / "ods_gl_balances.csv")
     debit_total = sum(float(row["debit_balance"]) for row in rows)
     credit_total = sum(float(row["credit_balance"]) for row in rows)
@@ -207,7 +222,12 @@ def check_amount_signs(output_dir: Path) -> list[CheckResult]:
     results = []
     for table_name, fields in sign_fields.items():
         rows = read_csv_rows(output_dir / ODS_SUBDIR / f"{table_name}.csv")
-        bad = [f"{row['source_record_id']}.{field}={row[field]}" for row in rows for field in fields if float(row[field]) < 0]
+        bad = [
+            f"{row['source_record_id']}.{field}={row[field]}"
+            for row in rows
+            for field in fields
+            if float(row[field]) < 0
+        ]
         results.append(
             CheckResult(
                 name=f"金额非负 {table_name}",
@@ -219,6 +239,7 @@ def check_amount_signs(output_dir: Path) -> list[CheckResult]:
 
 
 def run_checks(output_dir: Path, ref: ReferenceData) -> list[CheckResult]:
+    """跑完全部自检项，返回结论清单。"""
     results: list[CheckResult] = []
     results.extend(check_row_counts(output_dir))
     results.extend(check_report_date(output_dir))
@@ -230,6 +251,7 @@ def run_checks(output_dir: Path, ref: ReferenceData) -> list[CheckResult]:
 
 
 def print_report(results: Iterable[CheckResult]) -> bool:
+    """打印自检结论，并返回是否全部通过。"""
     all_passed = True
     for result in results:
         mark = "PASS" if result.passed else "FAIL"
@@ -239,6 +261,7 @@ def print_report(results: Iterable[CheckResult]) -> bool:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """解析命令行参数。"""
     parser = argparse.ArgumentParser(description="生成 FR 2052a 演示数据（REF + ODS）")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUTPUT_DIR, help="输出根目录，默认 sample_data/")
     parser.add_argument(
@@ -268,6 +291,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """生成 ref 与 ODS 两套 CSV，随后自检；不通过则以退出码 1 结束。"""
     args = parse_args(argv)
     ref_dir = args.out / REF_SUBDIR
     ods_dir = args.out / ODS_SUBDIR
@@ -288,9 +312,7 @@ def main(argv: list[str] | None = None) -> int:
         ref,
         args.gl_break_amount,
         correction=(
-            None
-            if args.correct_deposit_record is None
-            else (args.correct_deposit_record, args.correct_deposit_amount)
+            None if args.correct_deposit_record is None else (args.correct_deposit_record, args.correct_deposit_amount)
         ),
     )
     for table_name, count in ods_counts.items():

@@ -1,4 +1,4 @@
-"""核对数据湖表结构与生成器产出的 CSV 表头是否逐列一致。
+r"""核对数据湖表结构与生成器产出的 CSV 表头是否逐列一致。
 
 这是一道防漂移的机器闸。CSV 是数据的源头，表结构必须与它对齐；一旦错位，
 入湖时会静默丢列或串列，而且不会报错。
@@ -8,8 +8,8 @@
   2. 表里多出来的列只允许是 loader 侧补齐的列（白名单）。
 
 用法（Server 2，经 spark-submit 包装脚本执行）：
-    bash spark-submit-fr2052a.sh \\
-        /opt/fr2052a-app/python/lakehouse/verify_ods_schema.py \\
+    bash spark-submit-fr2052a.sh \
+        /opt/fr2052a-app/python/lakehouse/verify_ods_schema.py \
         /opt/fr2052a-app/sample_data
 """
 
@@ -32,6 +32,7 @@ LAYOUT = (("ref", "ref"), ("bronze", "ods"))
 
 
 def read_csv_header(path: Path) -> list[str]:
+    """读出 CSV 表头，作为表结构比对的基准。"""
     with path.open(newline="", encoding="utf-8") as handle:
         return next(csv.reader(handle))
 
@@ -58,6 +59,7 @@ def verify_table(spark: SparkSession, namespace: str, table: str, csv_path: Path
 
 
 def main(argv: list[str]) -> int:
+    """把湖表的列名与列序跟生成器产出的 CSV 表头逐列比对。"""
     data_root = Path(argv[1]) if len(argv) > 1 else Path("/opt/fr2052a-app/sample_data")
     if not data_root.is_dir():
         print(f"样本数据目录不存在: {data_root}", file=sys.stderr)

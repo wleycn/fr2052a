@@ -37,12 +37,14 @@ import os
 import sys
 from datetime import date
 from decimal import Decimal
+from typing import Any
 
 import psycopg2
 import psycopg2.extras
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数：capture 与 register 两种模式。"""
     parser = argparse.ArgumentParser(description="重述登记")
     parser.add_argument("--mode", required=True, choices=("capture", "register"))
     parser.add_argument("--report-date", required=True, help="报告日，格式 YYYY-MM-DD")
@@ -54,7 +56,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def pg_connection():
+def pg_connection() -> psycopg2.extensions.connection:
+    """连接 Server 1 的 PostgreSQL，报表与控制表都在那一侧。"""
     return psycopg2.connect(
         host=os.environ["SERVER1_HOST"],
         port=int(os.environ.get("POSTGRES_PORT", "5432")),
@@ -64,7 +67,7 @@ def pg_connection():
     )
 
 
-def json_default(value):
+def json_default(value: object) -> float | str:
     """JSONB 不接受 Decimal 与 date，转成字符串/浮点。"""
     if isinstance(value, Decimal):
         return float(value)
@@ -73,7 +76,8 @@ def json_default(value):
     raise TypeError(f"无法序列化的类型：{type(value).__name__}")
 
 
-def fetch_report_row(cursor, report_date: str, entity_code: str) -> dict | None:
+def fetch_report_row(cursor: psycopg2.extensions.cursor, report_date: str, entity_code: str) -> dict[str, Any] | None:
+    """取某实体某报告日的当前报表行，作为重述前的留痕快照。"""
     cursor.execute(
         """
         SELECT *, md5(row_to_json(t)::text) AS snapshot_hash
@@ -86,7 +90,7 @@ def fetch_report_row(cursor, report_date: str, entity_code: str) -> dict | None:
     return None if row is None else dict(row)
 
 
-def capture(connection, args: argparse.Namespace) -> int:
+def capture(connection: psycopg2.extensions.connection, args: argparse.Namespace) -> int:
     """把当前生效的报表存进版本历史（若尚未登记过）。"""
     with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
         report = fetch_report_row(cursor, args.report_date, args.entity_code)
@@ -110,9 +114,7 @@ def capture(connection, args: argparse.Namespace) -> int:
 
     if existing is not None:
         if existing["snapshot_hash"] == snapshot_hash:
-            print(
-                f"{report_id} 当前版本已登记且内容一致（v{existing['record_version']}），无需重复登记。"
-            )
+            print(f"{report_id} 当前版本已登记且内容一致（v{existing['record_version']}），无需重复登记。")
             return 0
         # 内容变了但没走重述流程 —— 说明有人直接改了数据。留痕并继续登记新版本，
         # 不能静默覆盖，否则版本历史会说谎。
@@ -165,7 +167,7 @@ def capture(connection, args: argparse.Namespace) -> int:
     return 0
 
 
-def register(connection, args: argparse.Namespace) -> int:
+def register(connection: psycopg2.extensions.connection, args: argparse.Namespace) -> int:
     """重跑完成后：关闭旧版本、写入新版本、登记重述记录。"""
     with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
         report = fetch_report_row(cursor, args.report_date, args.entity_code)
@@ -252,6 +254,7 @@ def register(connection, args: argparse.Namespace) -> int:
 
 
 def main() -> int:
+    """重述入口：capture 留痕，register 登记新版本。"""
     args = parse_args()
     connection = pg_connection()
     try:

@@ -49,8 +49,7 @@ with DAG(
         ssh_conn_id=SSH_CONN_ID,
         cmd_timeout=SSH_TIMEOUT_SECONDS,
         command=(
-            f"cd {REMOTE_DIR} && REPORT_DATE={{{{ params.report_date }}}} "
-            "bash run-daily-pipeline.sh realtime-scan"
+            f"cd {REMOTE_DIR} && REPORT_DATE={{{{ params.report_date }}}} bash run-daily-pipeline.sh realtime-scan"
         ),
         doc_md="扫描大额未保险存款敞口，写事件表并投递告警主题",
     )
@@ -60,8 +59,7 @@ with DAG(
         ssh_conn_id=SSH_CONN_ID,
         cmd_timeout=SSH_TIMEOUT_SECONDS,
         command=(
-            f"cd {REMOTE_DIR} && REPORT_DATE={{{{ params.report_date }}}} "
-            "bash run-daily-pipeline.sh realtime-summary"
+            f"cd {REMOTE_DIR} && REPORT_DATE={{{{ params.report_date }}}} bash run-daily-pipeline.sh realtime-summary"
         ),
         doc_md="汇总事件表，供人快速判断本轮有没有异常",
     )

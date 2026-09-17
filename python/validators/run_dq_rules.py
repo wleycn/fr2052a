@@ -1,4 +1,4 @@
-"""数据质量引擎：把 ref 层声明的校验规则逐条执行，结果落审计表。
+r"""数据质量引擎：把 ref 层声明的校验规则逐条执行，结果落审计表。
 
 规则不写在代码里，而是从 `ref.ref_validation_rules` 读 —— 那是规则的唯一定义处。
 本引擎只负责"把规则应用到具体表上并统计违规数"，应用范围（哪条规则管哪张表）
@@ -15,7 +15,7 @@
 本脚本跑在 Spark 里，JDBC 能读表、能整表覆盖写，但不能按条件删行。
 
 用法（Server 2，经 spark-submit 包装脚本执行）：
-    bash spark-submit-fr2052a.sh \\
+    bash spark-submit-fr2052a.sh \
         /opt/fr2052a-app/python/validators/run_dq_rules.py --batch-id BATCH-20260916-001
 """
 
@@ -88,6 +88,8 @@ CROSS_TABLE_RULES: dict[str, str] = {
 
 @dataclass
 class RuleResult:
+    """一条规则的执行结果：规则号、结论与涉及条数。"""
+
     rule_id: str
     description: str
     category: str
@@ -115,7 +117,7 @@ def evaluate_rule(
     for table in targets:
         try:
             violations = spark.sql(f"select count(*) as c from {table} where not ({expression})").collect()[0]["c"]
-        except Exception as error:  # noqa: BLE001 - 只吞"列不存在"，其余错误照常抛出
+        except Exception as error:
             message = str(error)
             if "UNRESOLVED_COLUMN" in message or "cannot be resolved" in message:
                 continue
@@ -128,12 +130,14 @@ def evaluate_rule(
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    """解析命令行参数。"""
     parser = argparse.ArgumentParser(description="执行 FR 2052a 数据质量规则")
     parser.add_argument("--batch-id", default="UNKNOWN", help="批次号，写入审计表用于追溯")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str]) -> int:
+    """逐条执行 ref 层声明的校验规则，结果落审计表。"""
     args = parse_args(argv[1:])
     spark = SparkSession.builder.appName("fr2052a-dq-rules").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
@@ -152,7 +156,9 @@ def main(argv: list[str]) -> int:
             details = [f"{table} 无数据" for table in empty]
             passed = violations == 0
         elif rule_id in RULE_TARGETS:
-            violations, details, evaluated = evaluate_rule(spark, rule_id, rule["sql_expression"], RULE_TARGETS[rule_id])
+            violations, details, evaluated = evaluate_rule(
+                spark, rule_id, rule["sql_expression"], RULE_TARGETS[rule_id]
+            )
             if evaluated == 0:
                 # 规则引用的列在所有目标表里都不存在 → 这条规则对本层不适用
                 results.append(
@@ -239,8 +245,7 @@ def main(argv: list[str]) -> int:
     skipped = [result for result in results if result.check_result == "SKIPPED"]
 
     print()
-    print(f"规则执行：PASS {len(results) - len(failures) - len(skipped)}，FAIL {len(failures)}，"
-          f"SKIPPED {len(skipped)}")
+    print(f"规则执行：PASS {len(results) - len(failures) - len(skipped)}，FAIL {len(failures)}，SKIPPED {len(skipped)}")
     print(f"审计表 {LOG_TABLE} 现有 {written} 行（批次 {args.batch_id} 已追加）")
 
     if errors:

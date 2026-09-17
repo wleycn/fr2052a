@@ -36,23 +36,21 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import psycopg2
 
 try:
-    import sqlglot
     from sqlglot.lineage import lineage
 except ImportError as error:  # pragma: no cover - 环境缺依赖时的显式失败
-    print(
-        "缺少 sqlglot，无法渲染字段级血缘。它随 dbt 一起安装，"
-        f"请确认 venv 完整（{error}）"
-    )
+    print(f"缺少 sqlglot，无法渲染字段级血缘。它随 dbt 一起安装，请确认 venv 完整（{error}）")
     raise SystemExit(3) from error
 
 DIALECT = "spark"
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数。"""
     parser = argparse.ArgumentParser(description="血缘与监管映射渲染")
     parser.add_argument("--manifest", required=True, help="dbt manifest.json 路径")
     parser.add_argument("--output-dir", required=True, help="报告输出目录")
@@ -67,15 +65,17 @@ def normalize_relation(name: str) -> str:
     return name.replace("`", "").replace('"', "")
 
 
-def load_manifest(path: Path) -> dict:
+def load_manifest(path: Path) -> dict[str, Any]:
+    """读 dbt 的 manifest.json，血缘的原始依据。"""
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def relation_of(node: dict) -> str:
+def relation_of(node: dict[str, Any]) -> str:
+    """取节点的物理关系名并归一化，供报告展示。"""
     return normalize_relation(node.get("relation_name") or "")
 
 
-def build_sources(manifest: dict) -> dict[str, str]:
+def build_sources(manifest: dict[str, Any]) -> dict[str, str]:
     """把每个模型/源表的编译后 SQL 作为 sources，供 sqlglot 递归下钻。
 
     键用 dbt 编译后实际出现的名字（relation_name），因为 compiled_code 里 ref() 已经
@@ -96,11 +96,11 @@ def build_sources(manifest: dict) -> dict[str, str]:
     return sources
 
 
-def model_edges(manifest: dict) -> list[tuple[str, str, str]]:
+def model_edges(manifest: dict[str, Any]) -> list[tuple[str, str, str]]:
     """表级血缘边：(上游, 下游, 转换类型)。"""
     edges: list[tuple[str, str, str]] = []
     nodes = {**manifest.get("nodes", {}), **manifest.get("sources", {})}
-    for node_id, node in nodes.items():
+    for _node_id, node in nodes.items():
         if node.get("resource_type") != "model":
             continue
         target = node.get("name", "")
@@ -114,9 +114,7 @@ def model_edges(manifest: dict) -> list[tuple[str, str, str]]:
     return sorted(set(edges))
 
 
-def column_lineage(
-    manifest: dict, sources: dict[str, str], model_name: str, column: str
-) -> list[str]:
+def column_lineage(manifest: dict[str, Any], sources: dict[str, str], model_name: str, column: str) -> list[str]:
     """把一个输出列追到最上游，返回命中的上游对象列表（去重、截断）。"""
     node = next(
         (item for item in manifest.get("nodes", {}).values() if item.get("name") == model_name),
@@ -150,9 +148,9 @@ def column_lineage(
     return sorted(set(leaves))
 
 
-def regulatory_mapping(manifest: dict) -> list[dict]:
+def regulatory_mapping(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     """列级 meta：监管规则号、页码、折扣率、责任人。"""
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     for node in manifest.get("nodes", {}).values():
         if node.get("resource_type") != "model":
             continue
@@ -174,6 +172,7 @@ def regulatory_mapping(manifest: dict) -> list[dict]:
 
 
 def write_audit(edges: list[tuple[str, str, str]], args: argparse.Namespace) -> int:
+    """把血缘边写进审计表。"""
     if args.no_audit:
         print("按参数要求跳过血缘表写入")
         return 0
@@ -206,7 +205,14 @@ def write_audit(edges: list[tuple[str, str, str]], args: argparse.Namespace) -> 
     return count
 
 
-def render_report(manifest: dict, edges, mapping_rows, sources, output_dir: Path) -> Path:
+def render_report(
+    manifest: dict[str, Any],
+    edges: list[tuple[str, str, str]],
+    mapping_rows: list[dict[str, Any]],
+    sources: dict[str, str],
+    output_dir: Path,
+) -> Path:
+    """渲染血缘与监管映射报告。"""
     lines: list[str] = []
     lines.append("# 血缘与监管映射（由 dbt manifest 渲染）")
     lines.append("")
@@ -260,6 +266,7 @@ def render_report(manifest: dict, edges, mapping_rows, sources, output_dir: Path
 
 
 def main() -> int:
+    """血缘渲染入口：读 manifest，抽边与映射，写表并出报告。"""
     args = parse_args()
     manifest_path = Path(args.manifest).expanduser()
     if not manifest_path.is_file():
@@ -273,9 +280,7 @@ def main() -> int:
     edges = model_edges(manifest)
     mapping_rows = regulatory_mapping(manifest)
 
-    report_path = render_report(
-        manifest, edges, mapping_rows, sources, Path(args.output_dir).expanduser()
-    )
+    report_path = render_report(manifest, edges, mapping_rows, sources, Path(args.output_dir).expanduser())
     written = write_audit(edges, args)
 
     print(f"表级血缘边：{len(edges)} 条")

@@ -24,6 +24,7 @@ import hashlib
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import psycopg2
 import psycopg2.extras
@@ -32,12 +33,14 @@ EXPECTED_FORMATS = ("XBRL", "XML", "CSV")
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数。"""
     parser = argparse.ArgumentParser(description="报送文件完整性核对")
     parser.add_argument("--report-date", required=True, help="报告日，格式 YYYY-MM-DD")
     return parser.parse_args()
 
 
-def pg_connection():
+def pg_connection() -> psycopg2.extensions.connection:
+    """连接 Server 1 的 PostgreSQL。"""
     return psycopg2.connect(
         host=os.environ["SERVER1_HOST"],
         port=int(os.environ.get("POSTGRES_PORT", "5432")),
@@ -48,6 +51,7 @@ def pg_connection():
 
 
 def sha256_of(path: Path) -> str:
+    """算文件摘要，用于与台账里的记录比对。"""
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(65536), b""):
@@ -56,6 +60,7 @@ def sha256_of(path: Path) -> str:
 
 
 def main() -> int:
+    """核对报送文件：格式齐全、摘要一致、实体不重复、报告日对得上。"""
     args = parse_args()
     connection = pg_connection()
     try:
@@ -78,7 +83,7 @@ def main() -> int:
         print(f"[FAIL] {args.report_date} 没有任何报送记录，先跑 submission 环节")
         return 1
 
-    by_report: dict[str, list[dict]] = {}
+    by_report: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         by_report.setdefault(row["report_id"], []).append(row)
 

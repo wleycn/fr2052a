@@ -40,6 +40,7 @@ import sys
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 from xml.etree import ElementTree as ET
 
 import psycopg2
@@ -53,6 +54,7 @@ FILE_FORMATS = ("XBRL", "XML", "CSV")
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数。"""
     parser = argparse.ArgumentParser(description="报送文件生成")
     parser.add_argument("--report-date", required=True, help="报告日，格式 YYYY-MM-DD")
     parser.add_argument(
@@ -68,7 +70,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def pg_connection():
+def pg_connection() -> psycopg2.extensions.connection:
+    """连接 Server 1 的 PostgreSQL。"""
     return psycopg2.connect(
         host=os.environ["SERVER1_HOST"],
         port=int(os.environ.get("POSTGRES_PORT", "5432")),
@@ -78,7 +81,7 @@ def pg_connection():
     )
 
 
-def report_columns(cursor) -> list[str]:
+def report_columns(cursor: psycopg2.extensions.cursor) -> list[str]:
     """报表的列清单取自库本身，不写死在代码里 —— 报表加列时不必改这里。
 
     调用方传的是 RealDictCursor，所以按列名取值，不能用 row[0]。
@@ -93,7 +96,8 @@ def report_columns(cursor) -> list[str]:
     return [row["column_name"] for row in cursor.fetchall()]
 
 
-def fetch_report_rows(cursor, report_date: str) -> list[dict]:
+def fetch_report_rows(cursor: psycopg2.extensions.cursor, report_date: str) -> list[dict[str, Any]]:
+    """取某报告日全部实体的报表行，一个实体一套文件。"""
     with cursor:
         cursor.execute(
             "SELECT * FROM ads.ads_fr2052a_report WHERE report_date = %s ORDER BY entity_code",
@@ -102,25 +106,29 @@ def fetch_report_rows(cursor, report_date: str) -> list[dict]:
         return [dict(row) for row in cursor.fetchall()]
 
 
-def to_amount(value) -> str:
+def to_amount(value: Any) -> str:
     """金额统一两位小数。None 表示「本演示无此业务」，导出成空而不是 0。"""
     if value is None:
         return ""
     return f"{Decimal(value):.2f}"
 
 
-def write_csv_file(path: Path, columns: list[str], rows: list[dict]) -> None:
+def write_csv_file(path: Path, columns: list[str], rows: list[dict[str, Any]]) -> None:
+    """按给定列序写出 CSV。"""
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(columns)
         for row in rows:
             writer.writerow(
-                [to_amount(row[name]) if isinstance(row[name], (int, float, Decimal)) else (row[name] or "")
-                 for name in columns]
+                [
+                    to_amount(row[name]) if isinstance(row[name], (int, float, Decimal)) else (row[name] or "")
+                    for name in columns
+                ]
             )
 
 
-def write_xml_file(path: Path, report_date: str, columns: list[str], rows: list[dict]) -> None:
+def write_xml_file(path: Path, report_date: str, columns: list[str], rows: list[dict[str, Any]]) -> None:
+    """写出 XML 格式的报送文件。"""
     root = ET.Element("FR2052aReport", {"reportDate": report_date, "reportingCurrency": "USD"})
     for row in rows:
         entity = ET.SubElement(
@@ -145,7 +153,7 @@ def write_xml_file(path: Path, report_date: str, columns: list[str], rows: list[
     ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
 
 
-def write_xbrl_file(path: Path, report_date: str, rows: list[dict]) -> None:
+def write_xbrl_file(path: Path, report_date: str, rows: list[dict[str, Any]]) -> None:
     """生成 XBRL 2.1 实例文档。
 
     结构遵循 XBRL 2.1：每个实体一个 context（期间为报告日），金额事实带 unitRef 指向 USD。
@@ -160,7 +168,7 @@ def write_xbrl_file(path: Path, report_date: str, rows: list[dict]) -> None:
     unit = ET.SubElement(root, f"{{{XBRL_NAMESPACE}}}unit", {"id": "usd"})
     ET.SubElement(unit, f"{{{XBRL_NAMESPACE}}}measure").text = f"{{{ISO4217_NAMESPACE}}}USD"
 
-    contexts: list[tuple[str, dict]] = []
+    contexts: list[tuple[str, dict[str, Any]]] = []
     for row in rows:
         # context 用 report_id 命名：一个报送主体一个 context，
         # 名字里带上报表身份，读 XBRL 的人不必回头查 entity_code 对应哪份报表。
@@ -202,6 +210,7 @@ def write_xbrl_file(path: Path, report_date: str, rows: list[dict]) -> None:
 
 
 def sha256_of(path: Path) -> str:
+    """算文件摘要，作为台账里可比对的指纹。"""
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(65536), b""):
@@ -209,7 +218,7 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
-def simulated_receipt(report_id: str, file_hash: str) -> dict:
+def simulated_receipt(report_id: str, file_hash: str) -> dict[str, Any]:
     """演示环境的模拟回执，一个报送主体一份。
 
     真实环境这里应接监管网关并以它返回的回执为准：回执号由监管系统编，
@@ -224,7 +233,8 @@ def simulated_receipt(report_id: str, file_hash: str) -> dict:
     }
 
 
-def upsert_submission(cursor, rows: list[dict]) -> None:
+def upsert_submission(cursor: psycopg2.extensions.cursor, rows: list[dict[str, Any]]) -> None:
+    """把报送台账按报告日、实体、格式、摘要四个字段幂等写入。"""
     for row in rows:
         cursor.execute(
             """
@@ -258,6 +268,7 @@ def upsert_submission(cursor, rows: list[dict]) -> None:
 
 
 def main() -> int:
+    """为每个实体各生成三种格式的报送文件，并把台账登记落库。"""
     args = parse_args()
     output_dir = Path(args.output_dir) / args.report_date
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -278,9 +289,9 @@ def main() -> int:
             external_receipt = json.loads(Path(args.receipt_file).read_text(encoding="utf-8"))
 
         submitted_at = datetime.now(UTC).replace(tzinfo=None)
-        submission_rows: list[dict] = []
+        submission_rows: list[dict[str, Any]] = []
         written: list[tuple[str, str, Path]] = []
-        receipts: list[tuple[str, dict]] = []
+        receipts: list[tuple[str, dict[str, Any]]] = []
 
         for row in rows:
             report_id = row["report_id"]

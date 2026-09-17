@@ -39,12 +39,14 @@ DEFAULT_SQL_DIR = "/opt/fr2052a-app/sql/postgres"
 
 
 def parse_args() -> argparse.Namespace:
+    """解析命令行参数。"""
     parser = argparse.ArgumentParser(description="重新应用库对象定义")
     parser.add_argument("--sql-dir", default=DEFAULT_SQL_DIR, help="SQL 文件目录")
     return parser.parse_args()
 
 
-def pg_connection():
+def pg_connection() -> psycopg2.extensions.connection:
+    """连接 Server 1 的 PostgreSQL。"""
     connection = psycopg2.connect(
         host=os.environ["SERVER1_HOST"],
         port=int(os.environ.get("POSTGRES_PORT", "5432")),
@@ -58,6 +60,7 @@ def pg_connection():
 
 
 def main() -> int:
+    """重新应用建表与授权脚本，并检查有没有对象一条授权都没有。"""
     args = parse_args()
     sql_dir = Path(args.sql_dir)
     if not sql_dir.is_dir():

@@ -1,12 +1,12 @@
-"""执行一个 SQL 文件：逐条语句交给 Spark SQL 跑，任一失败即退出非零。
+r"""执行一个 SQL 文件：逐条语句交给 Spark SQL 跑，任一失败即退出非零。
 
 用途：把建表脚本（sql/iceberg/*.sql）应用到数据湖，以及跑临时诊断查询。
 之所以单独写一个执行器而不是直接把 DDL 塞进 Python，是为了让语句保持在可读、
 可 diff、可 Git 管理的 .sql 文件里。
 
 用法（Server 2，经 spark-submit 包装脚本执行）：
-    bash spark-submit-fr2052a.sh \\
-        /opt/fr2052a-app/python/lakehouse/run_sql_file.py \\
+    bash spark-submit-fr2052a.sh \
+        /opt/fr2052a-app/python/lakehouse/run_sql_file.py \
         /opt/fr2052a-app/sql/iceberg/01_create_ref_tables.sql
 
     # 诊断查询：把结果打出来（SELECT/EXPLAIN/SHOW/DESCRIBE 会打印，写语句不会）
@@ -43,6 +43,7 @@ def summarize(statement: str) -> str:
 
 
 def main(argv: list[str]) -> int:
+    """把 SQL 文件里的语句逐条交给 Spark SQL 执行，任一失败即退出非零。"""
     arguments = [item for item in argv[1:] if item != "--show"]
     show_results = "--show" in argv
 

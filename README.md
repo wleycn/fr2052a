@@ -55,6 +55,15 @@ curl -s -o /dev/null -w "%{http_code}\n" http://192.168.17.22:9001          # Mi
 curl -s -o /dev/null -w "%{http_code}\n" http://192.168.17.24:8081          # Spark 主节点界面
 ```
 
+**改代码之前先过闸：**
+
+```bash
+make lint                          # ruff 检查 + 格式检查 + mypy
+git config core.hooksPath .githooks   # 做一次：之后每次提交前自动跑上面这条
+```
+
+没有预装 ruff / mypy 也能跑：`make lint` 会退到 `uvx` 现取（需要 uv）。要固定版本就命令行覆盖，例如 `make lint RUFF="uvx ruff@0.14.4"`。
+
 ## 怎么用（常见任务）
 
 | 任务 | 命令（在 Server 2 的 `~/fr2052a-infra` 下执行） |
@@ -67,6 +76,7 @@ curl -s -o /dev/null -w "%{http_code}\n" http://192.168.17.24:8081          # Sp
 | 查看表与样本 | `bash spark-submit-fr2052a.sh /opt/fr2052a-app/python/lakehouse/inspect_catalog.py --list` |
 | 时间旅行取证 | `bash spark-submit-fr2052a.sh /opt/fr2052a-app/python/audit/time_travel.py --table silver.owd_deposits_history --list-snapshots` |
 | 重置环境 | 在开发机执行 `bash deploy/reset-demo.sh --apply` |
+| 代码质量闸 | 在开发机执行 `make lint`（首次先 `git config core.hooksPath .githooks`） |
 
 Airflow 界面在 `http://192.168.17.22:8080`，MinIO 控制台在 `http://192.168.17.22:9001`。
 
