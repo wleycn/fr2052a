@@ -14,6 +14,29 @@ networks:
   fr2052a_net:
     driver: bridge
 
+# Airflow 三个容器的共享配置。放在扩展字段里而不是挂在某个服务上：
+# 挂在服务上的锚点会把该服务的 entrypoint/command 一起带给继承者 ——
+# 实测踩过：初始化容器覆盖了入口，webserver 与 scheduler 继承后把 webserver 当 shell 命令跑，直接 127。
+x-airflow-common: &airflow-common
+  image: ${AIRFLOW_IMAGE}
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+    # SSHOperator 由 provider 提供，官方镜像支持启动时按需安装。
+    # 生产环境应打进自建镜像，这里为省掉一次镜像构建而用运行时安装。
+    _PIP_ADDITIONAL_REQUIREMENTS: apache-airflow-providers-ssh
+    TZ: ${TZ}
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/keys:/opt/airflow/keys:ro
+  networks:
+    - fr2052a_net
+
 services:
   postgres:
     image: postgres:18-alpine
@@ -81,6 +104,59 @@ services:
         echo "MinIO bucket ready: $$MINIO_BUCKET"
     networks:
       - fr2052a_net
+
+  # ---- Airflow：调度编排 ----
+  # LocalExecutor 单机模式，元数据库复用本机 PostgreSQL（库名 airflow）。
+  # 不用 CeleryExecutor：本演示的任务都是"触发远端跑批 + 等结果"，并发需求接近于零。
+  #
+  # SSH 私钥挂在 ./airflow/keys（由 prepare-airflow.sh 准备并改属主）：
+  # DAG 用 SSHOperator 触发 Server 2 上的跑批，密钥属主必须是容器内运行用户。
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: fr2052a_airflow_init
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # 只有初始化容器需要覆盖入口：跑一次性命令后退出
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        set -e
+        airflow db migrate
+        airflow users create \
+          --username "${AIRFLOW_ADMIN_USER}" \
+          --password "${AIRFLOW_ADMIN_PASSWORD}" \
+          --firstname FR2052a --lastname Admin \
+          --role Admin --email admin@example.com || echo "管理员已存在，跳过"
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: fr2052a_airflow_webserver
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    command: webserver
+    ports:
+      - "${AIRFLOW_PORT}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: fr2052a_airflow_scheduler
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    command: scheduler
 
 volumes:
   pg_data:

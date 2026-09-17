@@ -570,6 +570,66 @@ Iceberg 的**表元数据落 PostgreSQL**（JDBC catalog），**数据文件落 
 
 ---
 
+## E5.2 Airflow 编排（2026-09-17）
+
+**目标**：按需求文档把 Airflow 部署到 Server 1，并用它驱动整条报送链路。
+
+**产出**
+
+| 位置 | 内容 |
+|---|---|
+| dev `deploy/server1/docker-compose.yml` | 新增 `x-airflow-common` 共享块 + 初始化/界面/调度三个服务 |
+| dev `deploy/server1/prepare-airflow.sh` | 建元数据库、DAG/日志目录、SSH 私钥（改容器用户属主） |
+| dev `deploy/server1/init-airflow.sh` | 配置连接与变量（幂等） |
+| dev `deploy/server1/airflow/dags/fr2052a_daily_batch.py` | 主链路 10 个任务 |
+| dev `deploy/server1/airflow/dags/fr2052a_gl_reconciliation.py` | GL 对账，不平即阻断 |
+| dev `deploy/server1/sql/init/02_airflow_db.sql` | Airflow 元数据库 |
+| dev `deploy/server2/run-daily-pipeline.sh` | 改成**步骤分发器**：既可整跑，也可按环节调用 |
+
+**关键设计：DAG 不复制命令**
+
+DAG 的每个任务只是"SSH 到 Server 2 执行 `run-daily-pipeline.sh` 的某个环节"。
+编排逻辑只有那一份脚本 —— 若在 DAG 里再写一遍命令，改一处忘一处必然漂移。
+环节的退出码直接决定任务成败，核对脚本失败会让批次红并阻断下游。
+
+**验证证据**
+
+| 判据 | 实测 |
+|---|---|
+| 容器 | init 退出码 0、界面 Up(healthy)、调度器 Up |
+| Web UI | `http://192.168.17.22:8080/health` 从 dev 返回 200，元数据库与调度器均 healthy |
+| 连接与变量 | `postgres_default`、`ssh_default` 建立；4 个变量就位 |
+| DAG 解析 | 两个 DAG 均被调度器识别 |
+| **日批实跑** | **10 个任务全部 success，dag_run 状态 success** |
+| 单步耗时 | 每步约 2 分钟（spark-submit 冷启动为主），整条约 22 分钟 |
+
+任务级耗时（实测）：`check_source_arrival` 瞬间 → `load_ref` 2m08s → `replay_ods` 2m08s →
+`load_bronze` 2m09s → `dbt_run` 2m15s → `dq_validate` 2m14s → `export_pg` 2m18s →
+`verify_bronze` 2m13s → `verify_silver` 2m09s → `verify_ads` 2m09s。
+
+**踩到的坑**
+
+1. **compose 锚点挂在服务上会连入口一起继承。** 我把 `&airflow-common` 挂在 `airflow-init` 上，
+   而该服务覆盖了 `entrypoint: /bin/bash`，于是 webserver 与 scheduler 继承后把 `webserver`
+   当 shell 命令执行，容器反复以退出码 127 重启。
+   修法：共享配置放到顶层 `x-airflow-common` 扩展字段，只让初始化容器覆盖入口。
+2. **SSHOperator 的默认命令超时只有 10 秒。** 单个环节要跑两分钟的 spark-submit，
+   用默认值必失败，报错是 `SSH command timed out` —— 与"作业跑得慢"无关，是操作符的默认值太短。
+   修法：统一显式设置 `cmd_timeout=3600`，并把这条写进 DAG 的模块注释。
+3. **`airflow connections list` 会把口令明文打印出来。** 我的初始化脚本原本用它输出连接清单，
+   等于把数据库口令写进日志。改为从元数据库只取 `conn_id` 与 `conn_type`。
+4. **密钥目录改了属主后宿主用户写不进去。** `known_hosts` 原本直接重定向写入，
+   而该目录属主已改为容器用户（uid 50000），报 Permission denied。改用 `sudo tee`。
+
+**遗留**
+
+- `fr2052a_realtime_alert`、`fr2052a_backfill_and_restate`、`fr2052a_submission` 三个 DAG
+  属 E6 范围（实时告警、重述、报送），尚未建 —— 不做空壳任务占位。
+- 两个 DAG 当前处于**暂停**状态：调试期间多触发的手动运行因 `max_active_runs=1` 排队，
+  暂停以止住重复占用算力（跑批幂等，重复运行不会写坏数据）。E6 需要时再放开。
+
+---
+
 ## 后续步骤
 
 E4 业务开发（数据生成器 → ODS → OWD → OWS → ADS）→ E5 编排 → E6 合规演示剧本 → E7 治理收口。
