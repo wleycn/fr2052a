@@ -23,7 +23,7 @@
 - 数据质量：自研规则引擎，规则落 `ref.ref_validation_rules`，由 `run_dq_rules.py` 执行
 - 元数据治理：dbt `schema.yml` 的 meta 声明 + `render_lineage.py` 渲染血缘
 - 开放表格式：Apache Iceberg 1.11（JDBC catalog：元数据在 PG，数据在 MinIO）
-- 巡检：`pipeline_health.py` 检查熔断、质量、报送、Kafka 滞后、连接与磁盘
+- 巡检：`pipeline_health.py` 检查熔断、校验、预警、报送、重述、实时事件、PG 连接、Kafka 滞后与磁盘（8 项）
 
 ## 2. 上下文加载（动手前必做）
 
@@ -32,7 +32,7 @@
 1. 读本文 §3 红线清单
 2. 读 `docs/rules/PROJECT-STRUCTURE.md` 的「目录职责」与「收口点」
 3. 读 `docs/rules/CODING-STANDARD.md` 的本类型红线
-4. 涉及数据变更 → 读对应 `docs/tables/{table}.md` 表契约
+4. 涉及数据变更 → 读 `docs/business/DATA-DESIGN.md` 的表契约（分层表清单、字段语义、口径）
 5. **合计不超过 3 个规则文件**（防上下文过载）
 
 ## 3. 红线清单
@@ -63,7 +63,7 @@
 - 只给代码或明确的 diff，不夹带无关说明
 - 在改动的**代码文件**头部加 `[AI-GENERATED] model=<m> date=<d> reviewed_by=<human>` 注释。两类文件豁免：装配工具生成的产物、以及文档。它们的来源由下面的 commit 标记与变更留痕承担。
 - `reviewed_by=pending` 表示还没有人 review 过；review 完成后由 review 者替换成自己的名字。
-- agent 提交的 commit message 必须含 `[AI]`，人工提交不带标记。机器门禁会拦下缺少 `[AI]` 的 agent 会话提交，也会对缺头注的改动代码文件告警。这条规则不靠自觉。
+- agent 提交的 commit message 必须含 `[AI]`，人工提交不带标记。缺 `[AI]` 的 agent 会话提交由 `.githooks/commit-msg` 拦下。头注缺失的告警检查尚未实现，已登记在 `KNOWN-ISSUE.md`。
 - 单次变更不超过文件总量的 **40%**。阈值**只对改动前达到 200 行的文件**适用，不足 200 行不受限。超出就拆成多次，逐步验证。
 - 注释与 docstring 要和代码在同一个提交里改。不许留下与实现不符的注释。注释解释「**为什么**」，不复述「是什么」。细则见 `docs/rules/CODING-STANDARD.md` 的注释一节。
 - 写文档、写回报、写交付说明之前，先载入技能 `docs-writing-discipline`，按其检查表通读一遍再交
@@ -71,7 +71,7 @@
 
 ## 6. 变更留痕
 
-功能或契约变更，在 `docs/changes/{module}.md` **追加**一条目。条目 slug 与分支名同名，条目模板见 `docs/rules/DEVELOP-FLOW.md` §4。`{module}` 取 `python/` 顶层模块目录名；非功能变更落 `engineering.md`。该目录**只放条目文件**，不放 README、说明或附件。模块清单见 §9 项目地图。
+功能或契约变更，在 `docs/changes/{module}.md` **追加**一条目。条目 slug 与分支名同名，条目格式照 `docs/changes/` 下已有条目（该目录当前为空，模板待补，见 `KNOWN-ISSUE.md`）。`{module}` 取 `python/` 顶层模块目录名；非功能变更落 `engineering.md`。该目录**只放条目文件**，不放 README、说明或附件。模块清单见 §9 项目地图。
 
 - 上线后追加部署记录。
 
@@ -93,7 +93,7 @@
 ## 9. 项目地图（文件索引）
 
 > 回答「东西在哪」。
-> 生成规则：把**项目里真实存在**的文件填进下表，删掉不适用的行。表内路径必须真实可访问。机器门禁会检查 `docs/`、`sql/`、`dbt/`、`python/`、`deploy/`、`config/` 下被引用的文件，以及它点名的根文件。目录路径与 `config/` 下的条目要由审查者核实。
+> 生成规则：把**项目里真实存在**的文件填进下表，删掉不适用的行。表内路径必须真实可访问。被引用文件的存在性检查尚未实现，已登记在 `KNOWN-ISSUE.md`；当前靠评审核对。目录路径与 `config/` 下的条目要由审查者核实。
 
 | 类别 | 位置 | 用途 |
 |---|---|---|
@@ -102,7 +102,7 @@
 | 规范 | `docs/rules/` | 四件套：结构 / 编码 / 流程 / 验收 |
 | 业务文档 | `docs/business/` | 项目说明 / 模块 / 数据 / 接口 / 术语 / 变更 / 已知问题 |
 | 偏离登记处 | `docs/business/KNOWN-ISSUE.md` | 已知坑 / 设计决策 / 与上游规范不一致处的逐条登记（禁止无登记降标准） |
-| 变更留痕 | `docs/build-log.md` | E0-E5 构建日志（原始路径，用户要求保留）；新增模块变更追加到 `docs/changes/{module}.md` |
+| 变更留痕 | `docs/build-log.md` | E0-E7 构建日志（原始路径，用户要求保留）；新增模块变更追加到 `docs/changes/{module}.md` |
 | 部署清单 | `deploy/` | Server 1/2 部署脚本与配置 |
 | SQL DDL | `sql/iceberg/` | Iceberg 表定义（真源） |
 | dbt 项目 | `dbt/` | 模型 / 宏 / 配置 |
@@ -113,7 +113,7 @@
 ## 10. 技能地图（阶段 → 技能）
 
 > 回答「这个阶段该用哪个技能」。
-> 阶段定义见 `docs/rules/DEVELOP-FLOW.md` §1（十阶段）与 §1.1（阶段 4 子步骤）。下表只接**技能库里真实存在**的技能，名字必须可查，`pre_commit_gate.py` 会检查。
+> 阶段定义见 `docs/rules/DEVELOP-FLOW.md` §1（十阶段）与 §1.1（阶段 4 子步骤）。下表只接**技能库里真实存在**的技能，名字必须可查；当前由 `make lint`（本地钩子与 CI 都跑它）覆盖代码侧检查。
 > 用法：进入某阶段前先载入该阶段技能（`skill_view`），按它的 Phase 或 Step 执行。禁用「通用做法」替代技能流程。
 
 | 阶段 | 技能 | 什么时候用 |

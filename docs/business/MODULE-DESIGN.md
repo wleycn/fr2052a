@@ -23,22 +23,29 @@
 
 ### dbt macro 接口
 
+宏名不带前缀，`fr2052a_` 只在文件名上（`dbt/macros/fr2052a_rules.sql`）。
+
 | 宏名 | 参数 | 返回 | 用途 |
 |------|------|------|------|
-| `fr2052a_hqla_classification` | `security_type, rating` | `LEVEL_1\|LEVEL_2A\|LEVEL_2B\|NON_HQLA` | HQLA 分类 |
-| `fr2052a_maturity_bucket` | `maturity_date, report_date` | `O/N\|1-7D\|...` | 到期分桶 |
-| `fr2052a_mask_pii` | `field_value` | `h_xxxx` (HMAC 脱敏) | PII 脱敏 |
-| `fr2052a_fx_convert` | `amount, currency, report_date` | `amount_usd` | 汇率转换 |
+| `maturity_bucket` | `days_expr` | `VARCHAR`（`O/N`、`1-7D`……）| 到期分桶 |
+| `hqla_level` | `security_type_expr, rating_expr` | `LEVEL_1` / `LEVEL_2A` / `LEVEL_2B` / `NON_HQLA` | HQLA 分类 |
+| `hqla_haircut` | `hqla_level_expr` | 折扣率（小数）| 按分级给折扣 |
+| `customer_segment` | `customer_type_expr` | `VARCHAR` | 客户细分归一 |
+| `deposit_product_category` | `deposit_type_expr` | `VARCHAR` | 存款产品归类 |
+| `mask_pii` | `column_name` | `h_` + 16 位十六进制 | PII 脱敏，加盐 SHA-256，模板在 `dbt_project.yml` 的 `vars.pii_mask_template` |
+| `generate_schema_name` | `custom_schema_name, node` | `VARCHAR` | 决定模型落到哪个 schema |
+
+汇率折算没有对应宏：由 OWD 模型 join `stg_fx_rates` 完成。
 
 ### Python CLI 接口
 
 | 命令 | 参数 | 行为 | 退出码 |
 |------|------|------|--------|
-| `generate_sample_data.py` | 无 | 生成 ref/ods CSV 到 `sample_data/` | 0/1 |
-| `load_ref_tables.py` | `--target iceberg\|postgres` | 加载引用数据 | 0/1 |
-| `export_gold_to_pg.py` | `--date YYYY-MM-DD` | 导出 Gold 到 PG | 0/1 |
-| `run_dq_rules.py` | `--layer owd\|ows\|ads` | 运行数据质量校验 | 0/1/2 (1=WARNING, 2=ERROR) |
-| `replay_ods_to_kafka.py` | `--topic <name> --file <path>` | 重放 ODS 数据到 Kafka | 0/1 |
+| `generate_sample_data.py` | `--out`（默认 `sample_data/`）、`--gl-break-amount`、`--correct-deposit-record`、`--correct-deposit-amount` | 生成 ref/ods CSV，随后自检 | 0 全过 / 1 自检不通过 |
+| `load_ref_tables.py` | 位置参数：ref 目录（默认 `/opt/fr2052a-app/sample_data/ref`）| 覆盖写入 Iceberg 的 ref 命名空间 | 0 / 1 失败 / 2 目录不存在 |
+| `export_gold_to_pg.py` | 无参数 | 把 gold 层三张表导出到 PG 的 ads 层，覆盖写 | 0 / 1 |
+| `run_dq_rules.py` | `--batch-id`（默认 `UNKNOWN`）| 执行规则集并把结论落审计表 | 0 / 1 |
+| `replay_ods_to_kafka.py` | `--data-dir`、`--config`（均有默认）| 重放 ODS 数据到 Kafka | 0 / 1 |
 
 ### Kafka Topic 契约
 

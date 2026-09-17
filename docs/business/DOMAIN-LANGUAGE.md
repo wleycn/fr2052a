@@ -58,7 +58,7 @@
 | 术语 | 英文 / 代码 | 定义 | 说明 |
 |------|-------------|------|------|
 | 闸 / 机器闸 | gate | 由程序判定并通过退出码拦停的检查，不依赖人自觉 | 本项目三道：放行闸、权限自测、数据层核对 |
-| 放行闸 | submission gate | 决定「这次报送能不能生成文件」的那道闸 | `check_submission_gate.py`，退出码 0 放行 / 2 阻断 |
+| 放行闸 | submission gate | 决定「这次报送能不能生成文件」的那道闸 | `check_submission_gate.py`，退出码 0 放行 / 2 阻断 / 3 无法判定（同样不放行）|
 | 判据 | criterion | 验收清单里那条**可执行**的检查动作 | 写形容词（如「性能良好」）不算判据 |
 | 证据 | evidence | 判据实核时看到的原始输出：命令、退出码、行数、文件名 | 没有证据的勾选一律不算通过 |
 | 单源 | SSOT（Single Source of Truth） | 同一事实只在一处声明，其他地方引用它 | 阈值在 JSON、工具版本在 Makefile、主题映射在一个 JSON |
@@ -110,7 +110,7 @@
 
 | 枚举 | 取值 | 含义 | 状态流转 | 代码位置 |
 |---|---|---|---|---|
-| `submission_status` | `GENERATED` / `SUBMITTED` / `ACCEPTED` / `REJECTED` | 文件已生成 / 已提交 / 监管已接收 / 监管退回 | 生成即 `GENERATED`，提交后按回执更新 | `ads.ads_fr2052a_submission` |
+| `submission_status` | `GENERATED` / `SUBMITTED` / `ACCEPTED` / `REJECTED` | 文件已生成 / 已提交 / 监管已接收 / 监管退回 | 生成脚本写 `ACCEPTED`/`REJECTED`（按模拟回执）；`GENERATED`/`SUBMITTED` 是列注释里的预留值，当前代码未写 | `ads.ads_fr2052a_submission` |
 | `file_format` | `XBRL` / `XML` / `CSV` | 报送文件格式，每个实体各出一套 | — | `ads.ads_fr2052a_submission` |
 | `severity` | `CRITICAL` / `WARNING` / `INFO` | 预警严重度 | — | `ads.ads_fr2052a_alerts` |
 | `status`（预警） | `OPEN` / `CLOSED` | 规则是否仍在命中 | 命中即 `OPEN`，不再命中自动转 `CLOSED` | `ads.ads_fr2052a_alerts` |

@@ -3,8 +3,9 @@
 链条（与 requirements/[99] §2.4 的设计一致，按当前已落地的环节展开）：
 
     check_source_arrival → load_ref → replay_ods → load_bronze → dbt_run
-      → pii_vault → lineage → owd_scd2 → dq_validate → export_pg → liquidity_monitor
-      → verify_bronze → verify_silver → verify_ads → pipeline_health
+      → pii_vault → lineage → owd_scd2 → dq_validate → publish_access → export_pg
+      → liquidity_monitor → verify_bronze → verify_silver → verify_scd2 → verify_ads → verify_rbac
+      → pipeline_health
 
 设计要点：
   1. 每个 Task 都是"SSH 到 Server 2 执行 run-daily-pipeline.sh 的某一个环节"，
@@ -31,7 +32,6 @@ from airflow.providers.ssh.operators.ssh import SSHOperator
 
 SSH_CONN_ID = "ssh_default"
 REMOTE_DIR = "/home/hermes/fr2052a-infra"
-REMOTE_APP_DIR = "/opt/fr2052a-app"
 SSH_TIMEOUT_SECONDS = 3600
 
 
@@ -71,8 +71,8 @@ with DAG(
 ) as dag:
     check_source_arrival = ssh_task(
         "check_source_arrival",
-        f"ls -1 {REMOTE_APP_DIR}/sample_data/ods/*.csv | wc -l",
-        "确认 7 张 ODS 源文件全部到位，避免空跑一整轮",
+        pipeline_command("check-source"),
+        "确认 7 张 ODS 源文件全部到位：数量不等于 7 即判失败，避免空跑一整轮",
     )
     load_ref = ssh_task(
         "load_ref",
@@ -139,6 +139,11 @@ with DAG(
         pipeline_command("verify-silver"),
         "OWD 层行数、到期分桶、汇率折算逐行重算",
     )
+    verify_scd2 = ssh_task(
+        "verify_scd2",
+        pipeline_command("verify-scd2"),
+        "版本历史不变式：失效日为空 ⇔ 当前有效、版本号连续、无重复",
+    )
     verify_ads = ssh_task(
         "verify_ads",
         pipeline_command("verify-ads"),
@@ -165,11 +170,12 @@ with DAG(
         >> lineage
         >> owd_scd2
         >> dq_validate
-        >> export_pg
         >> publish_access
+        >> export_pg
         >> liquidity_monitor
         >> verify_bronze
         >> verify_silver
+        >> verify_scd2
         >> verify_ads
         >> verify_rbac
         >> pipeline_health

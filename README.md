@@ -74,8 +74,9 @@ git config core.hooksPath .githooks   # 做一次：之后每次提交前自动�
 | 只跑某几个环节 | `bash run-daily-pipeline.sh dbt-run dq-rules export-pg` |
 | 列出全部环节及说明 | `bash run-daily-pipeline.sh --help` |
 | 让 Airflow 按环节接管 | 见 `deploy/server1/airflow/dags/`（5 个 DAG，环节调同一份编排） |
-| 单跑接入或对账 | `bash run-daily-pipeline.sh ods-replay realtime-scan` |
-| 查看表与样本 | `bash spark-submit-fr2052a.sh /opt/fr2052a-app/python/lakehouse/inspect_catalog.py --list` |
+| 单跑接入或实时扫描 | `bash run-daily-pipeline.sh ods-replay realtime-scan` |
+| GL 对账 | 由 `dbt-run` 产出结论、`verify-ads` 核对；单跑对账 DAG 见 `deploy/server1/airflow/dags/fr2052a_gl_reconciliation.py` |
+| 查看表与样本 | `bash spark-submit-fr2052a.sh /opt/fr2052a-app/python/lakehouse/inspect_catalog.py`（不带参数即列出命名空间与表；看某张表的列加 `--describe silver.owd_deposits --sample 2`） |
 | 时间旅行取证 | `bash spark-submit-fr2052a.sh /opt/fr2052a-app/python/audit/time_travel.py --table silver.owd_deposits_history --list-snapshots` |
 | 重置环境 | 在开发机执行 `bash deploy/reset-demo.sh --apply` |
 | 代码质量闸 | 在开发机执行 `make lint`（首次先 `git config core.hooksPath .githooks`） |
@@ -90,7 +91,7 @@ demo-fr2052a/
 ├── AGENTS.md                  # AI 编码约束
 ├── requirements/              # 原始需求文档（保留参考）
 ├── docs/
-│   ├── business/              # 工程文档（九项核心）
+│   ├── business/              # 工程文档（业务文档七份）
 │   ├── rules/                 # 规范文件（结构 / 编码 / 流程 / 验收）
 │   └── build-log.md           # 构建日志（E0 起逐阶段记录）
 ├── deploy/

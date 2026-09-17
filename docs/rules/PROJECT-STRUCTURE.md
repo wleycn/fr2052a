@@ -7,9 +7,9 @@
 | 目录 | 职责 | 谁可写 | 禁止行为 |
 |------|------|--------|----------|
 | `requirements/` | 原始需求文档（参考） | 架构师 | 修改（应走变更流程）|
-| `docs/business/` | 九项核心文档（真源） | 全员 | 删除、重命名 |
+| `docs/business/` | 业务文档七份（真源） | 全员 | 删除、重命名 |
 | `docs/rules/` | 跨项目复用规范 | 架构师 | 未经评审修改 |
-| `docs/changes/` | 变更留痕（追加式） | 全员 | 修改历史条目 |
+| `docs/changes/` | 变更留痕（追加式）；当前为空目录，E6/E7 未按此格式留痕，见 `KNOWN-ISSUE.md` | 全员 | 修改历史条目 |
 | `deploy/` | 部署清单（不含凭据） | DevOps | 硬编码密码 |
 | `sql/` | DDL（真源） | DBA/架构师 | 直接改线上库 |
 | `dbt/models/` | 转换逻辑 | 数据工程师 | 绕过 dbt 直接写 SQL |
@@ -20,7 +20,7 @@
 ## 命名规范
 
 - 目录：kebab-case（如 `docs/business/`）
-- 文件：PascalCase 或 kebab-case，见下表
+- 文件：Python 用 snake_case（与 `CODING-STANDARD.md` 一致），SQL 与 shell 用 snake_case 或 kebab-case，见下表
 - 表名：`{层}_{表名}`（如 `ods_deposits`、`owd_loans`）
 
 | 文件类型 | 命名示例 |
@@ -28,11 +28,11 @@
 | 文档 | `PROJECT.md`、`DATA-DESIGN.md` |
 | SQL | `01_create_namespaces.sql`、`91_drop_smoke_tables.sql` |
 | Python | `generate_sample_data.py`、`export_gold_to_pg.py` |
-| 部署 | `docker-compose-core.yml`、`docker-compose-compute.yml` |
+| 部署 | `deploy/server1/docker-compose.yml`、`deploy/server2/docker-compose.yml` |
 
 ## 分层纪律
 
-1. **根目录**：`README.md` + `AGENTS.md` + `.gitignore` + `.gitattributes`
+1. **根目录**：`README.md` + `AGENTS.md` + `.gitignore` + `.gitattributes` + `Makefile` + `pyproject.toml`（教学文档只在本机，不入库）
 2. **docs/**：工程文档（rules + business + changes）
 3. **deploy/**：部署清单（YAML + shell 脚本）
 4. **sql/**：DDL（按层分目录）
@@ -49,4 +49,4 @@
 | 接口契约 | `docs/business/INTERFACE-DESIGN.md` | dbt macro / Python CLI / Kafka Topic |
 | 业务规则 | `dbt/macros/fr2052a_rules.sql` | HQLA、到期分桶、现金流 Cap |
 | 部署配置 | `deploy/server{1,2}/` | docker-compose + env |
-| 调度定义 | `airflow/dags/` | DAG 定义（待实现）|
+| 调度定义 | `deploy/server1/airflow/dags/` | DAG 定义（5 个，已实现）|

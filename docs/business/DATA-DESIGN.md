@@ -28,7 +28,7 @@ Gold / ADS
         │
         ├── 报送文件生成：XBRL / XML / CSV
         ├── 血缘与监管映射：dbt meta 声明 + render_lineage.py 渲染
-        └── 巡检：pipeline_health.py（熔断 / 质量 / 报送 / 滞后 / 连接 / 磁盘）
+        └── 巡检：pipeline_health.py（8 项：熔断 / 校验 / 预警 / 报送 / 重述 / 实时事件 / 连接 / 滞后 / 磁盘）
 ```
 
 ### 真源划分
@@ -184,7 +184,7 @@ CREATE TABLE ads.ads_fr2052a_alerts (
 
 | 层 | 写入方 | 读取方 | 幂等策略 |
 |----|--------|--------|----------|
-| Ref | `load_ref_tables.py` 批加载 | 所有层 | 按主键 MERGE |
+| Ref | `load_ref_tables.py` 批加载 | 所有层 | 整表覆盖写（`INSERT OVERWRITE`）：字典表量小，重跑任意次结果一致 |
 | Bronze | `kafka_to_iceberg.py` 消费 Kafka | OWD 模型 | 按主键 MERGE 去重，同一条消息重放不产生第二行 |
 | Silver | dbt 模型（table 物化） | OWS / ADS 模型 | 整表重建，先建后换，不留半成品 |
 | Silver 版本历史 | `owd_scd2.py` | 重述登记与审计 | 全表重算，同一主键的版本号连续 |
@@ -228,6 +228,9 @@ CREATE TABLE ads.ads_fr2052a_alerts (
 
 ### 3.4 数据质量规则（VDQ）
 
+规则集共 20 条（VDQ-001 至 VDQ-020），真源是生成器产出的 `sample_data/ref/ref_validation_rules.csv`，
+下表只列其中 9 条作为示例，完整清单以该 CSV 与 `ref.ref_validation_rules` 表为准。
+
 | 编号 | 层级 | 规则 | 严重度 |
 |------|------|------|--------|
 | VDQ-001 | ODS | 文件完整到达 | ERROR |
@@ -251,4 +254,4 @@ Core Banking Deposit Module
   → FR 2052a Section C / Line Item
 ```
 
-完整血缘由 `render_lineage.py` 从 dbt 元数据与 SQL 解析生成，见 [INTERFACE-DESIGN.md](INTERFACE-DESIGN.md#血缘渲染)。
+完整血缘由 `render_lineage.py` 从 dbt 元数据与 SQL 解析生成，见 [INTERFACE-DESIGN.md](INTERFACE-DESIGN.md#6-血缘与监管映射接口)。

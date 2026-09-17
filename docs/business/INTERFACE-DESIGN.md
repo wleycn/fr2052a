@@ -21,7 +21,7 @@
 | 4 | `customer_segment` | `customer_type_expr` | `VARCHAR` | 客户细分归一 | ✅ 已实现 |
 | 5 | `deposit_product_category` | `deposit_type_expr` | `VARCHAR` | 存款产品归类 | ✅ 已实现 |
 
-> 注：原设计中的 `fr2052a_mask_pii` 和 `fr2052a_fx_convert` 尚未实现，将在后续阶段补充。
+> 注：宏名不带 `fr2052a_` 前缀。脱敏已实现为 `mask_pii`（加盐 SHA-256，见 `dbt/macros/pii.sql`）；汇率折算没有对应宏，由 OWD 模型 join `stg_fx_rates` 完成。
 
 ### 2.1 `hqla_level`
 
@@ -215,11 +215,12 @@ check_source_arrival          确认 7 张 ODS 源文件到位，避免空跑一
   → dbt_run                   OWD → OWS → ADS 三层建模
   → pii_vault                 建脱敏对照表
   → lineage                   渲染血缘与监管映射
+  → owd_scd2                  OWD 版本历史归并（SCD2）
   → dq_validate               执行 ref 层声明的质量规则
-  → publish_access            施加库侧迁移与授权
+  → publish_access            施加库侧迁移与授权（必须在 export_pg 之前）
   → export_pg                 导出到报送服务层
   → liquidity_monitor         算 LCR、产预警、翻转熔断闸
-  → verify_*                  三层核对与权限核对
+  → verify_bronze → verify_silver → verify_ads → verify_rbac
   → pipeline_health           巡检收口
 ```
 
@@ -238,6 +239,19 @@ check_source_arrival          确认 7 张 ODS 源文件到位，避免空跑一
 - **参数**：`report_date`、`entity_code`、`reason`、`requested_by`、`approved_by`、`effective_date`
 - **逻辑**：先留取重跑前的报表快照，再重跑链路，最后登记新版本并关闭旧版本
 - **输出**：`ads.ads_restatement_log` 与 `ads.ads_fr2052a_report_history`
+
+### 5.4 `fr2052a_gl_reconciliation`
+
+- **触发**：每日 07:00
+- **任务流**：`refresh_report → check_reconciliation`；后者比对 8 个 Section，结论落 `ads.ads_gl_reconciliation`
+- **退出码**：对平 0，未对平非 0，由 DAG 记为失败并触发告警
+
+### 5.5 `fr2052a_submission`
+
+- **触发**：每日 07:30，`retries=0`（熔断中重试没有意义）
+- **任务流**：`check_gate → generate_and_submit → verify_submission`
+- **放行约定**：`check_gate` 退出码 0 才继续；2（熔断）与 3（判不了）都视为不放行
+- **产物**：每个实体各一份 XBRL / XML / CSV，落 `ads.ads_fr2052a_submission` 台账
 
 ## 6. 血缘与监管映射接口
 

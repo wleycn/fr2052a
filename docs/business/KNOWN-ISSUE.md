@@ -15,6 +15,7 @@
 | #python314-incompatible | 09-16 | Python 3.14.4 装不上 Great Expectations 与 pyspark | GE 要求 `>=3.10,<3.14`；pyspark 3.5.0 不支持 3.14 | ✅ 在服务器上用 uv 装独立 Python 3.12 venv | Server 2 环境 | BUILD-LOG E0 |
 | #dockerhub-image-removed | 09-16 | `minio/minio` 与 `bitnami/spark` 从 Docker Hub 下架 | 镜像源失效 | ✅ MinIO 改走 `quay.io/minio/minio`；Spark 改用官方 `apache/spark` | Server 1/2 部署 | BUILD-LOG E0 |
 | #detail-report-mismatch | 09-16 | Section B 明细与报表口径不一致，差 25 亿；Section F 明细 13 亿 vs 报表 0 | 明细把正回购与逆回购混在一起，报表只算正回购；明细没按 30 天过滤 | ✅ 明细按 `line_item` 拆开，30 天过滤下沉到明细 | OWD/OWS 模型 | BUILD-LOG E4.1 |
+| #delegate-audit-20260917 | 09-17 | 三路独立审查（代码 / dbt 与 SQL / 文档）共提出 80 条发现，其中一条是三路都报同一条（DAG 授权晚于导出） | 长期单方视角审查，缺口集中在「规则声称的机制没落地」「文档抄自设计稿而非实现」两类 | ✅ 已修 29 条（含 DAG 顺序、恒成功的源文件检查、宏表与 CLI 契约表、README 跑不通的命令）；剩 45 条涉及口径与设计取舍，未动 | 全项目 | `docs/AUDIT-2026-09-17-delegate-review.md` |
 | #scd2-reversed-interval | 09-17 | 版本历史表出现「失效日早于生效日」的反向区间（owd_deposits 1 行、owd_gl_entries 20 行） | 写失效日时直接取「本次生效日 - 1」，未与该版本自己的生效日比较。两个调用方的生效日约定一旦不一致（重述用处理日 2026-09-17、日批用报告日 2026-09-16），后跑的那次必然算出反向区间 | ✅ 修法：写入侧用 `greatest(生效日 - 1, 该版本生效日)` 兜底并写完自检不变式；日批生效日改为报告日次日；`verify-scd2` 纳入日批环节；存量脏行由 `sql/iceberg/07_fix_reversed_intervals.sql` 修 | SCD2 版本历史 | BUILD-LOG E6.2 |
 
 <!-- PROJECT.md 索引行（复制区）：
@@ -26,6 +27,7 @@
 - `#dockerhub-image-removed` — minio/spark 官方镜像已从 Docker Hub 下架
 - `#detail-report-mismatch` — 明细与报表口径不一致（正回购/30天过滤）
 - `#scd2-reversed-interval` — 版本区间不得反向（失效日早于生效日）
+- `#delegate-audit-20260917` — 三路独立审查的 80 条发现与处置
 -->
 
 ## 规范偏离（本项目 vs 上游）
@@ -53,6 +55,9 @@
 | 覆盖写显式开 `truncate=true` | Spark JDBC 写库默认 `truncate=false`，即 DROP + CREATE | 导出作业显式 `truncate=true`，写前比对模型列与目标表列 | ✅ 决策：默认行为会静默清掉授权、触发器与库侧列 |
 | 数据质量用自研规则引擎 | `[99]详细材料.md` 指定 Great Expectations | 规则定义已在 `ref.ref_validation_rules`，由 `run_dq_rules.py` 执行 | ✅ 决策：转成 GX suite 等于规则定义存两份，必然漂移 |
 | 血缘用 dbt meta 自渲染 | `[99]详细材料.md` 指定 DataHub | `dbt/models/**/schema.yml` 的 meta 声明 + `render_lineage.py` 渲染 | ✅ 决策：DataHub 部署成本高，演示价值等价 |
+| 机器门禁只落地一半 | 红线要求「能写成 lint、检查脚本或 CI check，就不指望模型读到」 | `[AI]` 提交标记已由 `.githooks/commit-msg` 拦下；**头注缺失告警**与**被引用文件存在性检查**尚未实现 | ⏳ 待决策：补两个检查脚本，或在 AGENTS 里保持「未实现」的明说（当前已改为明说）|
+| 监控与 BI 栈未落地 | 需求文档提到 Grafana / Prometheus / Superset | 三者都没有部署，巡检由 `pipeline_health.py`、血缘由 `render_lineage.py` 直接输出 | ⏳ 待决策：接监控栈，或明确「演示项目不做面板」并保留现状 |
+| 变更留痕目录为空 | AGENTS 要求功能变更在 `docs/changes/{module}.md` 追加条目 | 目录存在但为空；E6/E7 的变更落在 `docs/build-log.md` 与 `KNOWN-ISSUE.md` | ⏳ 待决策：按格式补 E6/E7 条目，或调整规则 |
 | DQ 结果日志按批次先清后写 | 上游未定义日志粒度 | 一行 = 一个批次的一条规则，重跑前由 `clear_dq_batch.py` 清该批次 | ✅ 决策：不清则重跑静默翻倍，「本批次几条 ERROR」随之翻倍 |
 | lint 口径排除 4 类规则 | 上游要求 `ruff check .`、`ruff format .`、`mypy .` 全过 | 配置收在项目根 `pyproject.toml`，排除 `D415`、`N812`、`RUF001`、`RUF002`、`RUF003` | ✅ 决策：前两类与中文写作冲突（`D415` 只认 ASCII 句末标点、`RUF001-003` 把全角标点当歧义字符），`N812` 与 PySpark 的 `functions as F` 写法冲突。逐条理由与命中数写在 `pyproject.toml` 注释里；无命中的 `D401`/`D202` 不排除，继续管事 |
 | 提交闸两道，本地在前 | 上游要求「等待 CI 通过」后合并 | 本地 `.githooks/pre-commit` 跑 `make lint`；推送后 GitHub Actions 跑同一条命令 | ✅ 决策：本地那道先拦住，省一次往返；CI 兜住没配钩子的克隆。gitee 只作镜像，没有 runner |
@@ -79,3 +84,6 @@
 - **lint 排除 4 类规则**（✅ 决策）——代价：这几类问题不再有机器兜底，只能靠评审看；回退：删掉 `pyproject.toml` 里对应的 `ignore` 项并批量整改
 - **提交闸本地优先**（✅ 决策）——代价：本地与 CI 都要维护可用环境，版本口径靠 `Makefile` 单源约束；回退：删掉 `.githooks/`，只留 CI
 - **不建单元测试套件**（✅ 决策）——代价：函数级回归只能靠核对脚本与端到端重跑，粒度偏粗；回退：补 pytest 套件并接进 `make lint`
+- **机器门禁减半**（⏳ 待决策）——代价：头注与文件引用仍靠人工核对；回退：把 AGENTS 里的两处声明删掉即可自洽
+- **监控栈缺席**（⏳ 待决策）——代价：没有历史趋势与告警推送，只有一次性的巡检输出；回退：接入 Prometheus + Grafana（约一张 compose 文件）
+- **变更留痕空转**（⏳ 待决策）——代价：按模块查变更史要翻 build-log；回退：按现有格式补条目

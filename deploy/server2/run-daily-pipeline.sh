@@ -62,6 +62,7 @@ STEPS=(
 )
 
 declare -A STEP_DESC=(
+  [check-source]="源文件到位检查：ODS 目录必须有 7 张 CSV，数量不对即失败"
   [ref-load]="REF 批加载：字典表入 ref 命名空间"
   [ods-replay]="ODS 重放：样本明细按主题打进 Kafka"
   [bronze-load]="入湖 bronze：消费 Kafka，按主键 MERGE 去重"
@@ -93,6 +94,16 @@ declare -A STEP_DESC=(
 
 execute_step() {
   case "$1" in
+    check-source)
+      # 必须用宿主路径：SSH 进来执行时看不到容器内的 /opt/fr2052a-app。
+      # 也不能直接用 `ls | wc -l` —— wc 恒退出 0，缺文件时这一步照样"成功"。
+      count=$(ls -1 "$HOST_APP_DIR/sample_data/ods/"*.csv 2>/dev/null | wc -l)
+      if [ "$count" -ne 7 ]; then
+        echo "ODS 源文件应为 7 张，实际 $count 张（目录 $HOST_APP_DIR/sample_data/ods）" >&2
+        exit 1
+      fi
+      echo "ODS 源文件 7 张，已到位"
+      ;;
     ref-load)
       bash spark-submit-fr2052a.sh "$APP_DIR/python/lakehouse/load_ref_tables.py" "$APP_DIR/sample_data/ref"
       ;;

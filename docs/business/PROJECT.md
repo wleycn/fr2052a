@@ -16,7 +16,7 @@
 | 计算引擎 | Apache Spark Standalone（容器内 JDK 17） | 3.5.9 |
 | 结果库 | PostgreSQL | 18.6 |
 | 脱敏 | dbt 宏 + PostgreSQL secure schema（加盐 SHA-256） | - |
-| 巡检 | 自研 `pipeline_health.py`（熔断 / 质量 / 报送 / 滞后 / 连接 / 磁盘） | - |
+| 巡检 | 自研 `pipeline_health.py`（熔断 / 校验 / 预警 / 报送 / 重述 / 实时事件 / 连接 / 滞后 / 磁盘） | - |
 | 代码质量闸 | ruff（检查 + 格式化）+ mypy，配置在项目根 `pyproject.toml` | ruff 0.14.4 / mypy 1.18.2 |
 
 ## 目录分层
@@ -27,7 +27,7 @@ demo-fr2052a/
 ├── AGENTS.md                  # AI 编码约束
 ├── requirements/              # 原始需求文档（参考，不落九文档）
 ├── docs/
-│   ├── business/              # 九项核心文档
+│   ├── business/              # 业务文档（七份）
 │   │   ├── PROJECT.md         # 本文档（工程地图）
 │   │   ├── DATA-DESIGN.md     # 数据流 + 数据结构
 │   │   ├── MODULE-DESIGN.md   # 功能模块设计
@@ -94,8 +94,8 @@ demo-fr2052a/
 |----------|------|------|
 | dbt macro | `dbt/macros/` | 脱敏、HQLA haircut、到期分桶 |
 | Python CLI | `python/` | 生成/加载/导出/校验 |
-| Kafka Topic | `config/pipeline_topics.json` | 7 个 Topic 契约 |
-| Airflow DAG | `airflow/dags/` | 5 个 DAG 定义 |
+| Kafka Topic | `config/pipeline_topics.json` | 10 个 Topic 契约（其中 7 个有生产者，落 bronze）|
+| Airflow DAG | `deploy/server1/airflow/dags/` | 5 个 DAG 定义 |
 
 ## 运行环境 + 验证命令
 
@@ -105,14 +105,15 @@ demo-fr2052a/
 | MinIO API | 9000 | `curl http://192.168.17.22:9000/minio/health/live` |
 | MinIO Console | 9001 | `curl -I http://192.168.17.22:9001` |
 | Airflow Web | 8080 | `curl -I http://192.168.17.22:8080` |
-| Kafka | 9092 | `kafka-topics --bootstrap-server 192.168.17.24:9092 --list` |
+| Kafka（跨机） | 9094 | `kafka-topics --bootstrap-server 192.168.17.24:9094 --list` |
+| Kafka（容器内） | 9092 | 只在 Server 2 的容器网络里可用，广告地址是 `kafka:9092` |
 | Spark Master | 8081 | `curl -I http://192.168.17.24:8081` |
 
 没有独立的元数据平台与监控面板：血缘由 `render_lineage.py` 渲染成 Markdown 报告，巡检由 `pipeline_health.py` 直接输出结论。
 
 代码质量闸在 dev 机跑：`make lint`（ruff 检查 + 格式检查 + mypy）。执行一次 `git config core.hooksPath .githooks` 后，每次提交前自动跑。
 
-详细验证清单见 [docs/business/PROJECT.md](PROJECT.md#运行环境) 与 [docs/build-log.md](../build-log.md)。
+验收清单见 [ACCEPTANCE-CHECKLIST.md](../rules/ACCEPTANCE-CHECKLIST.md)，构建过程与踩坑见 [build-log.md](../build-log.md)。
 
 ## 文档导航
 
@@ -138,3 +139,4 @@ demo-fr2052a/
 - `#dockerhub-image-removed` — minio/spark 官方镜像已从 Docker Hub 下架
 - `#detail-report-mismatch` — 明细与报表口径不一致（正回购/30天过滤）
 - `#scd2-reversed-interval` — 版本区间不得反向（失效日早于生效日）
+- `#delegate-audit-20260917` — 三路独立审查的 80 条发现与处置
