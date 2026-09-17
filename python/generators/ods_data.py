@@ -48,7 +48,17 @@ TERM_DEPOSIT_TYPES = ("CD", "TIME")
 CUSTOMER_TYPES = ("IND", "CORP", "GOV", "FI")
 COLLATERAL_TYPES = ("UST", "AGENCY", "MBS", "CORP")
 LOAN_TYPES = ("COMMERCIAL", "RETAIL", "MORTGAGE", "REVOLVING", "SYNDICATED")
-SECURITY_TYPES = ("TREASURY", "AGENCY_DEBT", "MBS", "ABS", "CORP_BOND", "EQUITY")
+# 证券类型与其权重。真实银行的 HQLA 以一级资产（国债）为主，
+# 二级资产（机构债/MBS/公司债）占比通常低于 40% —— 若等概率抽取，二级资产会占八成，
+# 报表的二级资产占比规则必然长期告警，与真实银行业务结构不符。
+SECURITY_TYPE_WEIGHTS: dict[str, float] = {
+    "TREASURY": 0.60,
+    "AGENCY_DEBT": 0.15,
+    "MBS": 0.10,
+    "CORP_BOND": 0.08,
+    "EQUITY": 0.04,
+    "ABS": 0.03,
+}
 PORTFOLIO_CODES = ("HTP", "AFS", "HFT")
 INSTRUMENT_TYPES = ("IRS", "CDS", "FX_FWD", "FX_SWAP", "OPTION", "FUTURES")
 COMMITMENT_TYPES = ("CREDIT_COMMITMENT", "LETTER_OF_CREDIT", "GUARANTEE")
@@ -284,7 +294,7 @@ def generate_securities(ods_dir: Path, ref: ReferenceData) -> int:
             f"SEC-{_token(rng)}",
             f"US{rng.randint(1000000000, 9999999999)}",
             f"{rng.randint(100000000, 999999999)}",
-            rng.choice(SECURITY_TYPES),
+            weighted_choice(rng, SECURITY_TYPE_WEIGHTS),
             rng.choice(PORTFOLIO_CODES),
             rng.choice(ref.counterparties),
             currency,

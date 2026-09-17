@@ -104,28 +104,30 @@ BEHAVIOR_ASSUMPTION_ROWS = [
     ("MMDA", "CORPORATE", "O/N", 0.15, 0.00, "2024-01-01", ""),
 ]
 
-# 校验规则：与 [02] §2.7 的 20 条 VDQ 逐条对应
+# 校验规则：与 [02] §2.7 的 20 条 VDQ 逐条对应。
+# 表达式里的列名必须与 silver/gold 层的实际列名一致 —— 规则与实现两张皮的话，
+# 数据质量引擎会以"列不存在"跳过，等于没校验。
 VALIDATION_RULE_ROWS = [
     ("VDQ-001", "Source file complete arrival", "COMPLETENESS", "ODS", "ERROR", "row_count > 0", "源文件整批到达，无空文件", True),
     ("VDQ-002", "Key fields not null", "COMPLETENESS", "ODS", "ERROR", "source_record_id IS NOT NULL AND currency IS NOT NULL", "主键与币种不得为空", True),
     ("VDQ-003", "Amount non-negative", "ACCURACY", "OWD", "ERROR", "principal_amount_usd >= 0", "金额不得为负", True),
     ("VDQ-004", "Interest rate in range", "ACCURACY", "OWD", "WARNING", "interest_rate BETWEEN -0.10 AND 1.0", "利率落在合理区间", True),
-    ("VDQ-005", "Currency is ISO 4217", "ACCURACY", "OWD", "ERROR", "LENGTH(currency) = 3", "币种须为三位 ISO 4217 代码", True),
-    ("VDQ-006", "Outstanding <= facility", "CONSISTENCY", "OWD", "ERROR", "outstanding_amount <= facility_amount", "已用额度不得超过授信额度", True),
-    ("VDQ-007", "Repo collateral value sane", "CONSISTENCY", "OWD", "WARNING", "collateral_market_value BETWEEN cash_amount AND cash_amount * 1.5", "回购抵押品市值相对现金金额合理", True),
+    ("VDQ-005", "Currency is ISO 4217", "ACCURACY", "OWD", "ERROR", "LENGTH(currency_code) = 3", "币种须为三位 ISO 4217 代码", True),
+    ("VDQ-006", "Outstanding <= facility", "CONSISTENCY", "OWD", "ERROR", "outstanding_usd <= facility_amount_usd", "已用额度不得超过授信额度", True),
+    ("VDQ-007", "Repo collateral value sane", "CONSISTENCY", "OWD", "WARNING", "collateral_mv_usd BETWEEN cash_amount_usd AND cash_amount_usd * 1.5", "回购抵押品市值相对现金金额合理", True),
     ("VDQ-008", "Maturity not before report date", "CONSISTENCY", "OWD", "ERROR", "maturity_date >= report_date", "到期日不得早于报告日", True),
-    ("VDQ-009", "FX conversion error under 1%", "ACCURACY", "OWD", "WARNING", "ABS(amount_usd - amount_local * spot_rate) / NULLIF(amount_usd, 0) < 0.01", "折算金额与本地金额×汇率误差小于 1%", True),
-    ("VDQ-010", "Summary equals detail sum", "CONSISTENCY", "OWS", "ERROR", "ABS(summary_amount - detail_sum) < 0.01", "汇总数必须等于明细求和", True),
-    ("VDQ-011", "Unencumbered <= total", "CONSISTENCY", "OWS", "ERROR", "unencumbered_amount <= total_amount", "非受限资产不得超过总资产", True),
-    ("VDQ-012", "Pledged <= market value", "CONSISTENCY", "OWS", "ERROR", "pledged_amount <= market_value", "已质押金额不得超过总市值", True),
-    ("VDQ-013", "Section total equals line items", "CONSISTENCY", "ADS", "ERROR", "ABS(section_total - line_items_total) < 0.01", "Section 合计等于其行项目合计", True),
-    ("VDQ-014", "Total funding vs balance sheet", "BUSINESS", "ADS", "WARNING", "ABS(total_funding - balance_sheet_total) / NULLIF(balance_sheet_total, 0) < 0.05", "总融资与资产负债表口径偏差小于 5%", True),
-    ("VDQ-015", "Period-over-period move", "BUSINESS", "ADS", "WARNING", "ABS(current_amount - prior_amount) / NULLIF(prior_amount, 0) < 0.20", "环比波动小于 20%", True),
-    ("VDQ-016", "Loaded before T+1 08:00 ET", "TIMELINESS", "ODS", "ERROR", "etl_load_timestamp <= report_date + INTERVAL '1 day 8 hours'", "T+1 早八点前完成加载", True),
-    ("VDQ-017", "L2A+2B within 40% of HQLA", "BUSINESS", "ADS", "WARNING", "(hqla_level_2a + hqla_level_2b) <= 0.40 * total_hqla", "二级资产不得超过 HQLA 总额 40%", True),
-    ("VDQ-018", "Inflow capped at 75% of outflow", "BUSINESS", "ADS", "ERROR", "total_inflow <= 0.75 * total_outflow", "现金流入上限为流出的 75%", True),
-    ("VDQ-019", "Mandatory line items present", "COMPLETENESS", "ADS", "ERROR", "mandatory_line_items_missing IS NULL", "必填行项目不得缺失", True),
-    ("VDQ-020", "LEI format", "ACCURACY", "OWD", "WARNING", "lei_code ~ '^[A-Z0-9]{20}$'", "LEI 须为 20 位大写字母数字", True),
+    ("VDQ-009", "FX conversion error under 1%", "ACCURACY", "OWD", "WARNING", "ABS(amount_usd - amount_lc * spot_rate) / NULLIF(amount_usd, 0) < 0.01", "折算金额与本地金额×汇率误差小于 1%（需跨表 join，由核对脚本执行）", True),
+    ("VDQ-010", "Summary equals detail sum", "CONSISTENCY", "OWS", "ERROR", "ABS(summary_amount - detail_sum) < 0.01", "汇总数必须等于明细求和（跨表比对）", True),
+    ("VDQ-011", "Unencumbered <= total", "CONSISTENCY", "OWS", "ERROR", "unencumbered_amount <= total_amount", "非受限资产不得超过总资产（跨表比对）", True),
+    ("VDQ-012", "Pledged <= market value", "CONSISTENCY", "OWS", "ERROR", "pledged_amount <= market_value", "已质押金额不得超过总市值（跨表比对）", True),
+    ("VDQ-013", "Section total equals line items", "CONSISTENCY", "ADS", "ERROR", "ABS(section_total - line_items_total) < 0.01", "Section 合计等于其行项目合计（跨表比对）", True),
+    ("VDQ-014", "Total funding vs balance sheet", "BUSINESS", "ADS", "WARNING", "ABS(total_funding - balance_sheet_total) / NULLIF(balance_sheet_total, 0) < 0.05", "总融资与资产负债表口径偏差小于 5%（跨表比对）", True),
+    ("VDQ-015", "Period-over-period move", "BUSINESS", "ADS", "WARNING", "ABS(current_amount - prior_amount) / NULLIF(prior_amount, 0) < 0.20", "环比波动小于 20%（需上一期数据）", True),
+    ("VDQ-016", "Loaded before T+1 08:00 ET", "TIMELINESS", "ODS", "ERROR", "etl_load_timestamp <= report_date + INTERVAL '1' DAY + INTERVAL '8' HOUR", "T+1 早八点前完成加载", True),
+    ("VDQ-017", "L2A+2B within 40% of HQLA", "BUSINESS", "ADS", "WARNING", "(sec_g_hqla_l2a_mv + sec_g_hqla_l2b_mv) <= 0.40 * (sec_g_hqla_l1_mv + sec_g_hqla_l2a_mv + sec_g_hqla_l2b_mv)", "二级资产不得超过 HQLA 总额 40%（按认列额截断，见报表模型）", True),
+    ("VDQ-018", "Inflow capped at 75% of outflow", "BUSINESS", "ADS", "ERROR", "sec_k_total_inflows <= 0.75 * sec_k_total_outflows", "现金流入上限为流出的 75%", True),
+    ("VDQ-019", "Mandatory line items present", "COMPLETENESS", "ADS", "ERROR", "sec_k_total_funding IS NOT NULL AND sec_c_total IS NOT NULL", "必填行项目不得缺失", True),
+    ("VDQ-020", "LEI format", "ACCURACY", "OWD", "WARNING", "lei_code RLIKE '^[A-Z0-9]{20}$'", "LEI 须为 20 位大写字母数字", True),
 ]
 
 

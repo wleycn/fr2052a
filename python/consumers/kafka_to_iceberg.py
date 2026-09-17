@@ -103,9 +103,14 @@ def main(argv: list[str]) -> int:
         def write_batch(batch: DataFrame, batch_id: int, table_name: str = table) -> None:
             upsert_batch(batch, batch_id, table_name)
 
+        # 入湖时间按数据自身的时间线打标（报告日 T+1 凌晨 2 点），而不是真实时钟：
+        # 演示数据的报告日是虚拟的，用真实时钟会让入湖时间与数据时间线脱节，
+        # 并使 T+1 时效规则（VDQ-016）产生假阳性 —— 那是演示前提造成的，不是数据缺陷。
+        load_timestamp = F.to_timestamp(F.concat(F.date_add(F.col("report_date"), 1), F.lit(" 02:00:00")))
+
         query = (
             parsed.select("payload.*")
-            .withColumn("etl_load_timestamp", F.current_timestamp())
+            .withColumn("etl_load_timestamp", load_timestamp)
             .writeStream.format("iceberg")
             .outputMode("append")
             .option("checkpointLocation", f"{CHECKPOINT_ROOT}/{table}")
