@@ -41,7 +41,8 @@ with deposits as (
         round(sum(case when customer_segment = 'RETAIL' and product_category = 'SAVINGS' then principal_amount_usd else 0 end), 2) as retail_savings,
         round(sum(case when customer_segment = 'RETAIL' and product_category in ('TIME', 'CD') then principal_amount_usd else 0 end), 2) as retail_time,
         round(sum(case when customer_segment <> 'RETAIL' and product_category = 'DEMAND' then principal_amount_usd else 0 end), 2) as wholesale_demand,
-        round(sum(case when customer_segment <> 'RETAIL' and product_category in ('TIME', 'CD') then principal_amount_usd else 0 end), 2) as wholesale_time
+        round(sum(case when customer_segment <> 'RETAIL' and product_category in ('TIME', 'CD') then principal_amount_usd else 0 end), 2) as wholesale_time,
+        round(sum(insured_amount_usd), 2) as insured_total
     from {{ ref('owd_deposits') }}
     group by report_date, entity_code, is_intracompany
 
@@ -68,6 +69,7 @@ cash as (
         -- ows_cash_position 没有 is_intracompany，现金头寸不涉及集团内往来
         cast(false as boolean) as is_intracompany,
         round(sum(cash_on_hand_usd), 2) as cash_on_hand,
+        round(sum(due_from_banks_usd), 2) as due_from_banks,
         round(sum(total_cash_usd), 2) as total_cash
     from {{ ref('ows_cash_position') }}
     group by report_date, entity_code
@@ -200,12 +202,16 @@ entity_level as (
         d.wholesale_time as sec_c_wholesale_time,
         cast(null as decimal(20, 2)) as sec_c_brokered,
         d.total_deposits_usd as sec_c_total,
+        d.insured_total as sec_c_insured_total,
         -- Section D：其他融资，演示环境无数据
         cast(null as decimal(20, 2)) as sec_d_total,
-        -- Section E：现金（不区分集团内，只在 is_intracompany = false 时 join）
+        -- Section E：现金与同业存放（不区分集团内，只在 is_intracompany = false 时 join）
+        -- 列名必须与语义一一对应：库存现金不能挂到「央行存款」列上，否则读的人必然误判。
+        -- 央行存款列保持 NULL：本演示的总账里没有央行准备金科目，NULL 表示「无此业务」。
         c.total_cash as sec_e_cash_total,
-        c.cash_on_hand as sec_e_central_bank_dep,
-        c.total_cash as sec_e_cash_equiv_total,
+        c.cash_on_hand as sec_e_cash_on_hand,
+        c.due_from_banks as sec_e_due_from_banks,
+        cast(null as decimal(20, 2)) as sec_e_central_bank_dep,
         -- Section F：贷款流入（30 天内到期）
         coalesce(l.commercial_inflow, 0) as sec_f_commercial_inflow,
         coalesce(l.retail_inflow, 0) as sec_f_retail_inflow,
@@ -306,10 +312,12 @@ entity_standalone as (
         sum(sec_c_wholesale_time) as sec_c_wholesale_time,
         cast(null as decimal(20, 2)) as sec_c_brokered,
         sum(sec_c_total) as sec_c_total,
+        sum(sec_c_insured_total) as sec_c_insured_total,
         cast(null as decimal(20, 2)) as sec_d_total,
         sum(sec_e_cash_total) as sec_e_cash_total,
+        sum(sec_e_cash_on_hand) as sec_e_cash_on_hand,
+        sum(sec_e_due_from_banks) as sec_e_due_from_banks,
         sum(sec_e_central_bank_dep) as sec_e_central_bank_dep,
-        sum(sec_e_cash_equiv_total) as sec_e_cash_equiv_total,
         sum(sec_f_commercial_inflow) as sec_f_commercial_inflow,
         sum(sec_f_retail_inflow) as sec_f_retail_inflow,
         sum(sec_f_mortgage_inflow) as sec_f_mortgage_inflow,
@@ -384,10 +392,12 @@ consolidated as (
         sum(sec_c_wholesale_time) as sec_c_wholesale_time,
         cast(null as decimal(20, 2)) as sec_c_brokered,
         sum(sec_c_total) as sec_c_total,
+        sum(sec_c_insured_total) as sec_c_insured_total,
         cast(null as decimal(20, 2)) as sec_d_total,
         sum(sec_e_cash_total) as sec_e_cash_total,
+        sum(sec_e_cash_on_hand) as sec_e_cash_on_hand,
+        sum(sec_e_due_from_banks) as sec_e_due_from_banks,
         sum(sec_e_central_bank_dep) as sec_e_central_bank_dep,
-        sum(sec_e_cash_equiv_total) as sec_e_cash_equiv_total,
         sum(sec_f_commercial_inflow) as sec_f_commercial_inflow,
         sum(sec_f_retail_inflow) as sec_f_retail_inflow,
         sum(sec_f_mortgage_inflow) as sec_f_mortgage_inflow,

@@ -230,6 +230,10 @@ CREATE TABLE ads.ads_fr2052a_alerts (
 | >1Y | 366 | 99999 |
 | OPEN | NULL | NULL |
 
+存款表的分桶走**行为口径**（`behavioral_bucket` 宏）：活期与储蓄存款没有到期日，按业务行为归 `O/N`（可随时提取，行为上等同隔夜），不落 `OPEN`；`OPEN` 只对「有到期日概念却没填到期日」的行生效。其余五张明细表按剩余天数分桶（`maturity_bucket` 宏）。
+
+为什么必须这么分：30 天现金流预测与报表只取 `O/N` / `1-7D` / `8-30D` 三个桶，活期与储蓄一旦落 `OPEN` 就被整体排除在流出之外 —— 而这两类存款正是 30 天流出的主体。
+
 ### 3.2 HQLA 分类
 
 | 等级 | 示例 | Haircut |
@@ -239,6 +243,13 @@ CREATE TABLE ads.ads_fr2052a_alerts (
 | Level 2B | 投资级公司债、部分股票 | 50% |
 | Non-HQLA | 其他 | 不纳入 |
 
+Level 1 在本演示里由两块组成：
+
+- 非受限的一级证券 —— `sec_i_unencumbered_hqla_l1`，来自 `owd_securities` 里分级为 `LEVEL_1` 的行，按未质押口径
+- 现金与同业存放 —— `sec_e_cash_total`，即总账 `1001` 库存现金 + `1100` 同业存放。现金没有「已质押」概念，全额计入
+
+LCR 分子的 L1 取这两块之和，见 `python/alerts/liquidity_monitor.py`。只算证券会把分子系统性压低，LCR 偏低时分不清是资产结构差还是口径漏算。
+
 ### 3.3 关键约束
 
 | 规则 | 约束 |
@@ -247,6 +258,8 @@ CREATE TABLE ads.ads_fr2052a_alerts (
 | HQLA 二级资产上限 | Level 2A + Level 2B ≤ 总 HQLA × 40% |
 | Operational 存款 | 流出率低于 Non-Operational |
 | 币种转换 | 报告日即期汇率转 USD；汇率表必须覆盖业务数据里出现的全部（报告日, 币种）组合，缺行由 `dbt/tests/assert_fx_covered.sql` 断言失败拦住（折算失败必须出声，不允许静默变 NULL） |
+| 行为假设覆盖 | ODS 存款里出现的每个 (product_category, customer_segment, maturity_bucket) 组合都必须在 ref_behavior_assumptions 里有行。缺行由两道拦住：生成器自检在生成阶段验（`check_behavior_coverage`），`dbt/tests/assert_behavior_covered.sql` 在转换后验。未命中不再静默兜底 10%，缺假设是缺陷 |
+| 受保金额截断 | 存款保险限额是美元限额，且按「客户 × 法人实体」聚合后截断：同一客户在同一家银行的多笔存款合计受保，超限时各笔按占该客户受保总额的比例等比缩到限额。必须先折算 USD 再截断 —— 在原币上截断会让外币存款的受保金额量级错误。`sec_c_total` 是全额，受保部分单列在 `sec_c_insured_total`。限额单源在 `dbt_project.yml` 的 `deposit_insurance_limit_usd`，上限断言见 `dbt/tests/assert_insured_within_limit.sql` |
 | 报告期隔离 | 跨期不混算：所有聚合与关联都按 `report_date` 分组与匹配（金额列、对账、核对脚本同理）。多个报告期共存时，每期只汇总自己的明细 |
 | 净额结算 | 仅有有效净额协议时允许 |
 
@@ -266,6 +279,47 @@ CREATE TABLE ads.ads_fr2052a_alerts (
 | VDQ-016 | ODS | T+1 08:00 ET 前加载 | ERROR |
 | VDQ-017 | ADS | L2A + L2B ≤ 总 HQLA 40% | WARNING |
 | VDQ-018 | ADS | 现金流入 cap = 总流出 75% | ERROR |
+
+### 3.5 行为假设派生规则
+
+ref_behavior_assumptions 从原来的 6 行手工样本改为由规则派生的全覆盖矩阵。维度取值按 ODS 数据里实际出现的组合取，不凭空造维度。
+
+组合 = product_category × customer_segment × maturity_bucket。流失率 = 基础流失率 × 客户分段调整 × 到期分桶调整，clamp [0, 1]。
+
+活期与储蓄存款没有到期日，按行为口径归到 O/N（活期可随时提取，行为上等同隔夜），只有 O/N 一个桶。定期类（CD、TIME）按到期日覆盖全部到期桶。
+
+基础流失率（活期低于定期：活期随时可取但行为上不会全走，定期到期不续约概率更高）：
+
+| 产品类别 | 基础流失率 |
+|---|---|
+| DEMAND | 5% |
+| SAVINGS | 8% |
+| CD | 30% |
+| TIME | 25% |
+
+客户分段调整（零售低于对公）：
+
+| 客户分段 | 调整系数 |
+|---|---|
+| RETAIL | 0.5 |
+| CORPORATE | 1.0 |
+| SOVEREIGN | 0.8 |
+| FINANCIAL | 1.5 |
+| AFFILIATE | 0.3 |
+
+到期分桶调整（短桶流失率高）：
+
+| 分桶 | 调整系数 |
+|---|---|
+| O/N | 1.2 |
+| 1-7D | 1.1 |
+| 8-30D | 1.0 |
+| 31-90D | 0.8 |
+| 91-180D | 0.6 |
+| 181D-1Y | 0.4 |
+| >1Y | 0.2 |
+
+派生关系的真源是 `python/generators/ref_data.py` 的 `_derive_behavior_rows`，本节与之同步更新。
 
 ## §4 数据血缘
 

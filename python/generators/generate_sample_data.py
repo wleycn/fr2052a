@@ -49,8 +49,8 @@ from .config import (
     VOLUMES,
     report_dates,
 )
-from .ods_data import GL_ACCOUNTS, GL_ROWS_PER_ACCOUNT
-from .ref_data import FX_RATES, ReferenceData
+from .ods_data import GL_ACCOUNTS, GL_ROWS_PER_ACCOUNT, TERM_DEPOSIT_TYPES
+from .ref_data import BEHAVIOR_ASSUMPTION_ROWS, FX_RATES, ReferenceData
 from .ref_data import generate_all as generate_ref
 
 # 外部对手方数（CP0001–CP0050）+ 集团内对手方数（CP9001–CP9005，每实体一个）
@@ -85,7 +85,7 @@ EXPECTED_REF_ROWS: dict[str, int] = {
     # 由 FX_RATES 币种数 + 1（USD→USD）派生，加币种不会因硬编码挡路
     "ref_exchange_rates": len(FX_RATES) + 1,
     "ref_regulatory_mapping": 5,
-    "ref_behavior_assumptions": 6,
+    "ref_behavior_assumptions": len(BEHAVIOR_ASSUMPTION_ROWS),
     "ref_calendar": 122,
     "ref_validation_rules": 20,
 }
@@ -446,6 +446,91 @@ def check_amount_signs(output_dir: Path) -> list[CheckResult]:
     return results
 
 
+# 行为假设覆盖率自检用的维度归一表：与 dbt/macros/fr2052a_rules.sql 的
+# deposit_product_category 与 customer_segment 两个宏同源。
+# 复现一份是为了在生成阶段（还没有 Spark）就拦住「假设表缺组合」；权威判定在转换后的
+# 数据上做（dbt/tests/assert_behavior_covered.sql）。两边若漂移，dbt 侧断言会失败。
+DEPOSIT_CATEGORY: dict[str, str] = {
+    "CHK": "DEMAND",
+    "SAV": "SAVINGS",
+    "MMDA": "SAVINGS",
+    "CD": "CD",
+    "TIME": "TIME",
+}
+CUSTOMER_SEGMENT: dict[str, str] = {
+    "IND": "RETAIL",
+    "CORP": "CORPORATE",
+    "FI": "FINANCIAL",
+    "GOV": "SOVEREIGN",
+    "AFFIL": "AFFILIATE",
+}
+# 行为分桶的可能取值：活期/储蓄按行为口径恒归 O/N，定期类按剩余天数落到任一到期桶。
+# 只列取值不列阈值 —— 阈值由 behavioral_bucket 宏定义，自检不复现阈值，避免两处各写一份。
+DEMAND_BUCKETS: tuple[str, ...] = ("O/N",)
+TERM_BUCKETS: tuple[str, ...] = ("O/N", "1-7D", "8-30D", "31-90D", "91-180D", "181D-1Y", ">1Y")
+
+
+def check_behavior_coverage(output_dir: Path) -> list[CheckResult]:
+    """行为假设覆盖率自检：ODS 存款里出现的每个组合都必须在假设表里有行。
+
+    组合 = (product_category, customer_segment, maturity_bucket)。
+
+    定期存款不逐笔算剩余天数，只要求「可能落到的每个到期桶」都有假设行 ——
+    具体落哪个桶由 behavioral_bucket 宏算，自检不复现它的阈值。
+
+    缺行即 FAIL。这条自检在生成阶段跑（那时还没有 Spark），与转换后的
+    dbt/tests/assert_behavior_covered.sql 一前一后守同一件事。
+    """
+    assumptions = read_csv_rows(output_dir / REF_SUBDIR / "ref_behavior_assumptions.csv")
+    assumption_keys = {
+        (row["product_category"], row["customer_segment"], row["maturity_bucket"]) for row in assumptions
+    }
+
+    deposits = read_csv_rows(output_dir / ODS_SUBDIR / "ods_deposits.csv")
+    missing: set[tuple[str, str, str]] = set()
+    probes = 0
+    # 定期存款必须带到期日：到期日为空会掉进 OPEN 桶，而行为假设矩阵只有 O/N 与到期桶
+    term_without_maturity: list[str] = []
+    for row in deposits:
+        deposit_type = row.get("deposit_type", "")
+        category = DEPOSIT_CATEGORY.get(deposit_type)
+        segment = CUSTOMER_SEGMENT.get(row.get("customer_type_raw", ""))
+        if category is None or segment is None:
+            missing.add((deposit_type or "?", row.get("customer_type_raw", "?"), "维度未归一"))
+            continue
+        if deposit_type in TERM_DEPOSIT_TYPES:
+            if not row.get("maturity_date"):
+                term_without_maturity.append(row["source_record_id"])
+            buckets = TERM_BUCKETS
+        else:
+            buckets = DEMAND_BUCKETS
+        probes += len(buckets)
+        missing |= {
+            (category, segment, bucket) for bucket in buckets if (category, segment, bucket) not in assumption_keys
+        }
+
+    return [
+        CheckResult(
+            name="行为假设覆盖",
+            passed=not missing,
+            detail=(
+                f"ODS 探查组合 {probes}，假设表行数 {len(assumption_keys)}，全部命中"
+                if not missing
+                else f"缺 {len(missing)} 个组合，例如 {sorted(missing)[:3]}"
+            ),
+        ),
+        CheckResult(
+            name="定期存款到期日非空",
+            passed=not term_without_maturity,
+            detail=(
+                "全部有到期日"
+                if not term_without_maturity
+                else f"{len(term_without_maturity)} 行缺到期日，例如 {term_without_maturity[:2]}"
+            ),
+        ),
+    ]
+
+
 def run_checks(
     output_dir: Path,
     ref: ReferenceData,
@@ -464,6 +549,7 @@ def run_checks(
     results.extend(check_amount_signs(output_dir))
     results.extend(check_gl_balanced(output_dir, valid_dates))
     results.extend(check_intracompany_pairs(output_dir))
+    results.extend(check_behavior_coverage(output_dir))
     return results
 
 

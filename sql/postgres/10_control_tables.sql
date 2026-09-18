@@ -472,6 +472,66 @@ BEGIN
     END IF;
 END $$;
 
+-- ads_fr2052a_report: Section E 列名与语义对齐（C4a）
+--   原来的 sec_e_central_bank_dep 挂的是库存现金 —— 列名与语义错配，读的人必然误判；
+--   sec_e_cash_equiv_total 与 sec_e_cash_total 是同一个数（重复计两次）。
+--   改为：库存现金单列、同业存放单列、央行存款列保持 NULL（本演示总账里没有该科目）。
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'ads' AND c.relname = 'ads_fr2052a_report'
+    ) THEN
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_catalog.pg_attribute a
+            JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'ads' AND c.relname = 'ads_fr2052a_report'
+              AND a.attname = 'sec_e_cash_on_hand' AND a.attnum > 0 AND NOT a.attisdropped
+        ) THEN
+            ALTER TABLE ads.ads_fr2052a_report ADD COLUMN sec_e_cash_on_hand NUMERIC(20, 2);
+        END IF;
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_catalog.pg_attribute a
+            JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'ads' AND c.relname = 'ads_fr2052a_report'
+              AND a.attname = 'sec_e_due_from_banks' AND a.attnum > 0 AND NOT a.attisdropped
+        ) THEN
+            ALTER TABLE ads.ads_fr2052a_report ADD COLUMN sec_e_due_from_banks NUMERIC(20, 2);
+        END IF;
+        IF EXISTS (
+            SELECT 1 FROM pg_catalog.pg_attribute a
+            JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'ads' AND c.relname = 'ads_fr2052a_report'
+              AND a.attname = 'sec_e_cash_equiv_total' AND a.attnum > 0 AND NOT a.attisdropped
+        ) THEN
+            -- 重复列：与 sec_e_cash_total 同值，模型里已删掉，库里也一并删
+            ALTER TABLE ads.ads_fr2052a_report DROP COLUMN sec_e_cash_equiv_total;
+        END IF;
+    END IF;
+END $$;
+
+-- ads_fr2052a_report: 新增 sec_c_insured_total 列（C4a：受保金额先折算再截断，报表新增受保合计列）
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'ads' AND c.relname = 'ads_fr2052a_report'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'ads' AND c.relname = 'ads_fr2052a_report'
+          AND a.attname = 'sec_c_insured_total' AND a.attnum > 0 AND NOT a.attisdropped
+    ) THEN
+        ALTER TABLE ads.ads_fr2052a_report ADD COLUMN sec_c_insured_total NUMERIC(20, 2);
+    END IF;
+END $$;
+
 -- ads_gl_reconciliation: 新增 entity_code 列（按视角对账需要区分实体/合并行）
 DO $$
 BEGIN

@@ -93,7 +93,11 @@ def number(value: Any) -> float:
 
 def compute_metrics(row: dict[str, Any], regulatory_min: float) -> dict[str, Any]:
     """把一条报表行换算成 LCR 口径的指标。"""
-    l1 = number(row["sec_i_unencumbered_hqla_l1"])
+    # Level 1 不只是非受限的一级证券：现金与同业存放同样是最优质的流动性资产
+    # （DATA-DESIGN §3.2 的 Level 1 定义里就有它们）。只算证券会把分子系统性压低，
+    # LCR 偏低时无法判断是「资产结构差」还是「口径少算了一块」。
+    # sec_e_cash_total = 总账 1001 + 1100，取合计而不是分别相加，避免同一笔算两次。
+    l1 = number(row["sec_i_unencumbered_hqla_l1"]) + number(row["sec_e_cash_total"])
     l2a = number(row["sec_i_unencumbered_hqla_l2a"])
     l2b = number(row["sec_i_unencumbered_hqla_l2b"])
     unencumbered_l2 = l2a + l2b

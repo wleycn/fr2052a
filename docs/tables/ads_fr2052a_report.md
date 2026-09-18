@@ -53,10 +53,12 @@ dbt `table` 物化整表重建；导出 PostgreSQL 时先清后写并开 `trunca
 | `sec_c_wholesale_time` |
 | `sec_c_brokered` |
 | `sec_c_total` |
+| `sec_c_insured_total` |
 | `sec_d_total` |
 | `sec_e_cash_total` |
+| `sec_e_cash_on_hand` |
+| `sec_e_due_from_banks` |
 | `sec_e_central_bank_dep` |
-| `sec_e_cash_equiv_total` |
 | `sec_f_commercial_inflow` |
 | `sec_f_retail_inflow` |
 | `sec_f_mortgage_inflow` |

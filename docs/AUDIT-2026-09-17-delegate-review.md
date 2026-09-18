@@ -33,6 +33,7 @@
 | 1 | 高 | `run-daily-pipeline.sh` 的 `execute_step` 被 `run_one` 当 `if` 条件调用，**条件上下文里 `set -e` 对函数体不生效**，于是一个环节里的多条命令只有最后一条的状态算数。`dbt-run` 环节是两条命令（`dbt run` + `dbt test`），实测 `dbt run` 报 `AMBIGUOUS_REFERENCE`、gold 表没建出来，环节却报 `[OK]`，直到导出环节才炸 | ✅ 已修：`dbt run ... && dbt test ...` 显式串联，并在 `execute_step` 上方写明这条约束（多条命令必须串联） |
 | 2 | 中 | `verify_scd2.py` 用**有序列表**比较「历史表业务列」与「OWD 当前业务列」。历史表新增列是 `ALTER TABLE ADD COLUMN` 追在末尾，与模型里的位置不同 → 判据失败，而打印出来的「缺 []，多 []」是空的，看的人无从下手 | ✅ 已修：改成按集合比较（列顺序对 SCD2 语义没有影响），并保留差异清单用于报错 |
 | 3 | 中 | `verify_gold.py` 的抵销核对把**全部**集团内放款都从 Section F 里减掉，而报表的 Section F 只含 30 天内到期的贷款本金 —— 减了一个报表里本来就没有的金额，于是「模型是对的、核对是错的」 | ✅ 已修：抵销项按报表列归档（`sec_c_total` / `k` 融资 ← 存款腿；`sec_f_total_inflow` ← 只有 30 天内到期的贷款腿），并新增一条「抵销前提」核对守住「数据里确实存在两条腿」，避免判据在而场景不在 |
+| 4 | 中 | 同一个抵销核对只抵销**余额列**，没抵销**现金流列**：活期/储蓄按行为口径归 `O/N` 之后，集团内存款腿（子公司存于母公司）也开始产生 30 天流失额 —— 实体行含它、合并行（只汇总非集团内行）不含它，于是 `sec_k_total_outflows` 逐期差 135,000（= 7,500,000 × 1.8% 流失率）。属口径修正的连带效应：修好一个判据的漏算，暴露出另一个判据的漏算 | ✅ 已修（批次 C4a）：抵销项补 `sec_k_total_outflows ← 存款腿 30 天流失额`，金额按 `ref.ref_behavior_assumptions` 的流失率从 silver 明细独立算出（不从报表读回，避免自证循环）；仍是逐报告期验算。实测：修前 verify-ads 报 `sec_k_total_outflows: Σ实体 … − 抵销 0 = …` 不一致；修后 PASS 且把抵销项写进结论行「存款腿 30 天流失额 135,000.00」，整条日批 18/18 全绿 |
 
 ## 修的时候自己踩的坑（值得记住）
 
@@ -201,7 +202,7 @@ DAG 只写 `pipeline_command("check-source")`。正负两向都实跑过：正�
 
 | # | 严重度 | 发现 | 本轮处置 |
 |---|---|---|---|
-| 1 | 高 | 30 天预期流出漏掉全部活期/储蓄存款（非定期存款 bucket 落 OPEN 被报表过滤） | ⬜ 待你定（证据已核，未动） | |
+| 1 | 高 | 30 天预期流出漏掉全部活期/储蓄存款（非定期存款 bucket 落 OPEN 被报表过滤） | ✅ 已修（批次 C4a）：新增 `behavioral_bucket` 宏，无到期日的活期/储蓄按行为口径归 `O/N`（原来落 `OPEN`，被 30 天窗口 `where maturity_bucket in ('O/N','1-7D','8-30D')` 过滤掉，等于全部活期存款不进流出）。规则只写在宏一处，`owd_deposits` 与 `verify_silver` 的分桶核对共用同一份定义。实测（两期样本，Server 2）：PG `ads.ads_fr2052a_report.sec_k_total_outflows` 与独立复算逐期逐实体一致（差 ≤ 0.05）—— 独立脚本直接读 `sample_data/ods/ods_deposits.csv` 与 `ref/ref_behavior_assumptions.csv`，按流失率算出活期/储蓄 30 天流失额（2026-09-16：合并口径 58,054,209.10，ENT004 23,168,796.18、ENT002 15,022,186.82），这些金额现在都在流出合计里 |
 | 2 | 高 | GL 对账 Section E 是自比对（两边同读 owd_gl_entries 的 1001/1100），恒 PASS 且零信息量 | ⬜ 待你定（证据已核，未动）。**补注（批次 C3-2a）**：对账模型已重构为「按报告期 × 视角对账」（法人单体行对各自总账、合并行对 `Σ 实体总账 − 集团内往来`），但 Section E 两侧仍同读总账 1001/1100 —— 这条自比对未动，需要有第二套现金来源（或明确改成控制总量核对）才能消除 | |
 | 3 | 高 | 覆盖写（truncate=true）的前置闸只查了表结构，不查业务前提；且 Airflow DAG 把 publish-access 排在 export-pg 之后，与脚本声明的前置条件相反 | ⬜ 待你定（证据已核，未动） |
 | 4 | 高 | 报表与对账模型都不按 report_date 限定：多报告期共存时金额跨期串加、合并行翻倍 | ✅ 已修（批次 C2）：报表 8 个口径 CTE 全部改为按 `(report_date, entity_code)` 分组、8 个 `left join` 补报告日匹配、合并行由 `max(report_date)` 改为按报告日分组；对账模型删掉单行日期构造（`max` + `cross join`），改为两边按期对上。生成器补 `--report-days N` 与按(表名,报告日)派生的随机源，使「加期不扰动已有期」成立。实测：1 期与 2 期输出的同一报告日逐字节一致、2 期行数 = 2 倍；上线跑整条日批 18/18 全绿，改造前快照的 PG `ads` 层 13 张表里报表/明细/对账/台账/版本历史/重述记录**内容 md5 逐字节相同**（另 5 张仅运行时刻戳变化，非时刻戳字段逐一对齐基线） | |
@@ -209,13 +210,13 @@ DAG 只写 `pipeline_command("check-source")`。正负两向都实跑过：正�
 | 6 | 高 | 三张报表表（report/detail/gl_reconciliation）全库无主键或唯一约束，且注释声称存在的『补键列 DO 块』在本仓 sql/ 中并不存在 | ⬜ 待你定（证据已核，未动） |
 | 7 | 高 | 汇率 LEFT JOIN 无缺行保护：折算失败时金额静默变 NULL，而 ref 汇率表只有报告日一行 | ✅ 已修（批次 C1）：OWD 的 join 形态不动，改为**在批次级把缺汇率变成失败** —— 新增 singular test `dbt/tests/assert_fx_covered.sql`（ODS 六张明细表出现的（报告日, 币种）缺 MID 汇率即失败），并让 `dbt-run` 环节在建模后跑断言、不过即整条日批红。同时把「汇率与数据自洽」写成契约 + 生成器自检项（比对写出的汇率 CSV），新增 `--inject-missing-fx` 让缺汇率只能来自「故意制造的缺陷数据」。实测：注入 JPY 后探针确认缺陷状态（汇率表 9 币种无 JPY、bronze 有 82 行 JPY），同态跑日批断言 ERROR=1、环节退 1；恢复正常数据后退 0。留存问题（下一批处理）：汇率表仍只有报告日一天，多报告期需要 C2/C4 一起把日期维度补上 |
 | 8 | 中 | stg_fx_rates 未限定 to_currency='USD'，OWD 各表 join 只用 currency，多目标币种时会行放大 | ✅ 已修（批次 C1）：`stg_fx_rates` 加 `and to_currency = 'USD'`，注释写明多目标币种会行放大、本项目只折 USD；生成器侧汇率行的折算目标恒为 USD |
-| 9 | 中 | 行为假设 join 缺 customer_segment，且未命中时静默套用 10% 默认流失率 | ⬜ 待你定（证据已核，未动） |
+| 9 | 中 | 行为假设 join 缺 customer_segment，且未命中时静默套用 10% 默认流失率 | ✅ 已修（批次 C4a）：① join 补 `customer_segment`；② `ref_behavior_assumptions` 从 6 行手工样本改为按规则派生的**全覆盖矩阵**（4 产品类别 × 5 客户分段 × 到期桶 = 80 行，流失率 = 基础率 × 分段系数 × 分桶系数，夹在 [0,1]）；③ 删掉 `coalesce(a.runoff_rate, 0.1)` 静默兜底。新增两道覆盖闸：生成器自检 `check_behavior_coverage`（生成阶段，没有 Spark 也能拦）+ `dbt/tests/assert_behavior_covered.sql`（转换后，返回行即失败；`dbt-run` 环节串跑断言，不过则整条日批红）。实测：正常数据生成器自检 PASS「ODS 探查组合 3656，假设表行数 80，全部命中」；A/B 探针删掉 `(DEMAND, RETAIL, O/N)` 一行 → FAIL「缺 1 个组合，例如 [('DEMAND', 'RETAIL', 'O/N')]」 |
 | 10 | 中 | is_encumbered 为 NULL 时三层三种处理方式，导致 Section I（非受限+受限）加不回 Section G | ⬜ 待你定（证据已核，未动） |
-| 11 | 中 | 受保存款限额在『原币』上截断 25 万美元，外币存款的受保金额量级错误 | ⬜ 待你定（证据已核，未动） |
-| 12 | 中 | insured_amount_usd 全仓无消费者，而 marts/schema.yml 声称 sec_c_total 已按受保限额截断 | ⬜ 待你定（证据已核，未动） |
-| 13 | 中 | Section E 列名与语义错配：库存现金映射到 sec_e_central_bank_dep，同业存放列整列丢失，total_cash 重复计两次 | ⬜ 待你定（证据已核，未动） |
+| 11 | 中 | 受保存款限额在『原币』上截断 25 万美元，外币存款的受保金额量级错误 | ✅ 已修（批次 C4a）：截断改在折算之后 `least(principal_amount * spot_rate, 限额)`，并且限额按**「客户 × 法人实体」聚合后**截断（客户受保总额超限时，各笔按占该客户受保总额的比例等比分摊）—— 逐笔截断等于给同一客户的多笔存款各发一次额度。限额单源进 `dbt_project.yml` 的 `deposit_insurance_limit_usd`，新增 `dbt/tests/assert_insured_within_limit.sql` 守「同一客户受保合计 ≤ 限额」。实测：独立复算（读 CSV，按客户聚合、按报告日汇率折算）与 PG `sec_c_insured_total` 十行逐实体一致（差 ≤ 0.05）；样本里有 3 个客户受保总额超限且持多笔，逐笔口径会比按客户口径多算 532,555.04 —— 若实现成逐笔，本次比对会不一致 |
+| 12 | 中 | insured_amount_usd 全仓无消费者，而 marts/schema.yml 声称 sec_c_total 已按受保限额截断 | ✅ 已修（批次 C4a）：报表新增 `sec_c_insured_total`（受保存款合计）让这一列有真实消费者，`dbt/models/marts/schema.yml` 的描述改成与实现一致：`sec_c_total` 是**全额**、受保部分单列。PG 侧走显式迁移加列（判存在用 `pg_catalog`）。实测：PG 报表该列存在，值与独立复算逐实体一致 |
+| 13 | 中 | Section E 列名与语义错配：库存现金映射到 sec_e_central_bank_dep，同业存放列整列丢失，total_cash 重复计两次 | ✅ 已修（批次 C4a）：库存现金（总账 1001）与同业存放（1100）各自成列 —— `sec_e_cash_on_hand` / `sec_e_due_from_banks`，央行存款列 `sec_e_central_bank_dep` 保持 NULL 并在模型注释里写明「本演示总账里没有央行准备金科目，NULL 表示无此业务」，删掉与 `sec_e_cash_total` 同值的 `sec_e_cash_equiv_total`（同一事实不写两列）。PG 侧显式迁移加两列、删一列。实测：PG 的 `sec_e%` 列恰为四项、无 `sec_e_cash_equiv_total`；四列值与独立复算（读 `ods_gl_balances.csv` 的 1001/1100 净额）逐实体一致 |
 | 14 | 低 | sec_k_cumulative_30d_gap 与 sec_k_net_funding_gap 是同一个表达式，累计口径名不副实 | ⬜ 待你定（证据已核，未动） |
-| 15 | 中 | LCR 分子不含现金与央行准备金，与 DATA-DESIGN §3.2 的 Level 1 定义不一致 | ⬜ 待你定（证据已核，未动） |
+| 15 | 中 | LCR 分子不含现金与央行准备金，与 DATA-DESIGN §3.2 的 Level 1 定义不一致 | ✅ 已修（批次 C4a）：`liquidity_monitor` 的 L1 = 非受限一级证券 + `sec_e_cash_total`（取 Section E 合计，不分别相加，避免同一笔算两次），L2 的 40% 上限基数同步纳入这个 L1。实测：`ads.ads_liquidity_metrics.hqla_l1_unencumbered_usd` 与报表「非受限一级证券 + 现金」逐行一致（6 行差 ≤ 0.05）；合并口径 L1 由 2,384,335,189 升到 2,522,498,378 |
 | 16 | 中 | 到期证券市值同时进 HQLA 与 30 天流入，形成双向计量 | ⬜ 待你定（证据已核，未动） |
 | 17 | 中 | DATA-DESIGN §2.1/§4 与模型三层漂移：ows_hqla_summary 声称含 40% 截断、ows_collateral_summary 来源写错、血缘图声称 ows_funding_summary 喂报表 | ⬜ 待你定（证据已核，未动） |
 | 18 | 中 | owd_derivatives 折算用交易币种 currency 而非 ODS 声明的 mtm_currency，后者在 OWD 层被丢弃 | ⬜ 待你定（证据已核，未动） |

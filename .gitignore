@@ -26,3 +26,4 @@ deploy/server2/spark/jdk17/
 
 # 本地教学文档（只留本机，不进版本库）
 教学文档-小白版.md
+ProjectInstruction.md

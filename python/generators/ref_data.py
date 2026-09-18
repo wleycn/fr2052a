@@ -218,14 +218,65 @@ REGULATORY_MAPPING_ROWS = [
     ),
 ]
 
-BEHAVIOR_ASSUMPTION_ROWS = [
-    ("DEMAND", "RETAIL", "O/N", 0.05, 0.00, "2024-01-01", ""),
-    ("SAVINGS", "RETAIL", "1-7D", 0.10, 0.00, "2024-01-01", ""),
-    ("TIME", "CORPORATE", "8-30D", 0.30, 0.00, "2024-01-01", ""),
-    ("CD", "FINANCIAL", "31-90D", 0.50, 0.00, "2024-01-01", ""),
-    ("BROKERED", "RETAIL", "O/N", 0.20, 0.00, "2024-01-01", ""),
-    ("MMDA", "CORPORATE", "O/N", 0.15, 0.00, "2024-01-01", ""),
-]
+# 行为假设派生规则：由基础流失率 × 客户分段调整 × 到期分桶调整组合出全覆盖矩阵。
+# 维度取值从 ODS 生成器的实际维度派生（不凭空造维度）：
+#   产品类别 deposit_product_category 宏的取值里 ODS 实际产生的（CHK→DEMAND, SAV/MMDA→SAVINGS, CD, TIME）
+#   客户分段 customer_segment 宏的取值（IND→RETAIL, CORP→CORPORATE, GOV→SOVEREIGN, FI→FINANCIAL, AFFIL→AFFILIATE）
+#   到期分桶 behavioral_bucket 宏：活期/储蓄恒归 O/N；定期类按到期日归桶
+# 派生关系：活期低于定期（活期随时可取但行为上不会全走，定期到期不续约概率更高）、零售低于对公
+# 详见 docs/business/DATA-DESIGN.md §3.5 行为假设派生规则
+_BEHAVIOR_PRODUCT_CATEGORIES = ("DEMAND", "SAVINGS", "CD", "TIME")
+_BEHAVIOR_CUSTOMER_SEGMENTS = ("RETAIL", "CORPORATE", "SOVEREIGN", "FINANCIAL", "AFFILIATE")
+# 活期/储蓄按行为口径恒归 O/N；定期类按到期日可落到以下桶
+_TERM_BUCKETS = ("O/N", "1-7D", "8-30D", "31-90D", "91-180D", "181D-1Y", ">1Y")
+_DEMAND_BUCKETS = ("O/N",)
+
+# 基础流失率
+_BASE_RUNOFF: dict[str, float] = {
+    "DEMAND": 0.05,
+    "SAVINGS": 0.08,
+    "CD": 0.30,
+    "TIME": 0.25,
+}
+# 客户分段调整系数（零售低于对公）
+_SEGMENT_FACTOR: dict[str, float] = {
+    "RETAIL": 0.5,
+    "CORPORATE": 1.0,
+    "SOVEREIGN": 0.8,
+    "FINANCIAL": 1.5,
+    "AFFILIATE": 0.3,
+}
+# 到期分桶调整系数（短桶流失率高）
+_BUCKET_FACTOR: dict[str, float] = {
+    "O/N": 1.2,
+    "1-7D": 1.1,
+    "8-30D": 1.0,
+    "31-90D": 0.8,
+    "91-180D": 0.6,
+    "181D-1Y": 0.4,
+    ">1Y": 0.2,
+}
+
+
+def _derive_behavior_rows() -> list[tuple[str, str, str, float, float, str, str]]:
+    """派生全覆盖行为假设矩阵。
+
+    组合 = product_category × customer_segment × maturity_bucket。
+    流失率 = 基础流失率 × 客户分段调整 × 到期分桶调整，clamp [0, 1]。
+    活期/储蓄只有 O/N 桶（行为口径），定期类覆盖全部到期桶。
+    """
+    rows: list[tuple[str, str, str, float, float, str, str]] = []
+    for cat in _BEHAVIOR_PRODUCT_CATEGORIES:
+        buckets = _DEMAND_BUCKETS if cat in ("DEMAND", "SAVINGS") else _TERM_BUCKETS
+        for seg in _BEHAVIOR_CUSTOMER_SEGMENTS:
+            for bucket in buckets:
+                rate = _BASE_RUNOFF[cat] * _SEGMENT_FACTOR[seg] * _BUCKET_FACTOR[bucket]
+                rate = min(max(rate, 0.0), 1.0)
+                rows.append((cat, seg, bucket, round(rate, 4), 0.0, "2024-01-01", ""))
+    return rows
+
+
+BEHAVIOR_ASSUMPTION_ROWS = _derive_behavior_rows()
 
 # 校验规则：与 [02] §2.7 的 20 条 VDQ 逐条对应。
 # 表达式里的列名必须与 silver/gold 层的实际列名一致 —— 规则与实现两张皮的话，

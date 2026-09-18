@@ -84,6 +84,17 @@ def check_maturity_buckets(spark: SparkSession) -> list[CheckResult]:
                 detail=f"{len(observed)} 种取值，全部有定义" if not unknown else f"未定义取值 {sorted(unknown)}",
             )
         )
+    # 行为分桶一致性：活期与储蓄存款的 maturity_bucket 必须为 O/N，
+    # 而不是 OPEN（行为口径与 maturity_bucket 宏定义共用同一份规则，两处各写一份必然漂移）
+    dep = spark.table("silver.owd_deposits")
+    misplaced = dep.filter((dep.product_category.isin("DEMAND", "SAVINGS")) & (dep.maturity_bucket != "O/N")).count()
+    results.append(
+        CheckResult(
+            name="行为分桶 owd_deposits",
+            passed=misplaced == 0,
+            detail="活期/储蓄全部归 O/N" if misplaced == 0 else f"{misplaced} 行活期/储蓄未归 O/N",
+        )
+    )
     return results
 
 

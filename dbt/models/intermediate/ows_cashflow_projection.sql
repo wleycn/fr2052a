@@ -19,10 +19,13 @@ with deposit_runoff as (
         'C-OUT' as line_item,
         d.maturity_bucket,
         cast(0 as decimal(20, 2)) as expected_inflow_usd,
-        round(sum(d.principal_amount_usd * coalesce(a.runoff_rate, 0.1)), 2) as expected_outflow_usd
+        -- 不再对未命中的假设兜底 10%：缺假设是缺陷，由 dbt/tests/assert_behavior_covered.sql 拦住。
+        -- coalesce 只兜「该产品类别一行假设都没有」这种全空求和，不掩盖部分缺行 —— 部分缺行由断言拦。
+        round(coalesce(sum(d.principal_amount_usd * a.runoff_rate), 0), 2) as expected_outflow_usd
     from {{ ref('owd_deposits') }} d
     left join {{ source('ref', 'ref_behavior_assumptions') }} a
         on a.product_category = d.product_category
+       and a.customer_segment = d.customer_segment
        and a.maturity_bucket = d.maturity_bucket
     group by d.report_date, d.entity_code, d.is_intracompany, d.maturity_bucket
 

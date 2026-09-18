@@ -28,6 +28,10 @@ vars:
   # 将来接入第二种监管报表时只换变量或按报表拆模型，不必去 SQL 里找散落的字面量。
   report_code: "FR2052A"
 
+  # 存款保险限额（美元）：受保金额按「客户 × 法人实体」聚合后截断的额度上限。
+  # 模型与断言都读这一个变量，避免限额在两个文件里各写一份、改一处漏一处。
+  deposit_insurance_limit_usd: 250000
+
   # PII 脱敏模板：dbt 的 mask_pii 宏与 python/governance/build_pii_vault.py 都读这里，不各写一份
   pii_mask_template: "concat('h_', substr(sha2(concat_ws('|', '{salt}', cast({column} as string)), 256), 1, 16))"
 

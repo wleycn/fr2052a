@@ -150,6 +150,14 @@ class IntracompanyAmounts:
     loan_leg_within_30d: float
     """30 天内到期的那部分贷款腿。合并口径要从 Section F 剔除。"""
 
+    deposit_leg_runoff_30d: float
+    """存款腿在 30 天窗口内的行为流失额。合并口径要从 Section K 的流出合计里剔除。
+
+    只剔本金是不够的：存款腿进了 30 天现金流预测，就带着自己的流失额进了
+    实体口径的流出合计；合并行不含集团内行，于是两边差一个流失额。
+    流失额按 ref_behavior_assumptions 的流失率算，不从报表读回来。
+    """
+
     def elimination_for(self, column: str) -> float:
         """某个报表列在合并口径里应剔除的金额。
 
@@ -161,6 +169,8 @@ class IntracompanyAmounts:
             return self.deposit_leg
         if column == "sec_f_total_inflow":
             return self.loan_leg_within_30d
+        if column == "sec_k_total_outflows":
+            return self.deposit_leg_runoff_30d
         return 0.0
 
 
@@ -177,10 +187,21 @@ def intracompany_amounts(spark: SparkSession, period: str) -> IntracompanyAmount
         f"from silver.owd_loans "
         f"where is_intracompany and cast(report_date as string) = '{period}'"
     ).collect()[0]
+    deposit_runoff = spark.sql(
+        f"select round(sum(d.principal_amount_usd * a.runoff_rate), 2) as total "
+        f"from silver.owd_deposits d "
+        f"join ref.ref_behavior_assumptions a "
+        f"  on a.product_category = d.product_category "
+        f" and a.customer_segment = d.customer_segment "
+        f" and a.maturity_bucket = d.maturity_bucket "
+        f"where d.is_intracompany and cast(d.report_date as string) = '{period}' "
+        f"  and d.maturity_bucket in ('O/N', '1-7D', '8-30D')"
+    ).collect()[0]["total"]
     return IntracompanyAmounts(
         deposit_leg=float(deposit_leg or 0),
         loan_leg=float(loan_rows["total"] or 0),
         loan_leg_within_30d=float(loan_rows["within_30d"] or 0),
+        deposit_leg_runoff_30d=float(deposit_runoff or 0),
     )
 
 
@@ -225,7 +246,8 @@ def check_consolidation(spark: SparkSession) -> list[CheckResult]:
                 passed=not mismatched,
                 detail=(
                     f"{len(CONSOLIDATION_COLUMNS)} 列逐列验算一致"
-                    f"（抵销：存款腿 {ic.deposit_leg:,.2f}、30 天内到期的贷款腿 {ic.loan_leg_within_30d:,.2f}）"
+                    f"（抵销：存款腿 {ic.deposit_leg:,.2f}、30 天内到期的贷款腿 {ic.loan_leg_within_30d:,.2f}、"
+                    f"存款腿 30 天流失额 {ic.deposit_leg_runoff_30d:,.2f}）"
                     if not mismatched
                     else f"不一致 {mismatched[:2]}"
                 ),

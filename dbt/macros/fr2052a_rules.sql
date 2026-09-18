@@ -20,6 +20,23 @@
 {%- endmacro %}
 
 
+{#- 行为分桶：无到期日的活期/储蓄存款按行为口径归 O/N（可随时提取，行为上等同隔夜）。
+    有到期日的产品仍按剩余天数归桶。规则只写这一处，模型与校验共用同一份定义。 -#}
+{% macro behavioral_bucket(product_category_expr, days_expr) -%}
+    case
+        when {{ product_category_expr }} in ('DEMAND', 'SAVINGS') then 'O/N'
+        when {{ days_expr }} is null then 'OPEN'
+        when {{ days_expr }} <= 0 then 'O/N'
+        when {{ days_expr }} <= 7 then '1-7D'
+        when {{ days_expr }} <= 30 then '8-30D'
+        when {{ days_expr }} <= 90 then '31-90D'
+        when {{ days_expr }} <= 180 then '91-180D'
+        when {{ days_expr }} <= 365 then '181D-1Y'
+        else '>1Y'
+    end
+{%- endmacro %}
+
+
 {#- HQLA 分级：证券类型 + 评级决定等级 -#}
 {% macro hqla_level(security_type_expr, rating_expr) -%}
     case
