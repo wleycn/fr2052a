@@ -79,11 +79,25 @@ def connection_properties() -> dict[str, str]:
 
 
 def target_columns(spark: SparkSession, url: str, table: str, properties: dict[str, Any]) -> list[str] | None:
-    """取目标表现有列；表还不存在时返回 None。"""
-    try:
-        return spark.read.jdbc(url, f"(SELECT * FROM {table} WHERE 1 = 0) AS probe", properties).columns
-    except Exception:  # noqa: BLE001 - 表不存在是正常情况（首次导出）
+    """取目标表现有列；**只有表确实不存在**时才返回 None（首次导出）。
+
+    「表不存在」与「表存在但读不到」必须分开：后者（权限、瞬时故障、catalog 未刷新）如果也
+    变成 None，下面那层防漂移比对会整体跳过、直接覆盖写 —— 那正是本函数要防的事。
+
+    判存在用 `pg_catalog` 而不是 `information_schema`：后者只列出当前角色有权限的对象，
+    「表在、但没权限读」会被它藏成「不存在」，于是退化回静默跳过比对的老路。实测过：
+    无权限角色看 `information_schema.tables` 是 0 行，看 `pg_class` 是 1 行。
+    """
+    schema, _, name = table.partition(".")
+    probe = (
+        "(SELECT 1 FROM pg_catalog.pg_class c "
+        "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+        f"WHERE n.nspname = '{schema}' AND c.relname = '{name}' "
+        "AND c.relkind IN ('r', 'p', 'v', 'm', 'f')) AS probe"
+    )
+    if not spark.read.jdbc(url, probe, properties=properties).take(1):
         return None
+    return spark.read.jdbc(url, f"(SELECT * FROM {table} WHERE 1 = 0) AS probe", properties=properties).columns
 
 
 def schema_diff(frame: DataFrame, existing: list[str]) -> tuple[list[str], list[str]]:

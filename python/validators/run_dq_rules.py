@@ -102,31 +102,36 @@ class RuleResult:
 
 def evaluate_rule(
     spark: SparkSession, rule_id: str, expression: str, targets: tuple[str, ...]
-) -> tuple[int, list[str], int]:
+) -> tuple[int, list[str], int, list[str]]:
     """对规则涉及的表统计违规行数。
 
-    返回 (违规总数, 明细, 实际参与评估的表数)。
+    返回 (违规总数, 明细, 实际参与评估的表数, 被跳过的表清单)。
 
     某张表若不含规则表达式引用的列，Spark 会报 UNRESOLVED_COLUMN —— 这说明这条规则
     对该表不适用（例如 `LENGTH(currency) = 3` 遇到总账表，列名是 currency_code），
     此时跳过该表而不是让整批失败。用 Spark 的报错来判断，比在代码里用正则猜列名可靠。
+
+    跳过这件事要留痕：调用方据此判断规则覆盖面是否缩水。列名漂移会让一条规则
+    悄悄从 5 张表缩到 3 张表，如果只看违规数，输出仍是 PASS。
     """
     total = 0
     details: list[str] = []
     evaluated = 0
+    skipped: list[str] = []
     for table in targets:
         try:
             violations = spark.sql(f"select count(*) as c from {table} where not ({expression})").collect()[0]["c"]
         except Exception as error:
             message = str(error)
             if "UNRESOLVED_COLUMN" in message or "cannot be resolved" in message:
+                skipped.append(table)
                 continue
             raise
         evaluated += 1
         total += violations
         if violations:
             details.append(f"{table}:{violations} 行违规")
-    return total, details, evaluated
+    return total, details, evaluated, skipped
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -154,13 +159,16 @@ def main(argv: list[str]) -> int:
             empty = [table for table in ALL_BRONZE if spark.table(table).count() == 0]
             violations = len(empty)
             details = [f"{table} 无数据" for table in empty]
+            detail_text = "；".join(details) if details else "无违规"
             passed = violations == 0
         elif rule_id in RULE_TARGETS:
-            violations, details, evaluated = evaluate_rule(
-                spark, rule_id, rule["sql_expression"], RULE_TARGETS[rule_id]
+            targets = RULE_TARGETS[rule_id]
+            violations, details, evaluated, skipped_tables = evaluate_rule(
+                spark, rule_id, rule["sql_expression"], targets
             )
             if evaluated == 0:
-                # 规则引用的列在所有目标表里都不存在 → 这条规则对本层不适用
+                # 全部目标表都不适用 → SKIPPED，但要说清跳过了哪些表
+                detail_text = f"全部目标表被跳过（列名不匹配）：{skipped_tables}"
                 results.append(
                     RuleResult(
                         rule_id=rule_id,
@@ -169,14 +177,20 @@ def main(argv: list[str]) -> int:
                         severity=rule["severity"],
                         apply_layer=rule["apply_layer"],
                         check_result="SKIPPED",
-                        detail="目标表中不存在该规则引用的列",
+                        detail=detail_text,
                         violations=0,
                     )
                 )
                 continue
-            passed = violations == 0
+            coverage = f"已评估 {evaluated}/{len(targets)} 张"
+            if skipped_tables:
+                coverage += f"，跳过 {skipped_tables}"
+            detail_text = coverage + ("；" + "；".join(details) if details else "")
+            # 覆盖面缩水不能算通过：ERROR 级规则若少查了表，说明列名漂移把规则悄悄缩小了
+            passed = violations == 0 and not (rule["severity"] == "ERROR" and skipped_tables)
         else:
             reason = CROSS_TABLE_RULES.get(rule_id, "未绑定应用表")
+            detail_text = reason
             results.append(
                 RuleResult(
                     rule_id=rule_id,
@@ -185,7 +199,7 @@ def main(argv: list[str]) -> int:
                     severity=rule["severity"],
                     apply_layer=rule["apply_layer"],
                     check_result="SKIPPED",
-                    detail=reason,
+                    detail=detail_text,
                     violations=0,
                 )
             )
@@ -199,7 +213,7 @@ def main(argv: list[str]) -> int:
                 severity=rule["severity"],
                 apply_layer=rule["apply_layer"],
                 check_result="PASS" if passed else "FAIL",
-                detail="；".join(details) if details else "无违规",
+                detail=detail_text,
                 violations=violations,
             )
         )

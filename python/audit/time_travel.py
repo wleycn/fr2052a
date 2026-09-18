@@ -12,6 +12,12 @@
     --diff A B                  比较两个快照的行数与键集合差异，定位「哪次改动动了什么」
     --trace-key <值>            把一个键在各快照里的取值逐版列出来，用于重述取证
 
+参数校验：
+    --table 必须是「库名.表名」格式（只允许一层点，字母开头）
+    --key-column 与 --columns 的每一项必须是合法标识符（字母开头，只含字母数字下划线）
+    --diff 的快照号必须是纯数字
+    --trace-key 进 SQL 时走单引号转义，防止注入
+
 用法（Server 2，经 spark-submit 包装脚本执行）：
 
     bash spark-submit-fr2052a.sh /opt/fr2052a-app/python/audit/time_travel.py \
@@ -25,9 +31,22 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 
 from pyspark.sql import SparkSession
+
+TABLE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$")  # 库.表，只允许一层点
+IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def sql_literal(value: str) -> str:
+    """把字符串包成 SQL 字面量：单引号翻倍转义。
+
+    Spark SQL 的 SQL 接口没有绑定参数，标识符与字面量都只能拼进语句里，拼之前必须转义 ——
+    否则键值里的一个单引号就能改变语句结构。
+    """
+    return "'" + value.replace("'", "''") + "'"
 
 
 def parse_args() -> argparse.Namespace:
@@ -70,6 +89,7 @@ def list_snapshots(spark: SparkSession, table: str) -> None:
 def diff_snapshots(spark: SparkSession, table: str, args: argparse.Namespace) -> None:
     """比较两个快照的主键差异：新增、删除、变更。"""
     snapshot_a, snapshot_b = args.diff
+    # 快照号已在 main 里校验为纯数字并转 int，拼进 SQL 不会有注入风险
     keys_a = spark.sql(f"SELECT {args.key_column} AS k FROM {table} VERSION AS OF {snapshot_a}").cache()
     keys_b = spark.sql(f"SELECT {args.key_column} AS k FROM {table} VERSION AS OF {snapshot_b}").cache()
 
@@ -97,7 +117,7 @@ def trace_key(spark: SparkSession, table: str, args: argparse.Namespace) -> None
         frame = spark.sql(
             f"""
             SELECT * FROM {table} VERSION AS OF {snapshot["snapshot_id"]}
-            WHERE {args.key_column} = '{args.trace_key}'
+            WHERE {args.key_column} = {sql_literal(args.trace_key)}
             """
         )
         rows = frame.collect()
@@ -112,8 +132,38 @@ def trace_key(spark: SparkSession, table: str, args: argparse.Namespace) -> None
 
 
 def main() -> int:
-    """时间旅行审计入口，按参数分派到列快照、比快照、追主键三种用法。"""
+    """时间旅行审计入口，按参数分派到列快照、比快照、追主键三种用法。
+
+    参数经白名单校验：非法格式打印原因并退 2，不进 Spark。
+    """
     args = parse_args()
+
+    # 参数校验：白名单 + 转义，防止拼 SQL 时被注入
+    if not TABLE_RE.match(args.table):
+        print(
+            f"参数非法：--table 必须是「库名.表名」格式（字母开头，只含字母数字下划线，一层点），实际值 {args.table!r}"
+        )
+        return 2
+
+    if not IDENTIFIER_RE.match(args.key_column):
+        print(f"参数非法：--key-column 必须是合法标识符（字母开头，只含字母数字下划线），实际值 {args.key_column!r}")
+        return 2
+
+    if args.columns is not None:
+        for col in (name.strip() for name in args.columns.split(",")):
+            if not IDENTIFIER_RE.match(col):
+                print(f"参数非法：--columns 的每一项必须是合法标识符，实际值 {col!r}")
+                return 2
+
+    if args.diff is not None:
+        validated = []
+        for snapshot in args.diff:
+            if not snapshot.isdigit():
+                print(f"参数非法：--diff 的快照号必须是纯数字，实际值 {snapshot!r}")
+                return 2
+            validated.append(int(snapshot))
+        args.diff = tuple(validated)
+
     spark = SparkSession.builder.appName("fr2052a-time-travel").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
 

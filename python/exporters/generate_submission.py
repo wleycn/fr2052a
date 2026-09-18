@@ -20,6 +20,8 @@
     ads.ads_fr2052a_submission 按（report_id, file_format）唯一，一行一个文件。
     台账是「当前状态」：重生成时更新哈希、大小、时间与回执，不堆新行。
     重生成历史另住 ads.ads_fr2052a_submission_audit，一行一次生成。
+    退出码：0 = 全部回执 ACCEPTED，1 = 有回执被拒（REJECTED）。
+    台账不论退出码都登记 REJECTED 状态与回执号，因为退回也是事实。
 
 为什么读 PostgreSQL 而不是数据湖：
     报送服务读的是报送服务层（PG 的 ads 层），不是湖里的中间态。而且这样能在
@@ -381,6 +383,11 @@ def main() -> int:
             print(f"回执 {report_id}：{receipt.get('receipt_id')}  状态 {accepted}")
         if receipts:
             print(f"      {receipts[0][1].get('message')}")
+
+        rejected = [report_id for report_id, receipt in receipts if not receipt.get("accepted")]
+        if rejected:
+            print(f"报送未通过：{len(rejected)} 个报送主体回执被拒（REJECTED），退出码 1")
+            return 1
     finally:
         connection.close()
 

@@ -100,7 +100,9 @@ python validators/run_dq_rules.py --batch-id <id>
 |------|------|------|------|
 | `--batch-id` | string | 是 | ETL 批次号 |
 
-**退出码**：`0` = 全部 PASS，`1` = 有 WARNING，`2` = 有 ERROR（阻断）
+**退出码**：`0` = 无 ERROR 级违规（WARNING 级只提示、不阻断），`1` = 有 ERROR 级违规（阻断）
+
+**覆盖面判定**：ERROR 级规则若因列名不存在跳过部分目标表，覆盖面缩水即判 FAIL，不再因违规数为 0 而 PASS。WARNING 级规则跳过表仍可 PASS，但 detail 会写出跳过了哪些表。
 
 ### 3.5 `replay_ods_to_kafka.py`
 
@@ -123,6 +125,8 @@ python producers/replay_ods_to_kafka.py --data-dir <dir> --config <json>
 | `python/lakehouse/verify_gold.py` | 验证 Gold 层数据 |
 | `python/lakehouse/verify_ods_schema.py` | 验证 ODS 表结构 |
 | `python/exporters/export_gold_to_pg.py` | Gold → PG 导出 |
+| `python/exporters/generate_submission.py` | 报送文件生成（退出码：0 = 全部回执 ACCEPTED，1 = 有回执被拒 REJECTED） |
+| `python/audit/time_travel.py` | Iceberg 时间旅行审计（参数经白名单校验，非法退 2） |
 
 > `verify_*` 系列在核对对象为零时退出 `1`（零命中不算通过）。
 
