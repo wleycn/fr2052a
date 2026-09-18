@@ -107,7 +107,7 @@ def jdbc_options() -> tuple[str, dict[str, str]]:
     }
 
 
-def detect(frame: DataFrame, report_date: str, threshold: float) -> DataFrame:
+def detect(frame: DataFrame, threshold: float) -> DataFrame:
     """标出大额未保险存款，并留下「解析是否成功」的痕迹。
 
     不在这里 filter 掉未命中的行：过滤之后，「一条都没命中」与「解析全为空」
@@ -193,7 +193,7 @@ def main() -> int:
         .option("failOnDataLoss", "false")
         .load()
     )
-    alerts = detect(raw, args.report_date, threshold)
+    alerts = detect(raw, threshold)
 
     def write_batch(batch: DataFrame, batch_id: int) -> None:
         """落一个微批并投递预警。先报读入条数与命中条数，让「零命中」与「读不到」分得开。"""

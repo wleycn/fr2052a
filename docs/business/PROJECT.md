@@ -35,7 +35,7 @@ demo-fr2052a/
 │   │   ├── DOMAIN-LANGUAGE.md # 术语表
 │   │   ├── CHANGELOG.md       # 变更记录
 │   │   └── KNOWN-ISSUE.md     # 已知坑 + 决策记录
-│   ├── tables/                # 表契约（一表一份：51 张）
+│   ├── tables/                # 表契约（一表一份：52 张）
 │   ├── rules/                 # 规范文件（四件套）
 │   │   ├── PROJECT-STRUCTURE.md
 │   │   ├── CODING-STANDARD.md

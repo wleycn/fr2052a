@@ -33,6 +33,7 @@ TRUNCATE TABLE ads.ads_liquidity_metrics;
 TRUNCATE TABLE ads.ads_fr2052a_alerts;
 TRUNCATE TABLE ads.ads_fr2052a_realtime_alerts;
 TRUNCATE TABLE ads.ads_fr2052a_submission;
+TRUNCATE TABLE ads.ads_fr2052a_submission_audit;
 TRUNCATE TABLE ads.ads_restatement_log;
 TRUNCATE TABLE ads.ads_fr2052a_report_history;
 TRUNCATE TABLE ads.ads_fr2052a_validation_log;

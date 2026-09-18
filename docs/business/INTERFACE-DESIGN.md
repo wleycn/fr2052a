@@ -251,7 +251,7 @@ check_source_arrival          确认 7 张 ODS 源文件到位，避免空跑一
 - **触发**：每日 07:30，`retries=0`（熔断中重试没有意义）
 - **任务流**：`check_gate → generate_and_submit → verify_submission`
 - **放行约定**：`check_gate` 退出码 0 才继续；2（熔断）与 3（判不了）都视为不放行
-- **产物**：每个实体各一份 XBRL / XML / CSV，落 `ads.ads_fr2052a_submission` 台账
+- **产物**：每个实体各一份 XBRL / XML / CSV，落 `ads.ads_fr2052a_submission` 台账（按 report_id + file_format 唯一，一个文件一行）
 
 ## 6. 血缘与监管映射接口
 

@@ -45,7 +45,7 @@ Gold / ADS
 
 ### 2.1 分层表清单
 
-> 每张表的完整契约（粒度 / 主键 / 去重 / 分区 / 金额口径 / PII 与脱敏 / 生命周期 / 新鲜度与 owner / 依赖 / 质量规则）住 `docs/tables/`，一表一份，共 51 张。本节只列清单与落点，表级细节不在这里复制一份。
+> 每张表的完整契约（粒度 / 主键 / 去重 / 分区 / 金额口径 / PII 与脱敏 / 生命周期 / 新鲜度与 owner / 依赖 / 质量规则）住 `docs/tables/`，一表一份，共 52 张。本节只列清单与落点，表级细节不在这里复制一份。
 > 不入契约的两类：dbt 的连通性自检模型（`pg_smoke`、`spark_smoke`）产出的是探针表，随跑批丢弃；`market_data_prices` 等三个只作声明的 Kafka 主题没有对应表。
 
 #### 引用数据（Ref，Iceberg）
@@ -134,7 +134,8 @@ Gold / ADS
 | `ads.ads_fr2052a_alerts` | 规则状态（一行 = 一条规则的当前状态，重复命中累加次数） |
 | `ads.ads_fr2052a_realtime_alerts` | 实时敞口事件流水（一行 = 一笔事件） |
 | `ads.ads_circuit_breaker` | 熔断闸（全局一行，OPEN / HALTED） |
-| `ads.ads_fr2052a_submission` | 报送台账（一行 = 一个文件，含哈希与回执） |
+| `ads.ads_fr2052a_submission` | 报送台账（一行 = 一个文件当前状态，含哈希与回执） |
+| `ads.ads_fr2052a_submission_audit` | 报送重生成审计（一行 = 一次生成，记录哈希变化） |
 | `ads.ads_restatement_log` | 重述登记（原报表 ↔ 新报表） |
 | `ads.ads_fr2052a_report_history` | 报表版本历史 |
 | `ads.ads_fr2052a_validation_log` | 数据质量结论（一行 = 一个批次的一条规则） |

@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS ads.ads_fr2052a_submission (
     entity_code TEXT NOT NULL,                       -- 法人实体编码
     file_format TEXT NOT NULL,                       -- 文件格式：XBRL / XML / CSV
     file_path TEXT NOT NULL,                         -- 文件在报送服务端落盘路径
-    file_hash TEXT NOT NULL,                         -- 文件 SHA-256，供监管回执核验
+    file_hash TEXT NOT NULL,                         -- 当前版本的文件 SHA-256（重生成时被更新）
     file_size_bytes BIGINT,                          -- 文件字节数
     submitted_at TIMESTAMP,                          -- 提交时刻
     submission_status TEXT NOT NULL,                 -- GENERATED / SUBMITTED / ACCEPTED / REJECTED
@@ -134,10 +134,116 @@ CREATE TABLE IF NOT EXISTS ads.ads_fr2052a_submission (
     receipt_message TEXT,                            -- 回执消息
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT ads_fr2052a_submission_uk
-        UNIQUE (report_date, entity_code, file_format, file_hash)
+        UNIQUE (report_id, file_format)
 );
 
-COMMENT ON TABLE ads.ads_fr2052a_submission IS '报送文件台账与监管回执';
+COMMENT ON TABLE ads.ads_fr2052a_submission IS '报送文件当前状态台账：一个文件一行，重生成时更新哈希与回执';
+COMMENT ON COLUMN ads.ads_fr2052a_submission.file_hash IS '当前版本的文件 SHA-256（重生成时被更新）';
+
+-- ---------------------------------------------------------------------------
+-- 5b. 报送重生成审计：一行一次重生成，回答「这份文件生成过几版、哈希怎么变的」。
+--     台账只留当前状态，历史在这里查。
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ads.ads_fr2052a_submission_audit (
+    audit_id BIGSERIAL PRIMARY KEY,
+    report_id TEXT NOT NULL,                         -- 报表主键，与台账同源
+    file_format TEXT NOT NULL,                       -- 文件格式：XBRL / XML / CSV
+    file_hash TEXT NOT NULL,                         -- 本次生成的文件 SHA-256
+    previous_hash TEXT,                              -- 被替换的上一次哈希；首次生成为 NULL
+    file_size_bytes BIGINT,                          -- 文件字节数
+    is_content_change BOOLEAN NOT NULL,              -- 与上一条台账状态相比内容是否变化，首次生成为 true
+    entry_source TEXT NOT NULL DEFAULT 'GENERATE',   -- GENERATE = 报送脚本写的，MIGRATION = 迁移回填的
+    generated_at TIMESTAMP NOT NULL,                 -- 本次生成的时刻
+    CONSTRAINT ads_fr2052a_submission_audit_change_ck
+        CHECK (is_content_change = (previous_hash IS NULL OR previous_hash <> file_hash))
+);
+
+COMMENT ON TABLE ads.ads_fr2052a_submission_audit IS '报送文件重生成审计流水，一行一次生成';
+
+COMMENT ON COLUMN ads.ads_fr2052a_submission_audit.previous_hash IS '被本次生成替换掉的上一次哈希；首次生成为 NULL';
+COMMENT ON COLUMN ads.ads_fr2052a_submission_audit.is_content_change IS '与上一条台账状态相比内容是否变化，首次生成为 true';
+COMMENT ON COLUMN ads.ads_fr2052a_submission_audit.entry_source IS 'GENERATE = 报送脚本写的，MIGRATION = 迁移回填的';
+
+CREATE INDEX IF NOT EXISTS idx_submission_audit_key
+    ON ads.ads_fr2052a_submission_audit (report_id, file_format, generated_at);
+
+-- 台账唯一键从 (report_date, entity_code, file_format, file_hash) 改为 (report_id, file_format)。
+-- 旧库里的约束名相同（ads_fr2052a_submission_uk），但列不同，需要先删旧约束再补新约束。
+-- 判存在走 pg_constraint，重复执行不报错。
+DO $$
+BEGIN
+    -- 1) 回填旧行进审计表：同一业务键下只留 submission_id 最大的一行，其余回填后删掉。
+    --    表为空时整段 no-op。
+    IF EXISTS (
+        SELECT 1 FROM ads.ads_fr2052a_submission
+        WHERE (report_id, file_format) IN (
+            SELECT report_id, file_format
+            FROM ads.ads_fr2052a_submission
+            GROUP BY report_id, file_format
+            HAVING COUNT(*) > 1
+        )
+    ) THEN
+        INSERT INTO ads.ads_fr2052a_submission_audit
+            (report_id, file_format, file_hash, previous_hash, file_size_bytes,
+             is_content_change, entry_source, generated_at)
+        SELECT
+            s.report_id,
+            s.file_format,
+            s.file_hash,
+            -- 被保留那一行（submission_id 最大）的哈希作为 previous_hash
+            LAG(s.file_hash) OVER (
+                PARTITION BY s.report_id, s.file_format
+                ORDER BY s.submission_id
+            ),
+            s.file_size_bytes,
+            -- is_content_change 按同一表达式计算
+            (LAG(s.file_hash) OVER (
+                PARTITION BY s.report_id, s.file_format
+                ORDER BY s.submission_id
+            ) IS NULL
+             OR LAG(s.file_hash) OVER (
+                PARTITION BY s.report_id, s.file_format
+                ORDER BY s.submission_id
+             ) <> s.file_hash),
+            'MIGRATION',
+            COALESCE(s.submitted_at, CURRENT_TIMESTAMP)
+        FROM ads.ads_fr2052a_submission s
+        WHERE s.submission_id NOT IN (
+            SELECT MAX(submission_id)
+            FROM ads.ads_fr2052a_submission
+            GROUP BY report_id, file_format
+        );
+
+        -- 2) 删掉旧行，只留最新一行
+        DELETE FROM ads.ads_fr2052a_submission
+        WHERE submission_id NOT IN (
+            SELECT MAX(submission_id)
+            FROM ads.ads_fr2052a_submission
+            GROUP BY report_id, file_format
+        );
+    END IF;
+
+    -- 3) 旧约束还在就删掉（按 conname + conrelid 精确定位，不裸 DROP）
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'ads_fr2052a_submission_uk'
+          AND conrelid = 'ads.ads_fr2052a_submission'::regclass
+    ) THEN
+        ALTER TABLE ads.ads_fr2052a_submission
+            DROP CONSTRAINT ads_fr2052a_submission_uk;
+    END IF;
+
+    -- 4) 新约束没有就补上
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'ads_fr2052a_submission_uk'
+          AND conrelid = 'ads.ads_fr2052a_submission'::regclass
+    ) THEN
+        ALTER TABLE ads.ads_fr2052a_submission
+            ADD CONSTRAINT ads_fr2052a_submission_uk
+            UNIQUE (report_id, file_format);
+    END IF;
+END $$;
 
 -- ---------------------------------------------------------------------------
 -- 6. 重述登记：原报表与新报表成对留痕。

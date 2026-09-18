@@ -17,8 +17,9 @@
     加上扩展名即可自解释：ENT001-FR2052A-20260916-01.xbrl
 
 落库与幂等：
-    ads.ads_fr2052a_submission 按（报告日, 实体, 格式, 文件哈希）唯一，一行一个文件。
-    重复跑同一批不会堆重复行 —— 内容没变就只是刷新时间戳。
+    ads.ads_fr2052a_submission 按（report_id, file_format）唯一，一行一个文件。
+    台账是「当前状态」：重生成时更新哈希、大小、时间与回执，不堆新行。
+    重生成历史另住 ads.ads_fr2052a_submission_audit，一行一次生成。
 
 为什么读 PostgreSQL 而不是数据湖：
     报送服务读的是报送服务层（PG 的 ads 层），不是湖里的中间态。而且这样能在
@@ -234,8 +235,42 @@ def simulated_receipt(report_id: str, file_hash: str) -> dict[str, Any]:
 
 
 def upsert_submission(cursor: psycopg2.extensions.cursor, rows: list[dict[str, Any]]) -> None:
-    """把报送台账按报告日、实体、格式、摘要四个字段幂等写入。"""
+    """把报送台账按业务键（report_id + file_format）幂等写入，并在写台账前写一行审计。
+
+    台账是「当前状态」：一个文件一行，重生成时更新哈希、大小、时间与回执。
+    审计表留重生成历史：每次生成都写一行，记录哈希是否变化。
+    三步在同一事务里完成，不手动 commit。
+    """
     for row in rows:
+        # 先查当前台账的哈希，用于审计行的 previous_hash
+        cursor.execute(
+            "SELECT file_hash FROM ads.ads_fr2052a_submission WHERE report_id = %s AND file_format = %s",
+            (row["report_id"], row["file_format"]),
+        )
+        previous = cursor.fetchone()
+        previous_hash = previous[0] if previous else None
+
+        # 每次生成都写审计行，不论内容是否变化
+        is_content_change = previous_hash is None or previous_hash != row["file_hash"]
+        cursor.execute(
+            """
+            INSERT INTO ads.ads_fr2052a_submission_audit
+                (report_id, file_format, file_hash, previous_hash, file_size_bytes,
+                 is_content_change, entry_source, generated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, 'GENERATE', %s)
+            """,
+            (
+                row["report_id"],
+                row["file_format"],
+                row["file_hash"],
+                previous_hash,
+                row["file_size_bytes"],
+                is_content_change,
+                row["submitted_at"],
+            ),
+        )
+
+        # upsert 台账：冲突目标为业务键，哈希进入更新集
         cursor.execute(
             """
             INSERT INTO ads.ads_fr2052a_submission
@@ -243,8 +278,9 @@ def upsert_submission(cursor: psycopg2.extensions.cursor, rows: list[dict[str, A
                  file_hash, file_size_bytes, submitted_at, submission_status,
                  receipt_id, receipt_message)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (report_date, entity_code, file_format, file_hash) DO UPDATE SET
+            ON CONFLICT (report_id, file_format) DO UPDATE SET
                 file_path = EXCLUDED.file_path,
+                file_hash = EXCLUDED.file_hash,
                 file_size_bytes = EXCLUDED.file_size_bytes,
                 submitted_at = EXCLUDED.submitted_at,
                 submission_status = EXCLUDED.submission_status,

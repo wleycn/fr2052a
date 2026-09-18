@@ -6,19 +6,19 @@
 
 ## 主题
 
-报送台账：一行 = 一个报送文件，含路径、哈希、字节数与回执。
+报送台账：一行 = 一个报送文件当前状态，含路径、哈希、字节数与回执。
 
 ## 粒度
 
-一行 = 一个报送主体的一个文件。
+一行 = 一个报送主体的一个文件（当前版本）。
 
 ## 业务主键
 
-`submission_id` 主键；唯一键 `report_date` + `entity_code` + `file_format` + `file_hash`。
+`submission_id` 主键；唯一键 `report_id` + `file_format`。
 
 ## 去重方式
 
-按业务键 upsert；按批次累积的表先清本批次再追加，重跑不翻倍。
+按业务键（report_id + file_format）upsert。重生成时更新哈希、大小、时间与回执，不堆新行。
 
 ## 分区
 
@@ -34,7 +34,7 @@
 | `entity_code` | TEXT NOT NULL | 法人实体编码 |
 | `file_format` | TEXT NOT NULL | 文件格式：XBRL / XML / CSV |
 | `file_path` | TEXT NOT NULL | 文件在报送服务端落盘路径 |
-| `file_hash` | TEXT NOT NULL | 文件 SHA-256，供监管回执核验 |
+| `file_hash` | TEXT NOT NULL | 当前版本的文件 SHA-256（重生成时被更新） |
 | `file_size_bytes` | BIGINT | 文件字节数 |
 | `submitted_at` | TIMESTAMP | 提交时刻 |
 | `submission_status` | TEXT NOT NULL | GENERATED / SUBMITTED / ACCEPTED / REJECTED |
@@ -52,7 +52,7 @@
 
 ## 生命周期
 
-PostgreSQL 常驻表，按环节写入或覆盖；无快照与压缩策略。
+PostgreSQL 常驻表，按业务键 upsert 覆盖当前状态；无快照与压缩策略。重生成历史住 `ads_fr2052a_submission_audit`。
 
 ## 新鲜度 SLA 与 owner
 
@@ -65,4 +65,4 @@ PostgreSQL 常驻表，按环节写入或覆盖；无快照与压缩策略。
 
 ## 质量规则清单
 
-回执与文件哈希由 `python/validators/verify_submission.py` 在 `verify-submission` 环节核对；同一文件重复报送由唯一键挡下。
+回执与文件哈希由 `python/validators/verify_submission.py` 在 `verify-submission` 环节核对；同一文件重复报送由唯一键挡下。重生成历史由 `ads.ads_fr2052a_submission_audit` 留痕。
