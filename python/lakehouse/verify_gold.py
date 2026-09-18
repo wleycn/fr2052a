@@ -369,19 +369,32 @@ def check_l2_cap(spark: SparkSession) -> list[CheckResult]:
 
     这条规则在需求文档里是 WARNING 级 —— 二级资产占比高本身不构成错误，
     真正的错误是认列总额没有按上限截断。因此这里验算计算是否正确，而不是占比是否达标。
+
+    输入必须独立：L1 / L2A / L2B 的市值从 silver 明细独立算出（`owd_securities` 按
+    `hqla_classification` 汇总，合并口径只取非集团内行），不读报表自己的 `sec_g_*` 列 ——
+    拿被校验方算好的输入再套一遍同一个公式，只能证明「公式抄对了」，证明不了输入没写歪。
     """
     results: list[CheckResult] = []
     for period in report_periods(spark):
-        row = spark.sql(
+        detail = spark.sql(
             f"""
-            select sec_g_hqla_l1_mv as l1, sec_g_hqla_l2a_mv as l2a, sec_g_hqla_l2b_mv as l2b,
-                   sec_g_hqla_capped_total_usd as capped
+            select
+                round(sum(case when hqla_classification = 'LEVEL_1' then market_value_usd else 0 end), 2) as l1,
+                round(sum(case when hqla_classification = 'LEVEL_2A' then market_value_usd else 0 end), 2) as l2a,
+                round(sum(case when hqla_classification = 'LEVEL_2B' then market_value_usd else 0 end), 2) as l2b
+            from silver.owd_securities
+            where not is_intracompany and cast(report_date as string) = '{period}'
+            """
+        ).collect()[0]
+        report_row = spark.sql(
+            f"""
+            select sec_g_hqla_capped_total_usd as capped
             from {REPORT} where is_consolidated and cast(report_date as string) = '{period}'
             """
         ).collect()[0]
-        level_1 = float(row["l1"] or 0)
-        level_2 = float(row["l2a"] or 0) + float(row["l2b"] or 0)
-        capped = float(row["capped"] or 0)
+        level_1 = float(detail["l1"] or 0)
+        level_2 = float(detail["l2a"] or 0) + float(detail["l2b"] or 0)
+        capped = float(report_row["capped"] or 0)
 
         hqla_before_cap = level_1 + level_2
         expected = round(level_1 + min(level_2, 0.40 * hqla_before_cap), 2)

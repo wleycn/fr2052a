@@ -15,7 +15,7 @@
 --
 -- 运行（Server 2）：
 --   bash spark-submit-fr2052a.sh /opt/fr2052a-app/python/lakehouse/run_sql_file.py \
---        /opt/fr2052a-app/sql/iceberg/07_fix_reversed_intervals.sql
+--        /opt/fr2052a-app/sql/iceberg/oneoff/07_fix_reversed_intervals.sql
 
 UPDATE silver.owd_deposits_history SET end_date = begin_date
 WHERE end_date IS NOT NULL AND end_date < begin_date;

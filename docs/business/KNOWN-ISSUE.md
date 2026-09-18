@@ -16,7 +16,9 @@
 | #dockerhub-image-removed | 09-16 | `minio/minio` 与 `bitnami/spark` 从 Docker Hub 下架 | 镜像源失效 | ✅ MinIO 改走 `quay.io/minio/minio`；Spark 改用官方 `apache/spark` | Server 1/2 部署 | BUILD-LOG E0 |
 | #detail-report-mismatch | 09-16 | Section B 明细与报表口径不一致，差 25 亿；Section F 明细 13 亿 vs 报表 0 | 明细把正回购与逆回购混在一起，报表只算正回购；明细没按 30 天过滤 | ✅ 明细按 `line_item` 拆开，30 天过滤下沉到明细 | OWD/OWS 模型 | BUILD-LOG E4.1 |
 | #delegate-audit-20260917 | 09-17 | 三路独立审查（代码 / dbt 与 SQL / 文档）共提出 80 条发现，其中一条是三路都报同一条（DAG 授权晚于导出） | 长期单方视角审查，缺口集中在「规则声称的机制没落地」「文档抄自设计稿而非实现」两类 | ✅ 已修 29 条（含 DAG 顺序、恒成功的源文件检查、宏表与 CLI 契约表、README 跑不通的命令）；剩 45 条涉及口径与设计取舍，未动 | 全项目 | `docs/AUDIT-2026-09-17-delegate-review.md` |
-| #scd2-reversed-interval | 09-17 | 版本历史表出现「失效日早于生效日」的反向区间（owd_deposits 1 行、owd_gl_entries 20 行） | 写失效日时直接取「本次生效日 - 1」，未与该版本自己的生效日比较。两个调用方的生效日约定一旦不一致（重述用处理日 2026-09-17、日批用报告日 2026-09-16），后跑的那次必然算出反向区间 | ✅ 修法：写入侧用 `greatest(生效日 - 1, 该版本生效日)` 兜底并写完自检不变式；日批生效日改为报告日次日；`verify-scd2` 纳入日批环节；存量脏行由 `sql/iceberg/07_fix_reversed_intervals.sql` 修 | SCD2 版本历史 | BUILD-LOG E6.2 |
+| #scd2-reversed-interval | 09-17 | 版本历史表出现「失效日早于生效日」的反向区间（owd_deposits 1 行、owd_gl_entries 20 行） | 写失效日时直接取「本次生效日 - 1」，未与该版本自己的生效日比较。两个调用方的生效日约定一旦不一致（重述用处理日 2026-09-17、日批用报告日 2026-09-16），后跑的那次必然算出反向区间 | ✅ 修法：写入侧用 `greatest(生效日 - 1, 该版本生效日)` 兜底并写完自检不变式；日批生效日改为报告日次日；`verify-scd2` 纳入日批环节；存量脏行由 `sql/iceberg/oneoff/07_fix_reversed_intervals.sql` 修 | SCD2 版本历史 | BUILD-LOG E6.2 |
+| #dead-ows-tables | 09-18 | 三张 OWS 汇总表（`ows_hqla_summary`、`ows_collateral_summary`、`ows_funding_summary`）在全仓无任何下游消费者，却随每次 dbt 全量物化 | 血缘图与表契约原先声称它们喂报表，实际报表直接读 OWD 明细 —— 文档抄的是设计稿，不是实现 | ✅ 已把文档与血缘改成与实现一致并登记待下线。保留原因：`migration-notes` 记的汇总层设计占位，dbt 按工程整体物化，删掉要同时改模型与建表脚本；下线条件 = 确认无人接入后删模型、建表脚本与表契约三处 | OWS 汇总层 | `docs/AUDIT-2026-09-17-delegate-review.md` 第 17 条 |
+| #report-history-reset-exception | 09-18 | `reset_demo.sql` 原先会 `TRUNCATE TABLE ads.ads_fr2052a_report_history`，与该表「历史不可变」的硬性质冲突 | 复位脚本把版本历史表与可变派生表混在同一个 TRUNCATE 清单里 | ✅ 修法：从复位清单移除该表的 TRUNCATE；如需清空走单独人工步骤并在此登记 | 复位脚本 `sql/admin/reset_demo.sql` | — |
 
 <!-- PROJECT.md 索引行（复制区）：
 - `#pg18-data-dir-change` — PG 18 改了数据目录约定
@@ -27,6 +29,8 @@
 - `#dockerhub-image-removed` — minio/spark 官方镜像已从 Docker Hub 下架
 - `#detail-report-mismatch` — 明细与报表口径不一致（正回购/30天过滤）
 - `#scd2-reversed-interval` — 版本区间不得反向（失效日早于生效日）
+- `#dead-ows-tables` — 三张 OWS 汇总表无消费者（登记待下线）
+- `#report-history-reset-exception` — 版本历史表不在复位清单（历史不可变是硬性质）
 - `#delegate-audit-20260917` — 三路独立审查的 80 条发现与处置
 -->
 

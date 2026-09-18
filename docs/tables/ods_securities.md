@@ -78,4 +78,4 @@ Iceberg v2 表，快照保留 7 天或至少 10 个（`python/lakehouse/maintain
 
 ## 质量规则清单
 
-本层规则共 3 条：`VDQ-001` 源文件整批到达、`VDQ-002` 主键与币种非空、`VDQ-016` 加载早于 T+1 08:00。规则定义住 `ref.ref_validation_rules`（`apply_layer = 'ODS'`），由 `python/validators/run_dq_rules.py` 执行，结论落 `ads.ads_fr2052a_validation_log`。
+本层规则共 4 条：`VDQ-001` 源文件整批到达、`VDQ-002` 主键与币种非空、`VDQ-016` 加载早于 T+1 08:00、`VDQ-021` 质押标记取值合法（空值即违规 —— 空值按未受限处理，但源系统缺报状态要报出来）。规则定义住 `ref.ref_validation_rules`（`apply_layer = 'ODS'`），由 `python/validators/run_dq_rules.py` 执行，结论落 `ads.ads_fr2052a_validation_log`。

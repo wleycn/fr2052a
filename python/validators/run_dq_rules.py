@@ -56,6 +56,7 @@ ALL_OWD = (
 RULE_TARGETS: dict[str, tuple[str, ...]] = {
     "VDQ-002": ALL_BRONZE,  # 关键字段非空
     "VDQ-003": ("silver.owd_deposits",),
+    "VDQ-021": ("bronze.ods_securities",),  # 质押标记取值合法（空值即违规：源系统缺报状态）
     "VDQ-004": ("silver.owd_deposits", "silver.owd_secured_financing", "silver.owd_loans"),
     "VDQ-005": ALL_OWD,
     "VDQ-006": ("silver.owd_loans",),

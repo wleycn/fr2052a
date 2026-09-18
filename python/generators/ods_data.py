@@ -352,7 +352,10 @@ def generate_securities(ods_dir: Path, ref: ReferenceData, report_date: date, ap
             _business_day_before(rng, report_date, 30, 1200),
             _business_day_after(rng, report_date, 60, 3650),
             rng.choice(("AAA", "AA", "A", "BBB")),
-            rng.choice(("Y", "N")),
+            # 质押标记：源系统偶尔缺报状态。空值不等于「未质押」——
+            # 折算层按「只有明确 Y 才算受限」处理（见 owd_securities 的口径说明），
+            # 缺报本身是数据缺陷，由 VDQ-021 报出来，不靠折算层替源系统猜。
+            weighted_choice(rng, {"Y": 0.40, "N": 0.56, "": 0.04}),
         ]
         rows.append(_assemble("ods_securities", f"SEC-{index:06d}", entity_code, business, clock.next(), report_date))
 
@@ -433,8 +436,18 @@ def _split_amount(rng: random.Random, total: float, parts: int) -> list[float]:
 
 
 def _amount_usd(row: dict[str, str], amount_column: str) -> float:
-    """把一行明细的指定金额按其币种折算成 USD。"""
+    """把一行明细的指定金额按其**交易币种**折算成 USD。"""
     return float(row[amount_column]) * FX_RATES.get(row["currency"], 1.0)
+
+
+def _amount_usd_by(row: dict[str, str], amount_column: str, currency_column: str) -> float:
+    """把一行明细的指定金额按**指定币种列**折算成 USD。
+
+    有些金额的计价币种与交易币种不同：衍生品的盯市价值按 ODS 声明的 mtm_currency 计价，
+    名义本金与抵押品按交易币种。总账与报表都要用同一个币种口径，否则两边对不上账，
+    而且差异会以「对账不平」的形式出现，看不出是币种用错。
+    """
+    return float(row[amount_column]) * FX_RATES.get(row[currency_column], 1.0)
 
 
 def _read_ods_rows(ods_dir: Path, table_name: str, report_date: date | None = None) -> list[dict[str, str]]:
@@ -537,14 +550,24 @@ def generate_gl_balances(
                 sum(_amount_usd(row, "cash_amount") for row in repo_entity if row["repo_type"] == "REVERSE_REPO"), 2
             ),
             "1500": round(
-                sum(_amount_usd(row, "mark_to_market") for row in deriv_entity if float(row["mark_to_market"]) > 0), 2
+                sum(
+                    _amount_usd_by(row, "mark_to_market", "mtm_currency")
+                    for row in deriv_entity
+                    if float(row["mark_to_market"]) > 0
+                ),
+                2,
             ),
             "2100": round(sum(_amount_usd(row, "outstanding_amount") for row in loans_entity), 2),
             "2001": demand_deposits,
             "2002": time_deposits,
             "2010": round(sum(_amount_usd(row, "cash_amount") for row in repo_entity if row["repo_type"] == "REPO"), 2),
             "2200": round(
-                -sum(_amount_usd(row, "mark_to_market") for row in deriv_entity if float(row["mark_to_market"]) < 0), 2
+                -sum(
+                    _amount_usd_by(row, "mark_to_market", "mtm_currency")
+                    for row in deriv_entity
+                    if float(row["mark_to_market"]) < 0
+                ),
+                2,
             ),
         }
 

@@ -35,7 +35,12 @@ TRUNCATE TABLE ads.ads_fr2052a_realtime_alerts;
 TRUNCATE TABLE ads.ads_fr2052a_submission;
 TRUNCATE TABLE ads.ads_fr2052a_submission_audit;
 TRUNCATE TABLE ads.ads_restatement_log;
-TRUNCATE TABLE ads.ads_fr2052a_report_history;
+-- 版本历史表（ads_fr2052a_report_history）不在复位清单里。
+-- 该表在文档与 schema 里被声明为「历史不可变」（SCD2，重述前后版本成对留痕）。
+-- 历史不可变是硬性质：一旦允许复位清空，就等于承认「历史可以抹掉」，
+-- 重述登记里引用的原报表版本将变成悬空引用，审计链断裂。
+-- 如确需清空（例如重建演示环境），走单独的人工步骤并在 KNOWN-ISSUE.md
+-- 登记为有意的例外，写清例外范围与代价。
 TRUNCATE TABLE ads.ads_fr2052a_validation_log;
 TRUNCATE TABLE ads.ads_pipeline_run_context;
 

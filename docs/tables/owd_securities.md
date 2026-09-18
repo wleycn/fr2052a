@@ -6,7 +6,7 @@ Silver（标准化明细，Iceberg `silver` 命名空间）
 
 ## 主题
 
-标准化证券：折算 USD、HQLA 分类与折扣率、质押与受限标记。
+标准化证券：折算 USD、HQLA 分类与折扣率、质押与受限标记（`is_encumbered` 在本层统一成布尔：只有 `pledged_flag = 'Y'` 算受限，NULL 视为未受限）。
 
 ## 粒度
 
@@ -80,7 +80,7 @@ Iceberg v2 表，快照保留 7 天或至少 10 个（`python/lakehouse/maintain
 ## 上下游依赖
 
 - **上游**：`bronze.ods_securities` 与 `silver.stg_fx_rates`。
-- **下游**：`silver.owd_securities_history`、`ows_hqla_summary`、报表 Section G 与 Section I。
+- **下游**：`silver.owd_securities_history`、`ows_hqla_summary`、`ows_collateral_summary`、`ows_cashflow_projection`（到期证券流入）、报表 Section G 与 Section I。
 
 ## 质量规则清单
 

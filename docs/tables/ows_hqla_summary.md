@@ -60,7 +60,7 @@ Iceberg v2 表，快照保留 7 天或至少 10 个（`python/lakehouse/maintain
 ## 上下游依赖
 
 - **上游**：`silver.owd_securities`。
-- **下游**：报表 Section G 与 Section I、`ads.ads_liquidity_metrics` 的 HQLA 分子。
+- **下游**：当前无消费者 —— 报表直接读 `owd_securities` 明细，`ads.ads_liquidity_metrics` 读的是报表列。本表已登记为待下线（见 KNOWN-ISSUE）。
 
 ## 质量规则清单
 

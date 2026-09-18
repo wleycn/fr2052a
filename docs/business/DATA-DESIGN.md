@@ -126,8 +126,8 @@ ODS 各表的行数由三类来源组成：子公司配额、母公司追加（�
 | `silver.owd_derivatives` | 标准化衍生品 | `bronze.ods_derivatives` |
 | `silver.owd_gl_entries` | 标准化总账余额 | `bronze.ods_gl_balances` |
 | `silver.owd_off_bs` | 标准化表外承诺 | `bronze.ods_off_bs_commitments` |
-| `silver.ows_hqla_summary` | HQLA 汇总（含二级资产 40% 上限截断） | `owd_securities` |
-| `silver.ows_collateral_summary` | 担保品汇总 | `owd_secured_financing` |
+| `silver.ows_hqla_summary` | HQLA 汇总（按等级与受限状态汇总市值、折扣后价值；二级资产的 40% 上限在**报表层**应用，本层不截断） | `owd_securities` |
+| `silver.ows_collateral_summary` | 担保品汇总（按证券类型、等级、发行国汇总） | `owd_securities` |
 | `silver.ows_cash_position` | 现金头寸 | `owd_*` |
 | `silver.ows_cashflow_projection` | 现金流预测 | `owd_*` 到期分桶 |
 | `silver.ows_funding_summary` | 融资汇总 | `owd_*` 聚合 |
@@ -265,7 +265,7 @@ LCR 分子的 L1 取这两块之和，见 `python/alerts/liquidity_monitor.py`�
 
 ### 3.4 数据质量规则（VDQ）
 
-规则集共 20 条（VDQ-001 至 VDQ-020），真源是生成器产出的 `sample_data/ref/ref_validation_rules.csv`，
+规则集共 21 条（VDQ-001 至 VDQ-021），真源是生成器产出的 `sample_data/ref/ref_validation_rules.csv`，
 下表只列其中 9 条作为示例，完整清单以该 CSV 与 `ref.ref_validation_rules` 表为准。
 
 | 编号 | 层级 | 规则 | 严重度 |
@@ -327,9 +327,12 @@ ref_behavior_assumptions 从原来的 6 行手工样本改为由规则派生的�
 Core Banking Deposit Module
   → ods_deposits (Bronze)
   → owd_deposits (Silver)
-  → ows_funding_summary (Silver)
-  → ads_fr2052a_report.sec_c_retail_demand (Gold)
+  → ads_fr2052a_report.sec_c_retail_demand (Gold)   ← 报表直接读 OWD 明细，不经 OWS
   → FR 2052a Section C / Line Item
 ```
+
+三张 OWS 表（`ows_hqla_summary`、`ows_collateral_summary`、`ows_funding_summary`）当前无下游消费者：
+报表读的是 OWD 明细，OWS 只有 `ows_cash_position` 与 `ows_cashflow_projection` 被引用。
+它们已登记为待下线（见 [KNOWN-ISSUE.md](KNOWN-ISSUE.md)），保留原因与下线条件写在那里。
 
 完整血缘由 `render_lineage.py` 从 dbt 元数据与 SQL 解析生成，见 [INTERFACE-DESIGN.md](INTERFACE-DESIGN.md#6-血缘与监管映射接口)。

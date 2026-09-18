@@ -10,15 +10,34 @@ models:
       regulatory_reference: FR 2052a Instructions
       reporting_frequency: daily
     columns:
+      - name: report_id
+        description: 报表业务主键，「机构-报表-报告期-口径」四段区位码
+        tests:
+          - not_null
+          - unique
+        meta:
+          rule_id: FR2052A-GEN-03
+
       - name: report_date
         description: 报告日，报送数据的归属日
+        tests:
+          - not_null
         meta:
           rule_id: FR2052A-GEN-00
 
       - name: entity_code
         description: 法人实体编码，ENT001 为集团合并口径
+        tests:
+          - not_null
         meta:
           rule_id: FR2052A-GEN-01
+
+      - name: is_consolidated
+        description: 是否集团合并口径行
+        tests:
+          - not_null
+        meta:
+          rule_id: FR2052A-GEN-02
 
       - name: sec_c_total
         description: Section C 存款合计（全额，未按受保限额截断）
@@ -85,19 +104,28 @@ models:
         meta:
           rule_id: FR2052A-K-02
 
-      - name: is_consolidated
-        description: 是否集团合并口径行
-        meta:
-          rule_id: FR2052A-GEN-02
-
   - name: ads_fr2052a_detail
     description: 报送明细，支撑报表每一行的回溯核对
     meta:
       owner: Treasury Liquidity Team
       regulatory_reference: FR 2052a Instructions
     columns:
+      - name: report_date
+        description: 报告日
+        tests:
+          - not_null
+      - name: entity_code
+        description: 法人实体编码
+        tests:
+          - not_null
+      - name: section_code
+        description: Section 编码（A–K）
+        tests:
+          - not_null
       - name: line_item
         description: 行项目编号，与报表的 sec_* 列一一对应
+        tests:
+          - not_null
         meta:
           rule_id: FR2052A-DET-01
 
@@ -114,8 +142,24 @@ models:
       owner: Finance Control
       regulatory_reference: FR 2052a Instructions (GL reconciliation)
     columns:
+      - name: report_date
+        description: 报告日
+        tests:
+          - not_null
+      - name: entity_code
+        description: 法人实体编码（GRP001 为合并行）
+        tests:
+          - not_null
+      - name: section_code
+        description: Section 编码
+        tests:
+          - not_null
       - name: status
         description: 对账状态，PASS 表示差异在容差内
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['PASS', 'FAIL']
         meta:
           rule_id: FR2052A-REC-01
 

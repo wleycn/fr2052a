@@ -57,7 +57,7 @@ Iceberg v2 表，快照保留 7 天或至少 10 个（`python/lakehouse/maintain
 ## 上下游依赖
 
 - **上游**：`silver.owd_deposits` 与 `silver.owd_secured_financing`。
-- **下游**：报表 Section K 与 `VDQ-014` 的融资总量对账。
+- **下游**：当前无消费者（已登记为待下线，见 KNOWN-ISSUE）。
 
 ## 质量规则清单
 

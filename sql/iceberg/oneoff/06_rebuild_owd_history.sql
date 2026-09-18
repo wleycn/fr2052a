@@ -2,7 +2,7 @@
 --
 -- 运行（在 Server 2 的 ~/fr2052a-infra 下，且**先**确认没有别处依赖这些表）：
 --   bash spark-submit-fr2052a.sh /opt/fr2052a-app/python/lakehouse/run_sql_file.py \
---        /opt/fr2052a-app/sql/iceberg/06_rebuild_owd_history.sql
+--        /opt/fr2052a-app/sql/iceberg/oneoff/06_rebuild_owd_history.sql
 --
 -- 为什么需要重建（不是修复）：
 --   owd_scd2.py 早期版本有一个惰性求值缺陷 —— 判断「哪些键是新增/变更/删除」用的是

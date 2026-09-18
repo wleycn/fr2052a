@@ -25,11 +25,15 @@ models:
     columns:
       - name: customer_id
         description: 客户标识，脱敏后为 h_ 前缀的确定性 token
+        tests:
+          - not_null
         meta:
           pii: true
           pii_source: ods_deposits.customer_id
       - name: deposit_id
         description: 存款账号，脱敏后为 h_ 前缀的确定性 token
+        tests:
+          - not_null
         meta:
           pii: true
           pii_source: ods_deposits.account_number
@@ -39,11 +43,15 @@ models:
     columns:
       - name: borrower_id
         description: 借款人标识，脱敏后为 h_ 前缀的确定性 token
+        tests:
+          - not_null
         meta:
           pii: true
           pii_source: ods_loans.borrower_id
       - name: loan_id
         description: 贷款账号，脱敏后为 h_ 前缀的确定性 token
+        tests:
+          - not_null
         meta:
           pii: true
           pii_source: ods_loans.loan_id

@@ -550,3 +550,75 @@ BEGIN
             ADD COLUMN entity_code TEXT;
     END IF;
 END $$;
+
+-- ---------------------------------------------------------------------------
+-- 12. 报表三张表的唯一约束（C5-1 B 节）
+--     三张导出表由 Spark JDBC 用 truncate=true 覆盖写，表本身没有库侧主键。
+--     这里用幂等 DO 块补唯一约束，防止导出作业或手工写入产生重复行。
+--     判存在一律走 pg_catalog（information_schema 只列当前角色有权限的对象，
+--     本仓 B2 批次已立过这条口径）。
+--
+--     键的粒度依据：
+--       ads_fr2052a_report: report_id 天然唯一（含「机构-报表-报告期-口径」四段），
+--         同一报告期同一实体同一口径只会出一行。
+--       ads_fr2052a_detail: 粒度为「报告日 × 实体 × 抵销标记 × Section × 行项目 ×
+--         产品类别 × 交易对手类型 × 币种 × 到期分桶」——明细是维度组合下钻，
+--         同一维度组合不应有两行。
+--       ads_gl_reconciliation: 粒度为「报告日 × 实体 × Section」——每个实体每个
+--         报告期每个 Section 一行对账结果（合并行 entity_code = GRP001）。
+-- ---------------------------------------------------------------------------
+
+-- ads_fr2052a_report: report_id 唯一
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'ads' AND c.relname = 'ads_fr2052a_report'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conname = 'ads_fr2052a_report_report_id_uk'
+          AND conrelid = 'ads.ads_fr2052a_report'::regclass
+    ) THEN
+        ALTER TABLE ads.ads_fr2052a_report
+            ADD CONSTRAINT ads_fr2052a_report_report_id_uk UNIQUE (report_id);
+    END IF;
+END $$;
+
+-- ads_fr2052a_detail: 全维度组合唯一
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'ads' AND c.relname = 'ads_fr2052a_detail'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conname = 'ads_fr2052a_detail_dim_uk'
+          AND conrelid = 'ads.ads_fr2052a_detail'::regclass
+    ) THEN
+        ALTER TABLE ads.ads_fr2052a_detail
+            ADD CONSTRAINT ads_fr2052a_detail_dim_uk
+            UNIQUE (report_date, entity_code, is_intracompany, section_code,
+                    line_item, product_category, counterparty_type,
+                    currency_code, maturity_bucket);
+    END IF;
+END $$;
+
+-- ads_gl_reconciliation: (report_date, entity_code, section_code) 唯一
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'ads' AND c.relname = 'ads_gl_reconciliation'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conname = 'ads_gl_reconciliation_uk'
+          AND conrelid = 'ads.ads_gl_reconciliation'::regclass
+    ) THEN
+        ALTER TABLE ads.ads_gl_reconciliation
+            ADD CONSTRAINT ads_gl_reconciliation_uk
+            UNIQUE (report_date, entity_code, section_code);
+    END IF;
+END $$;

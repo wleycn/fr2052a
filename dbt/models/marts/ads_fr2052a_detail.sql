@@ -44,8 +44,11 @@ secured_detail as (
         currency_code,
         maturity_bucket,
         round(sum(cash_amount_usd), 2) as outstanding_amount,
-        cast(0 as decimal(20, 2)) as inflow_amount,
-        round(sum(cash_amount_usd), 2) as outflow_amount,
+        -- 方向要落在正确的列上：正回购是融资（钱进来、未来要还）→ 流出；逆回购是资金运用
+        -- （钱出去、未来收回）→ 流入。两笔都记在 outflow 上，下游必须靠 line_item 过滤才
+        -- 说得通 —— 那是把口径责任推给消费者，多一个消费者就多一次踩错的机会。
+        round(sum(case when transaction_type = 'REPO' then 0 else cash_amount_usd end), 2) as inflow_amount,
+        round(sum(case when transaction_type = 'REPO' then cash_amount_usd else 0 end), 2) as outflow_amount,
         round(sum(cash_amount_usd), 2) as net_amount,
         cast(0 as decimal(20, 2)) as market_value
     from {{ ref('owd_secured_financing') }}
@@ -72,8 +75,9 @@ loan_detail as (
         round(sum(outstanding_usd), 2) as net_amount,
         cast(0 as decimal(20, 2)) as market_value
     from {{ ref('owd_loans') }}
-    -- 与报表口径保持一致：Section F 只统计 30 天内到期的贷款本金
-    where days_to_maturity <= 30
+    -- 与报表口径保持一致：Section F 只统计 30 天内到期的贷款本金，窗口有下界
+    -- （已过到期日的贷款不算未来 30 天的流入，见报表模型同一处的说明）
+    where days_to_maturity between 0 and 30
     group by report_date, entity_code, is_intracompany, loan_type, borrower_type, currency_code, maturity_bucket
 
 ),

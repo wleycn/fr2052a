@@ -1,5 +1,5 @@
 -- 一次性迁移：对齐 silver.owd_secured_financing_history 的列名。
--- 运行：python python/lakehouse/run_sql_file.py sql/iceberg/05_align_owd_history.sql
+-- 运行：python python/lakehouse/run_sql_file.py sql/iceberg/oneoff/05_align_owd_history.sql
 --
 -- 背景：
 --   1. 该表的业务列原本叫 start_date / end_date，与 SCD2 版本列 end_date 撞名。

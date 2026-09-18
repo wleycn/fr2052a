@@ -6,7 +6,7 @@ Silver（标准化明细，Iceberg `silver` 命名空间）
 
 ## 主题
 
-标准化衍生品：名义本金与盯市折算 USD，区分集中清算与双边净额，算净敞口。
+标准化衍生品：名义本金与抵押品按交易币种折算 USD，盯市价值按 ODS 声明的盯市币种（`mtm_currency`）折算，区分集中清算与双边净额，算净敞口。
 
 ## 粒度
 
@@ -46,6 +46,8 @@ dbt `table` 物化，每次运行整表重建：先建后换，不留半成品�
 | `days_to_maturity` |
 | `maturity_bucket` |
 | `mtm_value_usd` |
+| `mtm_currency` |
+| `mtm_exchange_rate` |
 | `is_central_cleared` |
 | `csa_agreement_id` |
 | `is_bilateral_netted` |

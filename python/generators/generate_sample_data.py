@@ -87,7 +87,7 @@ EXPECTED_REF_ROWS: dict[str, int] = {
     "ref_regulatory_mapping": 5,
     "ref_behavior_assumptions": len(BEHAVIOR_ASSUMPTION_ROWS),
     "ref_calendar": 122,
-    "ref_validation_rules": 20,
+    "ref_validation_rules": 21,
 }
 
 # 派生 ODS 单期期望行数：子公司配额 + 母公司追加 + 配对腿追加

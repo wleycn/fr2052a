@@ -37,7 +37,7 @@ PG_CONTAINER="${PG_CONTAINER:-fr2052a_postgres}"
 REPORT_DATE="${REPORT_DATE:-2026-09-16}"
 
 RESET_SQL="$PROJECT_ROOT/sql/admin/reset_demo.sql"
-HISTORY_SQL="$PROJECT_ROOT/sql/iceberg/06_rebuild_owd_history.sql"
+HISTORY_SQL="$PROJECT_ROOT/sql/iceberg/oneoff/06_rebuild_owd_history.sql"
 
 APPLY=0
 RUN_AFTER=1
@@ -70,7 +70,7 @@ echo "3) 清 PostgreSQL 派生表（清单取自 $RESET_SQL）"
 grep -E '^(TRUNCATE TABLE|DROP (TABLE|VIEW)|UPDATE ads\.)' "$RESET_SQL" | sed 's/^/   /'
 echo
 echo "4) 清 Iceberg 的 OWD 版本历史表"
-echo "   文件：sql/iceberg/06_rebuild_owd_history.sql（由 owd_scd2.py 重建干净基线）"
+echo "   文件：sql/iceberg/oneoff/06_rebuild_owd_history.sql（由 owd_scd2.py 重建干净基线）"
 echo
 echo "5) 清 Kafka 主题内容与流式消费位点"
 python3 - "$PROJECT_ROOT/config/pipeline_topics.json" <<'PY' | sed 's/^/   /'
@@ -109,7 +109,7 @@ ssh "$SERVER1_HOST" \
 
 echo "[4/6] 清 Iceberg 的 OWD 版本历史表"
 ssh "$SERVER2_HOST" \
-  "cd $REMOTE_DIR && bash spark-submit-fr2052a.sh /opt/fr2052a-app/python/lakehouse/run_sql_file.py /opt/fr2052a-app/sql/iceberg/06_rebuild_owd_history.sql" \
+  "cd $REMOTE_DIR && bash spark-submit-fr2052a.sh /opt/fr2052a-app/python/lakehouse/run_sql_file.py /opt/fr2052a-app/sql/iceberg/oneoff/06_rebuild_owd_history.sql" \
   2>&1 | grep -v "^2[0-9]/[0-9][0-9]/[0-9][0-9]" | tail -12
 
 echo "[5/6] 清 Kafka 主题与消费位点"

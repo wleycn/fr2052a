@@ -81,7 +81,7 @@ Iceberg v2 表，快照保留 7 天或至少 10 个（`python/lakehouse/maintain
 ## 上下游依赖
 
 - **上游**：`bronze.ods_repo_transactions` 与 `silver.stg_fx_rates`。
-- **下游**：`silver.owd_secured_financing_history`、`ows_collateral_summary`、报表 Section B。
+- **下游**：`silver.owd_secured_financing_history`、报表 Section B、`ows_cashflow_projection`（回购到期流出）。
 
 ## 质量规则清单
 

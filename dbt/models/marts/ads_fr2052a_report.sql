@@ -78,7 +78,10 @@ cash as (
 
 loan_inflows as (
 
-    -- 30 天内到期的贷款本金构成预期流入
+    -- 30 天内到期的贷款本金构成预期流入。
+    -- 窗口必须有下界：已过到期日（days_to_maturity < 0）的贷款还在账上，但它们的到期流入
+    -- 不是「未来 30 天」的现金流；只看上界会把它们算成即将流入。
+    -- 下界取 0 而不是 1：当天到期的贷款当天就是现金（O/N 桶），属于 30 天窗口内。
     select
         report_date,
         entity_code,
@@ -88,7 +91,7 @@ loan_inflows as (
         round(sum(case when loan_type = 'MORTGAGE' then outstanding_usd else 0 end), 2) as mortgage_inflow,
         round(sum(outstanding_usd), 2) as total_inflow
     from {{ ref('owd_loans') }}
-    where days_to_maturity <= 30
+    where days_to_maturity between 0 and 30
     group by report_date, entity_code, is_intracompany
 
 ),

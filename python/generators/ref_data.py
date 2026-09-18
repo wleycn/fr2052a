@@ -482,6 +482,16 @@ VALIDATION_RULE_ROWS = [
         "LEI 须为 20 位大写字母数字",
         True,
     ),
+    (
+        "VDQ-021",
+        "Pledged flag value domain",
+        "COMPLETENESS",
+        "ODS",
+        "WARNING",
+        "coalesce(trim(pledged_flag), '') IN ('Y', 'N')",
+        "质押标记须为 Y 或 N；空值或非法值按未受限处理，但源系统缺报状态要报出来",
+        True,
+    ),
 ]
 
 
