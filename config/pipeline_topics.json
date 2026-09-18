@@ -44,6 +44,13 @@
       "has_producer": true
     },
     {
+      "name": "treasury_cash_position",
+      "source_system": "TREASURY_SYS",
+      "target_table": "bronze.ods_treasury_cash_position",
+      "has_producer": true,
+      "note": "司库现金头寸：银行对账单余额与库存现金盘点数，GL 对账 Section E 的独立基准"
+    },
+    {
       "name": "off_bs_commitments",
       "source_system": "OFFBS_SYS",
       "target_table": "bronze.ods_off_bs_commitments",

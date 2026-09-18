@@ -39,6 +39,7 @@ ALL_BRONZE = (
     "bronze.ods_securities",
     "bronze.ods_derivatives",
     "bronze.ods_gl_balances",
+    "bronze.ods_treasury_cash_position",
     "bronze.ods_off_bs_commitments",
 )
 ALL_OWD = (
@@ -49,6 +50,7 @@ ALL_OWD = (
     "silver.owd_derivatives",
     "silver.owd_off_bs",
     "silver.owd_gl_entries",
+    "silver.owd_treasury_cash_position",
 )
 
 # 规则 → 应用到的表。VDQ-001 是结构性规则（表非空），在引擎里单独处理，不在此列；

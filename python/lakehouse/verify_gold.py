@@ -471,6 +471,45 @@ def check_gl_reconciliation(spark: SparkSession) -> list[CheckResult]:
     return results
 
 
+def check_recon_benchmark(spark: SparkSession) -> list[CheckResult]:
+    """独立核对 Section E 的对账基准：来源必须是司库现金头寸，且调节后残差为零。
+
+    对账表自己判 PASS 不算证据。这里从另一条路径核三件事：
+      1. Section E 的基准来源标识必须是司库现金头寸 —— 退回到总账就是自比对；
+      2. 调节项必须非零 —— 现金头寸与账面真的不同源；
+      3. 调节后残差必须是零 —— 差额已被逐项解释干净。
+    """
+    results: list[CheckResult] = []
+    for period in report_periods(spark):
+        row = spark.sql(
+            f"""
+            select
+                count(*) as total,
+                sum(case when benchmark_source = 'TREASURY_CASH_POSITION' then 1 else 0 end) as independent,
+                sum(case when abs(reconciling_item_usd) >= 0.01 then 1 else 0 end) as itemized,
+                max(abs(variance)) as max_variance
+            from {RECONCILIATION}
+            where section_code = 'E' and cast(report_date as string) = '{period}'
+            """
+        ).collect()[0]
+        total = row["total"]
+        independent = row["independent"] or 0
+        itemized = row["itemized"] or 0
+        max_variance = float(row["max_variance"] or 0)
+        passed = total > 0 and independent == total and itemized == total and max_variance <= 0.01
+        results.append(
+            CheckResult(
+                name=f"对账基准独立性 {period}",
+                passed=passed,
+                detail=(
+                    f"E 项 {total} 行，司库口径基准 {independent} 行，调节项非零 {itemized} 行，"
+                    f"最大残差 {max_variance:,.2f}"
+                ),
+            )
+        )
+    return results
+
+
 def main() -> int:
     """跑 ADS 层全部核对项，任一不通过即以退出码 1 结束。"""
     spark = SparkSession.builder.appName("fr2052a-verify-gold").getOrCreate()
@@ -484,6 +523,7 @@ def main() -> int:
     results.extend(check_l2_cap(spark))
     results.extend(check_inflow_cap(spark))
     results.extend(check_gl_reconciliation(spark))
+    results.extend(check_recon_benchmark(spark))
 
     for result in results:
         print(f"  [{'PASS' if result.passed else 'FAIL'}] {result.name:<26} {result.detail}")

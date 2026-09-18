@@ -1,4 +1,6 @@
--- 一次性重建：删除 7 张 OWD 版本历史表，由 owd_scd2.py 重新建立干净的版本基线。
+-- 一次性重建：删除 OWD 版本历史表，由 owd_scd2.py 重新建立干净的版本基线。
+-- （2026-09-18 补入 owd_treasury_cash_position_history：新增第 8 张 OWD 表时同步，
+--   否则重置后的基线里会残留这张表的旧版本行。）
 --
 -- 运行（在 Server 2 的 ~/fr2052a-infra 下，且**先**确认没有别处依赖这些表）：
 --   bash spark-submit-fr2052a.sh /opt/fr2052a-app/python/lakehouse/run_sql_file.py \
@@ -30,3 +32,4 @@ DROP TABLE IF EXISTS silver.owd_securities_history;
 DROP TABLE IF EXISTS silver.owd_derivatives_history;
 DROP TABLE IF EXISTS silver.owd_off_bs_history;
 DROP TABLE IF EXISTS silver.owd_gl_entries_history;
+DROP TABLE IF EXISTS silver.owd_treasury_cash_position_history;

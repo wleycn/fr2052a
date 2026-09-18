@@ -23,10 +23,12 @@ OWD_TO_ODS = {
     "silver.owd_derivatives": "bronze.ods_derivatives",
     "silver.owd_off_bs": "bronze.ods_off_bs_commitments",
     "silver.owd_gl_entries": "bronze.ods_gl_balances",
+    "silver.owd_treasury_cash_position": "bronze.ods_treasury_cash_position",
 }
 
 # 没有到期日概念的 OWD 表，不参与分桶核对
-TABLES_WITHOUT_MATURITY = ("silver.owd_gl_entries",)
+# 现金头寸是余额快照，本就没有到期日
+TABLES_WITHOUT_MATURITY = ("silver.owd_gl_entries", "silver.owd_treasury_cash_position")
 
 # 折算核对：(OWD 表, OWD 的 USD 列, ODS 上游表, 上游原币列)
 FX_CHECKS = (
@@ -36,6 +38,12 @@ FX_CHECKS = (
     ("silver.owd_securities", "market_value_usd", "bronze.ods_securities", "market_value"),
     ("silver.owd_derivatives", "notional_usd", "bronze.ods_derivatives", "notional_amount"),
     ("silver.owd_off_bs", "undrawn_amount_usd", "bronze.ods_off_bs_commitments", "undrawn_amount"),
+    (
+        "silver.owd_treasury_cash_position",
+        "balance_usd",
+        "bronze.ods_treasury_cash_position",
+        "balance_amount",
+    ),
 )
 
 TOLERANCE = 0.02

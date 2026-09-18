@@ -64,7 +64,7 @@ STEPS=(
 )
 
 declare -A STEP_DESC=(
-  [check-source]="源文件到位检查：ODS 目录必须有 7 张 CSV，数量不对即失败"
+  [check-source]="源文件到位检查：ODS 目录的 CSV 张数须与主题声明一致，数量不对即失败"
   [ref-load]="REF 批加载：字典表入 ref 命名空间"
   [ods-replay]="ODS 重放：样本明细按主题打进 Kafka"
   [bronze-load]="入湖 bronze：消费 Kafka，按主键 MERGE 去重"
@@ -110,12 +110,19 @@ execute_step() {
     check-source)
       # 必须用宿主路径：SSH 进来执行时看不到容器内的 /opt/fr2052a-app。
       # 也不能直接用 `ls | wc -l` —— wc 恒退出 0，缺文件时这一步照样"成功"。
+      # 期望张数从主题声明派生（有生产者的主题 = 应到位的源文件），不写死数字：
+      # 写死的话新增一张 ODS 表就要来改这里的常量，改漏的表现是「张数对不上」被误判成缺文件。
+      expected=$(./venv/bin/python -c "
+import json
+topics = json.load(open('$HOST_APP_DIR/config/pipeline_topics.json'))['topics']
+print(sum(1 for topic in topics if topic.get('has_producer')))
+")
       count=$(ls -1 "$HOST_APP_DIR/sample_data/ods/"*.csv 2>/dev/null | wc -l)
-      if [ "$count" -ne 7 ]; then
-        echo "ODS 源文件应为 7 张，实际 $count 张（目录 $HOST_APP_DIR/sample_data/ods）" >&2
+      if [ "$count" -ne "$expected" ]; then
+        echo "ODS 源文件应为 $expected 张，实际 $count 张（目录 $HOST_APP_DIR/sample_data/ods）" >&2
         exit 1
       fi
-      echo "ODS 源文件 7 张，已到位"
+      echo "ODS 源文件 $expected 张，已到位"
       ;;
     ref-load)
       bash spark-submit-fr2052a.sh "$APP_DIR/python/lakehouse/load_ref_tables.py" "$APP_DIR/sample_data/ref"

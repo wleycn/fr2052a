@@ -176,6 +176,31 @@ USING iceberg
 PARTITIONED BY (days(report_date))
 TBLPROPERTIES ('format-version' = '2');
 
+-- 司库现金头寸：库存现金盘点数 + 各代理行对账单余额，附未达账项明细。
+-- 为什么单独一张表：FR 2052a 的 Section E（现金）在 GL 对账里原本两侧都读总账 1001/1100，
+-- 等于自己跟自己比，差异恒为零、什么错误都查不出来。司库系统给的是「对账单 + 盘点」口径，
+-- 与账面口径天然是两个来源，差额由在途存款与未兑现支票逐项解释。
+CREATE TABLE IF NOT EXISTS bronze.ods_treasury_cash_position (
+    source_system STRING COMMENT '来源系统编码',
+    source_record_id STRING COMMENT '源系统记录主键',
+    report_date DATE COMMENT '报告日',
+    entity_code STRING COMMENT '记账法人实体编码',
+    position_type STRING COMMENT '头寸类型：VAULT_CASH 库存现金 / DUE_FROM_BANKS 存放同业',
+    custodian_id STRING COMMENT '保管机构：OWN-VAULT 本行库房、CB-XXX 代理行',
+    account_ref STRING COMMENT '账户或库房标识',
+    currency STRING COMMENT '币种 ISO 4217',
+    balance_amount DECIMAL(20,2) COMMENT '对账单余额或盘点金额（原币）',
+    in_transit_deposits_amount DECIMAL(20,2) COMMENT '在途存款（账面已记、对账单未到）',
+    outstanding_checks_amount DECIMAL(20,2) COMMENT '未兑现支票（账面已扣、对账单未扣）',
+    event_time TIMESTAMP COMMENT '源系统事件时间',
+    etl_batch_id STRING COMMENT 'ETL 批次号',
+    etl_source_file STRING COMMENT 'ETL 来源文件',
+    etl_load_timestamp TIMESTAMP COMMENT '入湖时间'
+)
+USING iceberg
+PARTITIONED BY (days(report_date))
+TBLPROPERTIES ('format-version' = '2');
+
 -- 表外承诺：授信承诺、信用证、担保，进 Section J
 CREATE TABLE IF NOT EXISTS bronze.ods_off_bs_commitments (
     source_system STRING COMMENT '来源系统编码',

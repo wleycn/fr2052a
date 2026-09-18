@@ -29,6 +29,7 @@ OWD_TABLES = (
     "owd_derivatives",
     "owd_off_bs",
     "owd_gl_entries",
+    "owd_treasury_cash_position",
 )
 
 KEY_COLUMNS = ("source_system", "source_record_id", "report_date")

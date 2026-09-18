@@ -29,7 +29,8 @@ def check_reconciliation(**context: Any) -> None:
     hook = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID)
     rows = hook.get_records(
         """
-        select section_code, gl_account_id, gl_amount, fr2052a_amount, variance, status
+        select section_code, gl_account_id, benchmark_amount, benchmark_source,
+               reconciling_item_usd, fr2052a_amount, variance, status
         from ads.ads_gl_reconciliation
         order by section_code
         """
@@ -37,11 +38,11 @@ def check_reconciliation(**context: Any) -> None:
     if not rows:
         raise ValueError("对账表为空：日批可能尚未完成，或导出环节未执行")
 
-    failures = [row for row in rows if row[5] != "PASS"]
-    for section, accounts, gl_amount, report_amount, variance, status in rows:
+    failures = [row for row in rows if row[7] != "PASS"]
+    for section, accounts, benchmark, source, reconciling, report_amount, variance, status in rows:
         print(
-            f"  [{status}] Section {section:<3} 科目 {accounts:<12} 总账 {gl_amount:>18,.2f} "
-            f"报送 {report_amount:>18,.2f} 差异 {variance:>14,.2f}"
+            f"  [{status}] Section {section:<3} 科目 {accounts:<12} 基准 {benchmark:>18,.2f} "
+            f"({source}) 调节项 {reconciling:>14,.2f} 报送 {report_amount:>18,.2f} 差异 {variance:>14,.2f}"
         )
 
     print()
@@ -52,7 +53,7 @@ def check_reconciliation(**context: Any) -> None:
 
 with DAG(
     dag_id="fr2052a_gl_reconciliation",
-    description="GL 对账：总账余额与 FR 2052a 报送口径逐 Section 比对，不平则阻断",
+    description="GL 对账：独立基准（总账 / 司库现金头寸）与 FR 2052a 报送口径逐 Section 比对，不平则阻断",
     schedule="0 7 * * *",  # 日批 06:00 之后一小时，确保报表已导出
     start_date=pendulum.datetime(2026, 9, 1, tz="Asia/Shanghai"),
     catchup=False,

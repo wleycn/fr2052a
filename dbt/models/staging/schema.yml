@@ -55,3 +55,25 @@ models:
         meta:
           pii: true
           pii_source: ods_loans.loan_id
+
+  - name: owd_treasury_cash_position
+    description: OWD 司库现金头寸，GL 对账 Section E 的基准侧（对账单 + 盘点口径，非账面口径）
+    columns:
+      - name: position_type
+        description: 头寸类型：VAULT_CASH 库存现金 / DUE_FROM_BANKS 存放同业
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['VAULT_CASH', 'DUE_FROM_BANKS']
+      - name: balance_usd
+        description: 对账单余额或盘点金额，折美元
+        tests:
+          - not_null
+      - name: in_transit_deposits_usd
+        description: 在途存款折美元，账面已记、对账单未到；库存现金恒为 0
+        tests:
+          - not_null
+      - name: outstanding_checks_usd
+        description: 未兑现支票折美元，账面已扣、对账单未扣；库存现金恒为 0
+        tests:
+          - not_null

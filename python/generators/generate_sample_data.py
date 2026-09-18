@@ -39,6 +39,7 @@ if __package__ in (None, ""):
 
 from . import ods_data
 from .config import (
+    BANKS_PER_ENTITY,
     BOOKING_ENTITIES,
     DEFAULT_OUTPUT_DIR,
     INTRACOMPANY_PAIRS,
@@ -100,6 +101,8 @@ EXPECTED_ODS_ROWS: dict[str, int] = {
     "ods_securities": VOLUMES["ods_securities"] + PARENT_VOLUMES["ods_securities"],
     "ods_derivatives": VOLUMES["ods_derivatives"] + PARENT_VOLUMES["ods_derivatives"],
     "ods_gl_balances": GL_ROWS_PER_ACCOUNT * len(GL_ACCOUNTS) * len(BOOKING_ENTITIES),
+    # 每实体 1 行库存现金 + BANKS_PER_ENTITY 行代理行账户
+    "ods_treasury_cash_position": (1 + BANKS_PER_ENTITY) * len(BOOKING_ENTITIES),
     "ods_off_bs_commitments": VOLUMES["ods_off_bs_commitments"] + PARENT_VOLUMES["ods_off_bs_commitments"],
 }
 
@@ -337,6 +340,65 @@ def check_gl_balanced(output_dir: Path, valid_dates: list[date]) -> list[CheckRe
     return results
 
 
+def check_cash_position_reconciles(output_dir: Path, valid_dates: list[date]) -> list[CheckResult]:
+    """司库现金头寸与总账的勾稽自检：逐实体 × 逐报告期核对两条判据。
+
+    判据一：对账单余额 + 在途存款 − 未兑现支票 == 该实体总账 1001 + 1100。
+    这是 GL 对账 Section E 要判的等式，生成阶段先自证一次，免得等式不成立时
+    下游只能看到「对账不平」这一句结论。
+
+    判据二：两侧金额不相等 —— 对账单口径与账面口径真的不同源。
+    相等说明基准侧退化成了报送侧的副本，对账变成自己跟自己比（审计点名过的缺陷形态），
+    必须在这里报出来，而不是留到对账表里静静 PASS。
+    """
+    gl_rows = read_csv_rows(output_dir / ODS_SUBDIR / "ods_gl_balances.csv")
+    position_rows = read_csv_rows(output_dir / ODS_SUBDIR / "ods_treasury_cash_position.csv")
+    results: list[CheckResult] = []
+    for rd in valid_dates:
+        stamp = rd.isoformat()
+        for entity_code in BOOKING_ENTITIES:
+            book = round(
+                sum(
+                    float(row["debit_balance"])
+                    for row in gl_rows
+                    if row["report_date"] == stamp
+                    and row["entity_code"] == entity_code
+                    and row["gl_account_id"] in ("1001", "1100")
+                ),
+                2,
+            )
+            positions = [
+                row for row in position_rows if row["report_date"] == stamp and row["entity_code"] == entity_code
+            ]
+            statement = round(sum(float(row["balance_amount"]) for row in positions), 2)
+            reconciling = round(
+                sum(
+                    float(row["in_transit_deposits_amount"]) - float(row["outstanding_checks_amount"])
+                    for row in positions
+                ),
+                2,
+            )
+            gap = round(statement + reconciling - book, 2)
+            results.append(
+                CheckResult(
+                    name=f"现金头寸勾稽 {entity_code} {stamp}",
+                    passed=abs(gap) < 0.01,
+                    detail=f"对账单 {statement:,.2f} + 调节项 {reconciling:,.2f} vs 账面 {book:,.2f}，差 {gap:,.2f}",
+                )
+            )
+            results.append(
+                CheckResult(
+                    name=f"现金头寸独立基准 {entity_code} {stamp}",
+                    passed=abs(statement - book) >= 0.01 and abs(reconciling) >= 0.01,
+                    detail=(
+                        f"对账单与账面差 {round(statement - book, 2):,.2f}，调节项 {reconciling:,.2f}"
+                        "（两侧相等或调节项为零都会让对账失去意义）"
+                    ),
+                )
+            )
+    return results
+
+
 def check_intracompany_pairs(output_dir: Path) -> list[CheckResult]:
     """内部往来配对自检：逐对核对存款腿本金 == 贷款腿 outstanding，且两侧实体与对手方编号互相对得上。
 
@@ -425,6 +487,11 @@ def check_amount_signs(output_dir: Path) -> list[CheckResult]:
         "ods_loans": ("facility_amount", "outstanding_amount", "undrawn_amount"),
         "ods_securities": ("face_amount", "market_value", "book_value"),
         "ods_gl_balances": ("debit_balance", "credit_balance"),
+        "ods_treasury_cash_position": (
+            "balance_amount",
+            "in_transit_deposits_amount",
+            "outstanding_checks_amount",
+        ),
         "ods_off_bs_commitments": ("facility_amount", "undrawn_amount"),
     }
     results = []
@@ -548,6 +615,7 @@ def run_checks(
     results.extend(check_date_ordering(output_dir))
     results.extend(check_amount_signs(output_dir))
     results.extend(check_gl_balanced(output_dir, valid_dates))
+    results.extend(check_cash_position_reconciles(output_dir, valid_dates))
     results.extend(check_intracompany_pairs(output_dir))
     results.extend(check_behavior_coverage(output_dir))
     return results

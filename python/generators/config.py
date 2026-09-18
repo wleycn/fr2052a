@@ -40,8 +40,14 @@ VOLUMES: dict[str, int] = {
     "ods_securities": 200,
     "ods_derivatives": 150,
     "ods_gl_balances": 0,  # 派生填充，见上注释
+    # 派生填充：(1 + BANKS_PER_ENTITY) × 实体数，见下方常量注释
+    "ods_treasury_cash_position": 0,
     "ods_off_bs_commitments": 100,
 }
+
+# 司库现金头寸：每个法人实体一本库存现金头寸，外加这么多个代理行账户。
+# 头寸行数由它派生（每实体 1 + N 行），不硬编码，改账户数时行数自动跟上。
+BANKS_PER_ENTITY = 3
 
 # 承接业务记账的法人实体。母公司 ENT001 现在也记账（母公司单体口径需要数据），
 # 但既有四家子公司的生成逻辑一行不改——母公司单独追加。
@@ -91,6 +97,7 @@ ODS_SOURCE_FILES: dict[str, tuple[str, str]] = {
     "ods_securities": ("CUSTODY_SYS", "custody_positions_{ymd}.csv"),
     "ods_derivatives": ("DERIV_SYS", "derivatives_book_{ymd}.csv"),
     "ods_gl_balances": ("FINANCE_SYS", "gl_balances_{ymd}.csv"),
+    "ods_treasury_cash_position": ("TREASURY_SYS", "treasury_cash_position_{ymd}.csv"),
     "ods_off_bs_commitments": ("OFFBS_SYS", "off_bs_commitments_{ymd}.csv"),
 }
 

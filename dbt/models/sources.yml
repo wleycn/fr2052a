@@ -38,4 +38,6 @@ sources:
       - name: ods_securities
       - name: ods_derivatives
       - name: ods_gl_balances
+      - name: ods_treasury_cash_position
+        description: 司库现金头寸，银行对账单余额与库存现金盘点数，附未达账项
       - name: ods_off_bs_commitments

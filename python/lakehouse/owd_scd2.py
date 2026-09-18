@@ -59,6 +59,7 @@ OWD_TABLES = (
     "owd_derivatives",
     "owd_off_bs",
     "owd_gl_entries",
+    "owd_treasury_cash_position",
 )
 
 # 自然键：源系统 + 源记录号 + 报告日。同一源记录在不同报告日是两条独立的记录，
@@ -308,7 +309,7 @@ def version_table(spark: SparkSession, table: str, args: argparse.Namespace) -> 
 
 
 def main() -> int:
-    """对 7 张 OWD 表逐个做 SCD2 版本化，写完后自检区间不变式。"""
+    """对 8 张 OWD 表逐个做 SCD2 版本化，写完后自检区间不变式。"""
     args = parse_args()
     spark = SparkSession.builder.appName("fr2052a-owd-scd2").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")

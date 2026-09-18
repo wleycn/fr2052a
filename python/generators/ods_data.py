@@ -28,6 +28,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 from .config import (
+    BANKS_PER_ENTITY,
     BATCH_ID,
     BOOKING_ENTITIES,
     ENTITY_CURRENCY_WEIGHTS,
@@ -97,6 +98,18 @@ GL_ROWS_PER_ACCOUNT = 5
 # 现金与同业存放没有对应的业务明细表，按存款余额的一个比例设定（演示假设）
 CASH_TO_DEPOSIT_RATIO = 0.08
 DUE_FROM_BANKS_TO_DEPOSIT_RATIO = 0.04
+
+# 司库现金头寸的未达账项比例（演示假设）：
+#   在途存款 —— 账面已记、对账单未到，对账单余额因此低于账面；
+#   未兑现支票 —— 账面已扣、对账单未扣，对账单余额因此高于账面。
+# 未兑现支票由在途存款按系数派生，因此每个代理行账户的净调节项恒为正。
+# 净调节项为零意味着对账单与账面恰好相等 —— 那正是「基准侧与报送侧同源」这个
+# 已被审计点名的缺陷形态，必须由构造保证不发生（dbt 侧另有断言守着这条前提）。
+IN_TRANSIT_RATIO_RANGE = (0.003, 0.015)
+OUTSTANDING_CHECKS_FACTOR_RANGE = (0.2, 0.6)
+
+# 代理行账户的保管机构编号，按顺序取用；账户数由 BANKS_PER_ENTITY 决定
+CORRESPONDENT_BANKS = ("CITI", "JPM", "HSBC")
 
 
 @dataclass(frozen=True)
@@ -613,6 +626,120 @@ def generate_gl_balances(
     return write_csv(ods_dir / "ods_gl_balances.csv", _header(business_columns), all_rows, append=append)
 
 
+def _gl_book_cash_by_entity(ods_dir: Path, report_date: date) -> dict[str, tuple[float, float]]:
+    """从该期总账里读出每个法人实体的现金（1001）与同业存放（1100）账面余额。
+
+    司库头寸生成在总账之后，且以账面余额为锚：对账单余额 = 账面 − 在途存款 + 未兑现支票。
+    倒推方向是「账面 → 对账单」而不是反过来：账面余额由业务明细倒推得出，是这套数据的
+    基准；对账单侧只是把未达账项从这个基准里拆出来。
+
+    Args:
+        ods_dir: ODS 输出目录。
+        report_date: 该期的报告日。
+
+    Returns:
+        {实体码: (库存现金, 存放同业)}，某科目无行时记 0。
+    """
+    book: dict[str, list[float]] = {entity: [0.0, 0.0] for entity in BOOKING_ENTITIES}
+    for row in _read_ods_rows(ods_dir, "ods_gl_balances", report_date):
+        account_id = row["gl_account_id"]
+        if account_id not in ("1001", "1100"):
+            continue
+        slot = 0 if account_id == "1001" else 1
+        book[row["entity_code"]][slot] = round(book[row["entity_code"]][slot] + float(row["debit_balance"]), 2)
+    return {entity: (amounts[0], amounts[1]) for entity, amounts in book.items()}
+
+
+def generate_treasury_cash_position(
+    ods_dir: Path,
+    ref: ReferenceData,
+    report_date: date,
+    append: bool = False,
+) -> int:
+    """司库现金头寸：库存现金盘点数 + 各代理行对账单余额，附未达账项明细。
+
+    为什么需要这张表：FR 2052a 的 Section E（现金）在总账对账里原本两侧都读总账
+    1001/1100 —— 自己跟自己比，差异恒为零，任何错误都查不出来。司库系统的现金头寸
+    是「对账单 + 盘点」口径，与账面口径天然是两个来源，差额由在途存款与未兑现支票
+    逐项解释。对账因此变成真正的核对：任一侧被改坏，差额就不再等于调节项。
+
+    构造关系（逐实体、逐账户，精确到分）：
+        账面余额（总账 1001 库存现金 / 1100 存放同业）
+            = 对账单余额 + 在途存款 − 未兑现支票
+    库存现金是实地盘点数、没有对账单，演示假设盘点数与账面一致，因此未达账项只出现在
+    代理行账户上。
+
+    ref 参数保留以对齐其他生成器的签名，本表不使用引用数据。
+
+    Args:
+        ods_dir: ODS 输出目录。
+        ref: 引用数据（本表不用）。
+        report_date: 该期的报告日。
+        append: 追加模式。
+
+    Returns:
+        本次写入的行数。
+    """
+    rng = ods_rng("ods_treasury_cash_position", report_date)
+    clock = EventClock(report_date)
+    book_by_entity = _gl_book_cash_by_entity(ods_dir, report_date)
+
+    rows: list[list[object]] = []
+    index = 0
+    for entity_code in BOOKING_ENTITIES:
+        book_vault, book_due = book_by_entity[entity_code]
+
+        # 库存现金：实地盘点数 = 账面数，无未达账项
+        index += 1
+        rows.append(
+            _assemble(
+                "ods_treasury_cash_position",
+                f"TCP-{index:06d}",
+                entity_code,
+                ["VAULT_CASH", "OWN-VAULT", f"VC-{entity_code}", "USD", book_vault, 0.0, 0.0],
+                clock.next(),
+                report_date,
+            )
+        )
+
+        # 存放同业：按代理行账户拆分，每个账户各自带未达账项
+        for account_index, share in enumerate(_split_amount(rng, book_due, BANKS_PER_ENTITY), start=1):
+            in_transit = round(share * rng.uniform(*IN_TRANSIT_RATIO_RANGE), 2)
+            outstanding_checks = round(in_transit * rng.uniform(*OUTSTANDING_CHECKS_FACTOR_RANGE), 2)
+            statement_balance = round(share - in_transit + outstanding_checks, 2)
+            bank = CORRESPONDENT_BANKS[(account_index - 1) % len(CORRESPONDENT_BANKS)]
+            index += 1
+            rows.append(
+                _assemble(
+                    "ods_treasury_cash_position",
+                    f"TCP-{index:06d}",
+                    entity_code,
+                    [
+                        "DUE_FROM_BANKS",
+                        f"CB-{bank}",
+                        f"BA-{entity_code}-{bank}",
+                        "USD",
+                        statement_balance,
+                        in_transit,
+                        outstanding_checks,
+                    ],
+                    clock.next(),
+                    report_date,
+                )
+            )
+
+    business_columns = [
+        "position_type",
+        "custodian_id",
+        "account_ref",
+        "currency",
+        "balance_amount",
+        "in_transit_deposits_amount",
+        "outstanding_checks_amount",
+    ]
+    return write_csv(ods_dir / "ods_treasury_cash_position.csv", _header(business_columns), rows, append=append)
+
+
 def generate_off_bs_commitments(ods_dir: Path, ref: ReferenceData, report_date: date, append: bool = False) -> int:
     """表外承诺：授信承诺、信用证、担保，进 Section J。"""
     rng = ods_rng("ods_off_bs_commitments", report_date)
@@ -1115,7 +1242,7 @@ def generate_all(
     correction: tuple[str, float] | None = None,
     report_dates_list: list[date] | None = None,
 ) -> dict[str, int]:
-    """生成全部 7 张 ODS 表，返回各表行数（各期行数之和）。
+    """生成全部 8 张 ODS 表，返回各表行数（各期行数之和）。
 
     生成顺序（每期）：
     1. 子公司业务明细（_BUSINESS_GENERATORS）—— 既有四家子公司，一行不改
@@ -1123,6 +1250,7 @@ def generate_all(
     3. 集团内往来配对腿（generate_intracompany_pairs）—— 存款腿 + 贷款腿
     4. 存款修正（如有）
     5. 总账逐实体倒推（generate_gl_balances）—— 每个 BOOKING_ENTITIES 各一本账
+    6. 司库现金头寸（generate_treasury_cash_position）—— 以第 5 步的账面余额为锚
 
     多期生成：report_dates_list 给多个报告日时，按期顺序逐期生成各表。
     每期用 ods_rng(table_name, report_date) 派生独立随机源，
@@ -1148,6 +1276,7 @@ def generate_all(
         "ods_securities": 0,
         "ods_derivatives": 0,
         "ods_gl_balances": 0,
+        "ods_treasury_cash_position": 0,
         "ods_off_bs_commitments": 0,
     }
 
@@ -1172,5 +1301,10 @@ def generate_all(
     # 总账在存款修正之后逐期生成，每期各自平衡
     for i, rd in enumerate(report_dates_list):
         counts["ods_gl_balances"] += generate_gl_balances(ods_dir, ref, rd, gl_break_amount, append=i > 0)
+
+    # 司库现金头寸在总账之后逐期生成：对账单余额以该期账面余额为锚，
+    # 因此必须先有该期总账（见 _gl_book_cash_by_entity）
+    for i, rd in enumerate(report_dates_list):
+        counts["ods_treasury_cash_position"] += generate_treasury_cash_position(ods_dir, ref, rd, append=i > 0)
 
     return counts

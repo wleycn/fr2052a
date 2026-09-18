@@ -60,6 +60,7 @@
 | `custody_positions` | CUSTODY_SYS | `bronze.ods_securities` | 有 |
 | `derivatives_trades` | DERIV_SYS | `bronze.ods_derivatives` | 有 |
 | `gl_entries` | FINANCE_SYS | `bronze.ods_gl_balances` | 有 |
+| `treasury_cash_position` | TREASURY_SYS | `bronze.ods_treasury_cash_position` | 有 |
 | `off_bs_commitments` | OFFBS_SYS | `bronze.ods_off_bs_commitments` | 有 |
 | `market_data_prices` | MARKET_DATA | 不落表 | 暂作声明保留（本演示未生成对应的 ODS 表） |
 | `reference_data_updates` | REF_DATA | 不落表 | 暂作声明保留（引用数据走批加载直入 ref） |

@@ -6,7 +6,11 @@ Gold（Iceberg）与 ADS（PostgreSQL）同一份数据的两个落点
 
 ## 主题
 
-总账对账结果：报表口径与总账口径按 Section 逐项比对。
+对账结果：报送口径与**独立基准**按 Section 逐项比对。
+
+基准侧分两类（`benchmark_source` 列标明）：非现金 Section 取总账科目余额；Section E（现金）取司库现金头寸，即银行对账单余额与库存现金盘点数。
+
+Section E 为什么不沿用总账：报送侧的现金本身就出自总账 `1001/1100`，两侧同源等于自己跟自己比，差异恒为零，改坏任何一侧都查不出来。换成司库口径后两侧是两个来源，差额由在途存款与未兑现支票逐项解释，记在 `reconciling_item_usd` 列。
 
 ## 粒度
 
@@ -35,7 +39,9 @@ dbt `table` 物化整表重建；导出 PostgreSQL 时先清后写。
 | `section_code` |
 | `gl_account_id` |
 | `account_name` |
-| `gl_amount` |
+| `benchmark_amount` |
+| `benchmark_source` |
+| `reconciling_item_usd` |
 | `fr2052a_amount` |
 | `variance` |
 | `status` |
@@ -44,7 +50,11 @@ dbt `table` 物化整表重建；导出 PostgreSQL 时先清后写。
 
 ## 金额单位约定
 
-USD，`DECIMAL(20,2)`。总账侧按 Section 汇总后与报表比，不按单个科目比。
+USD，`DECIMAL(20,2)`。基准侧按 Section 汇总后与报送金额比，不按单个科目比。
+
+判定公式：`variance = benchmark_amount + reconciling_item_usd − fr2052a_amount`，落在容差内判 `PASS`，否则 `FAIL`（`FAIL` 阻断报送）。
+
+容差分两档：总账口径基准为报送金额的 1% 且不少于 1 分钱；对账单口径基准（Section E）只留 1 分钱 —— 差额已被调节项逐项解释，再留 1% 等于放行几十万的错误。
 
 ## PII 字段与脱敏方式
 
@@ -60,9 +70,15 @@ USD，`DECIMAL(20,2)`。总账侧按 Section 汇总后与报表比，不按单�
 
 ## 上下游依赖
 
-- **上游**：`silver.owd_gl_entries` 与报表 `gold.ads_fr2052a_report`。
+- **上游**：`silver.owd_gl_entries`（非现金 Section 的基准）、`silver.owd_treasury_cash_position`（Section E 的基准与调节项）、报表 `gold.ads_fr2052a_report`。
 - **下游**：GL 对账 DAG `fr2052a_gl_reconciliation`、放行闸与熔断判定。
 
 ## 质量规则清单
 
-`VDQ-013` 与 `VDQ-014` 覆盖 Section 合计与融资总量；差额超过阈值即 `status = FAIL`，说明报表与总账两套口径已经分叉。
+`VDQ-013` 与 `VDQ-014` 覆盖 Section 合计与融资总量；差额超过阈值即 `status = FAIL`，说明报表与基准两套口径已经分叉。
+
+列级声明见 `dbt/models/marts/schema.yml`（`FR2052A-REC-01` 至 `FR2052A-REC-05`）。
+
+另有两条 dbt 断言守着「对账有意义」这条前提，任一失败即视为对账结构被破坏：
+- `assert_recon_benchmark_independent`：Section E 的基准来源必须是司库现金头寸、基准与报送金额必须不相等、调节项必须非零 —— 抓「退回自比对」；
+- `assert_fx_covered`：对账单金额折 USD 的汇率必须齐备。

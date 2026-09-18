@@ -14,6 +14,11 @@
 | 存款 | Deposits | 零售/批发活期、储蓄、定期存款 | "存款余额"（缺少分类）| sec_c | 含 Retail 与 Wholesale |
 | 其他资金来源 | Other Funding / Liabilities | 批发存款以外的负债与融资：其他有担保与无担保债务 | "其他负债"（缺少融资含义）| sec_d | Section D |
 | 现金及等价物 | Cash & Cash Equivalents | 央行存款、短期高流动性资产 | "现金"（缺少等价物）| sec_e | 不含受限现金 |
+| 司库现金头寸 | Treasury Cash Position | 司库系统的现金头寸快照：库存现金盘点数 + 各代理行对账单余额 + 未达账项 | "现金余额"（分不清账面与对账单口径）| sec_e | 落 `bronze.ods_treasury_cash_position` |
+| 对账单口径 | Statement Basis | 以银行对账单余额与实地盘点数为准的口径（外部可见的事实）| "实际现金"、"真实余额" | sec_e | 与账面口径相对 |
+| 未达账项 | Reconciling Items | 账面与对账单之间的时间性差异：在途存款（账面已记、对账单未到）与未兑现支票（账面已扣、对账单未扣）| "差额"、"时间差" | sec_e | 逐账户记在 ODS 明细里 |
+| 调节项 | Reconciling Item | 把对账单口径调整到账面口径所需的净额 = 在途存款 − 未兑现支票 | "调整数"、"轧差" | sec_e | 对账表列 `reconciling_item_usd` |
+| 独立基准 | Independent Benchmark | 对账中与被校验对象分属两个来源的基准金额，两侧同源则对账无意义 | "参考值"、"对照数据" | ads | 对账表列 `benchmark_amount` 与 `benchmark_source` |
 | 贷款组合 | Loan Portfolio | 商业贷款、零售贷款、按揭贷款 | "贷款"（缺少组合限定）| sec_f | 现金流入侧 |
 | 证券投资组合 | Securities Portfolio | 国债、机构债、MBS/ABS、公司债 | "证券"（缺少投资组合限定）| sec_g | 含 HQLA 与非 HQLA |
 | 衍生品 | Derivatives | IRS、FX、期权、期货、CDS | "衍生工具" | sec_h | 按 Net MTM 计 |
@@ -116,7 +121,9 @@
 | `severity` | `CRITICAL` / `WARNING` / `INFO` | 预警严重度 | — | `ads.ads_fr2052a_alerts` |
 | `status`（预警） | `OPEN` / `CLOSED` | 规则是否仍在命中 | 命中即 `OPEN`，不再命中自动转 `CLOSED` | `ads.ads_fr2052a_alerts` |
 | `state`（熔断闸） | `OPEN` / `HALTED` | 报送是否放行 | 出现阻断级预警即 `HALTED`，清零后回 `OPEN` | `ads.ads_circuit_breaker` |
-| `status`（对账） | `PASS` / `FAIL` | 单个 Section 是否对平 | 每轮重算 | `ads.ads_gl_reconciliation` |
+| `status`（对账） | `PASS` / `FAIL` | 单个 Section 的调节后差异是否在容差内 | 每轮重算 | `ads.ads_gl_reconciliation` |
+| `benchmark_source` | `GL` / `TREASURY_CASH_POSITION` | 该 Section 的对账基准取自总账科目余额还是司库现金头寸 | 每轮重算 | `ads.ads_gl_reconciliation` |
+| `position_type` | `VAULT_CASH` / `DUE_FROM_BANKS` | 现金头寸是库存现金还是存放同业 | — | `bronze.ods_treasury_cash_position` |
 | `check_result` | `PASS` / `FAIL` / `SKIPPED` | 单条规则的结论 | — | `ads.ads_fr2052a_validation_log` |
 
 ### 3.2 质量与预警字段

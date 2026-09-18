@@ -35,7 +35,7 @@ demo-fr2052a/
 │   │   ├── DOMAIN-LANGUAGE.md # 术语表
 │   │   ├── CHANGELOG.md       # 变更记录
 │   │   └── KNOWN-ISSUE.md     # 已知坑 + 决策记录
-│   ├── tables/                # 表契约（一表一份：53 张）
+│   ├── tables/                # 表契约（一表一份：56 张）
 │   ├── rules/                 # 规范文件（四件套）
 │   │   ├── PROJECT-STRUCTURE.md
 │   │   ├── CODING-STANDARD.md
@@ -96,7 +96,7 @@ demo-fr2052a/
 |----------|------|------|
 | dbt macro | `dbt/macros/` | 脱敏、HQLA haircut、到期分桶 |
 | Python CLI | `python/` | 生成/加载/导出/校验 |
-| Kafka Topic | `config/pipeline_topics.json` | 10 个 Topic 契约（其中 7 个有生产者，落 bronze）|
+| Kafka Topic | `config/pipeline_topics.json` | 11 个 Topic 契约（其中 8 个有生产者，落 bronze）|
 | Airflow DAG | `deploy/server1/airflow/dags/` | 5 个 DAG 定义 |
 
 ## 运行环境 + 验证命令

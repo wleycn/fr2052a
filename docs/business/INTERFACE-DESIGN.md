@@ -224,6 +224,21 @@ python producers/replay_ods_to_kafka.py --data-dir <dir> --config <json>
 | `is_resolved` | BOOLEAN | 否 | 是否已解决 |
 | `resolution_note` | TEXT | 否 | 解决说明 |
 
+### 4.8 `treasury_cash_position`
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `position_type` | VARCHAR(20) | 是 | `VAULT_CASH` / `DUE_FROM_BANKS` |
+| `custodian_id` | VARCHAR(20) | 是 | 保管机构：`OWN-VAULT` 本行库房、`CB-XXX` 代理行 |
+| `account_ref` | VARCHAR(40) | 是 | 账户或库房标识 |
+| `currency` | CHAR(3) | 是 | 币种 |
+| `balance_amount` | NUMERIC(20,2) | 是 | 对账单余额或盘点金额（原币） |
+| `in_transit_deposits_amount` | NUMERIC(20,2) | 是 | 在途存款（账面已记、对账单未到） |
+| `outstanding_checks_amount` | NUMERIC(20,2) | 是 | 未兑现支票（账面已扣、对账单未扣） |
+| `event_time` | TIMESTAMPTZ | 是 | 事件时间 |
+
+司库系统的现金头寸快照，落 `bronze.ods_treasury_cash_position`。它是 GL 对账 Section E（现金）的独立基准：报送侧的现金出自总账，两侧同源就对不出错，因此基准换成这份对账单/盘点口径。
+
 ## 5. Airflow DAG 接口
 
 ### 5.1 `fr2052a_daily_batch`
@@ -232,7 +247,7 @@ DAG 只做编排：每个任务 ssh 到 Server 2 调用跑批脚本的同一个�
 
 ```text
 run_context_open             运行上下文开口：登记本次跑批的报告日/处理日/生效日
-  → check_source_arrival    确认 7 张 ODS 源文件到位，避免空跑一整轮
+  → check_source_arrival    确认 ODS 源文件张数与主题声明一致（现为 8 张），避免空跑一整轮
   → load_ref                REF 字典表入 Iceberg
   → replay_ods              样本明细按主题重放进 Kafka
   → load_bronze             消费 Kafka 入 bronze，按主键 MERGE 去重
@@ -268,7 +283,7 @@ run_context_open             运行上下文开口：登记本次跑批的报告
 ### 5.4 `fr2052a_gl_reconciliation`
 
 - **触发**：每日 07:00
-- **任务流**：`refresh_report → check_reconciliation`；后者比对 8 个 Section，结论落 `ads.ads_gl_reconciliation`
+- **任务流**：`refresh_report → check_reconciliation`；后者比对 8 个 Section（基准侧：非现金取总账科目余额，Section E 取司库现金头寸），结论落 `ads.ads_gl_reconciliation`
 - **退出码**：对平 0，未对平非 0，由 DAG 记为失败并触发告警
 
 ### 5.5 `fr2052a_submission`

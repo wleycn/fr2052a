@@ -155,7 +155,7 @@ models:
         tests:
           - not_null
       - name: status
-        description: 对账状态，PASS 表示差异在容差内
+        description: 对账状态，PASS 表示调节后差异在容差内
         tests:
           - not_null
           - accepted_values:
@@ -163,7 +163,30 @@ models:
         meta:
           rule_id: FR2052A-REC-01
 
-      - name: variance
-        description: 差异额 = 总账金额 − 报送金额
+      - name: benchmark_amount
+        description: 基准金额。总账口径 Section 取科目余额；Section E 取司库现金头寸的对账单/盘点数
+        tests:
+          - not_null
         meta:
           rule_id: FR2052A-REC-02
+
+      - name: benchmark_source
+        description: 基准来源：GL 总账科目余额 / TREASURY_CASH_POSITION 司库现金头寸
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['GL', 'TREASURY_CASH_POSITION']
+        meta:
+          rule_id: FR2052A-REC-03
+
+      - name: reconciling_item_usd
+        description: 可解释调节项净额，Section E 为在途存款减未兑现支票，其余 Section 为 0
+        tests:
+          - not_null
+        meta:
+          rule_id: FR2052A-REC-04
+
+      - name: variance
+        description: 调节后差异 = 基准金额 + 调节项 − 报送金额；对账单口径基准的容差是 1 分钱
+        meta:
+          rule_id: FR2052A-REC-05

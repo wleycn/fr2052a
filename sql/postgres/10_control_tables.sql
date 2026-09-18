@@ -551,6 +551,55 @@ BEGIN
     END IF;
 END $$;
 
+-- ads_gl_reconciliation: 基准侧改名 + 新增调节项与基准来源两列（审计 #2：Section E 换独立来源）
+--   原 gl_amount 列语义已扩为「独立基准金额」——非现金 Section 仍是总账科目余额，
+--   Section E 改成司库现金头寸的对账单/盘点数。名字不改就是误导：读者会以为 E 那格是总账。
+--   同时补 benchmark_source（基准取自哪里）与 reconciling_item_usd（可解释调节项净额），
+--   否则对账表上出现一个没有出处的差额，读的人只能猜。
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'ads' AND c.relname = 'ads_gl_reconciliation'
+    ) THEN
+        -- 改名：旧列在、新列不在时才动，重复执行无副作用
+        IF EXISTS (
+            SELECT 1 FROM pg_catalog.pg_attribute a
+            JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'ads' AND c.relname = 'ads_gl_reconciliation'
+              AND a.attname = 'gl_amount' AND a.attnum > 0 AND NOT a.attisdropped
+        ) AND NOT EXISTS (
+            SELECT 1 FROM pg_catalog.pg_attribute a
+            JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'ads' AND c.relname = 'ads_gl_reconciliation'
+              AND a.attname = 'benchmark_amount' AND a.attnum > 0 AND NOT a.attisdropped
+        ) THEN
+            ALTER TABLE ads.ads_gl_reconciliation RENAME COLUMN gl_amount TO benchmark_amount;
+        END IF;
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_catalog.pg_attribute a
+            JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'ads' AND c.relname = 'ads_gl_reconciliation'
+              AND a.attname = 'benchmark_source' AND a.attnum > 0 AND NOT a.attisdropped
+        ) THEN
+            ALTER TABLE ads.ads_gl_reconciliation ADD COLUMN benchmark_source TEXT;
+        END IF;
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_catalog.pg_attribute a
+            JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'ads' AND c.relname = 'ads_gl_reconciliation'
+              AND a.attname = 'reconciling_item_usd' AND a.attnum > 0 AND NOT a.attisdropped
+        ) THEN
+            ALTER TABLE ads.ads_gl_reconciliation ADD COLUMN reconciling_item_usd NUMERIC(20, 2);
+        END IF;
+    END IF;
+END $$;
+
 -- ---------------------------------------------------------------------------
 -- 12. 报表三张表的唯一约束（C5-1 B 节）
 --     三张导出表由 Spark JDBC 用 truncate=true 覆盖写，表本身没有库侧主键。

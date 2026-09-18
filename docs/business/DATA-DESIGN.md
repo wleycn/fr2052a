@@ -45,7 +45,7 @@ Gold / ADS
 
 ### 2.1 分层表清单
 
-> 每张表的完整契约（粒度 / 主键 / 去重 / 分区 / 金额口径 / PII 与脱敏 / 生命周期 / 新鲜度与 owner / 依赖 / 质量规则）住 `docs/tables/`，一表一份，共 53 张。本节只列清单与落点，表级细节不在这里复制一份。
+> 每张表的完整契约（粒度 / 主键 / 去重 / 分区 / 金额口径 / PII 与脱敏 / 生命周期 / 新鲜度与 owner / 依赖 / 质量规则）住 `docs/tables/`，一表一份，共 56 张。本节只列清单与落点，表级细节不在这里复制一份。
 > 不入契约的两类：dbt 的连通性自检模型（`pg_smoke`、`spark_smoke`）产出的是探针表，随跑批丢弃；`market_data_prices` 等三个只作声明的 Kafka 主题没有对应表。
 
 #### 引用数据（Ref，Iceberg）
@@ -66,7 +66,7 @@ Gold / ADS
 
 #### 接入层（Kafka）
 
-10 个主题，其中 7 个有生产者的落 bronze，3 个只作声明保留。
+11 个主题，其中 8 个有生产者的落 bronze，3 个只作声明保留。
 
 | Topic | 落点 | 生产者 |
 |-------|------|--------|
@@ -76,6 +76,7 @@ Gold / ADS
 | `custody_positions` | `bronze.ods_securities` | 有 |
 | `derivatives_trades` | `bronze.ods_derivatives` | 有 |
 | `gl_entries` | `bronze.ods_gl_balances` | 有 |
+| `treasury_cash_position` | `bronze.ods_treasury_cash_position` | 有 |
 | `off_bs_commitments` | `bronze.ods_off_bs_commitments` | 有 |
 | `market_data_prices` | 不落表 | 暂作声明保留（本演示未生成对应 ODS 表） |
 | `reference_data_updates` | 不落表 | 暂作声明保留（引用数据走批加载直入 ref） |
@@ -85,7 +86,7 @@ Gold / ADS
 
 #### Bronze 层（Iceberg）
 
-7 张 ODS 表，字段与源 CSV 表头一一对应（对不上时由 `verify_ods_schema.py` 报错），按 `days(report_date)` 分区。
+8 张 ODS 表，字段与源 CSV 表头一一对应（对不上时由 `verify_ods_schema.py` 报错），按 `days(report_date)` 分区。
 
 | 表 | 加载方式 |
 |----|----------|
@@ -95,6 +96,7 @@ Gold / ADS
 | `bronze.ods_securities` | Kafka → MERGE |
 | `bronze.ods_derivatives` | Kafka → MERGE |
 | `bronze.ods_gl_balances` | Kafka → MERGE |
+| `bronze.ods_treasury_cash_position` | Kafka → MERGE |
 | `bronze.ods_off_bs_commitments` | Kafka → MERGE |
 
 #### 数据规模与视角覆盖
@@ -125,13 +127,14 @@ ODS 各表的行数由三类来源组成：子公司配额、母公司追加（�
 | `silver.owd_securities` | 标准化证券 | `bronze.ods_securities` |
 | `silver.owd_derivatives` | 标准化衍生品 | `bronze.ods_derivatives` |
 | `silver.owd_gl_entries` | 标准化总账余额 | `bronze.ods_gl_balances` |
+| `silver.owd_treasury_cash_position` | 标准化司库现金头寸（对账单余额与未达账项） | `bronze.ods_treasury_cash_position` |
 | `silver.owd_off_bs` | 标准化表外承诺 | `bronze.ods_off_bs_commitments` |
 | `silver.ows_hqla_summary` | HQLA 汇总（按等级与受限状态汇总市值、折扣后价值；二级资产的 40% 上限在**报表层**应用，本层不截断） | `owd_securities` |
 | `silver.ows_collateral_summary` | 担保品汇总（按证券类型、等级、发行国汇总） | `owd_securities` |
 | `silver.ows_cash_position` | 现金头寸 | `owd_*` |
 | `silver.ows_cashflow_projection` | 现金流预测 | `owd_*` 到期分桶 |
 | `silver.ows_funding_summary` | 融资汇总 | `owd_*` 聚合 |
-| `silver.owd_*_history` | 7 张 OWD 的版本历史（SCD2） | `owd_scd2.py` 归并 |
+| `silver.owd_*_history` | 8 张 OWD 的版本历史（SCD2） | `owd_scd2.py` 归并 |
 
 #### Gold 层（Iceberg）与 ADS 层（PostgreSQL）
 
@@ -141,7 +144,7 @@ ODS 各表的行数由三类来源组成：子公司配额、母公司追加（�
 |----|------|------|
 | `ads_fr2052a_report` | FR 2052a 报表主表，一个报送主体一行 | `ows_*` 汇总 |
 | `ads_fr2052a_detail` | 报表明细行，用于回溯报表数字 | `owd_*` 明细展开 |
-| `ads_gl_reconciliation` | 总账对账结果，8 个 Section 逐项 PASS / FAIL | 报表 vs 总账 |
+| `ads_gl_reconciliation` | GL 对账结果，8 个 Section 逐项 PASS / FAIL。基准侧分两类：非现金 Section 取总账科目余额，Section E 取司库现金头寸（对账单 + 盘点口径），差额由调节项解释 | 报表 vs 独立基准 |
 
 #### 控制与审计（PostgreSQL）
 
@@ -330,6 +333,20 @@ Core Banking Deposit Module
   → ads_fr2052a_report.sec_c_retail_demand (Gold)   ← 报表直接读 OWD 明细，不经 OWS
   → FR 2052a Section C / Line Item
 ```
+
+Section E（现金）的对账血缘是两条独立链路，这是它有意义的前提：
+
+```text
+Treasury Cash Position（司库系统对账单与盘点）
+  → ods_treasury_cash_position (Bronze)
+  → owd_treasury_cash_position (Silver)
+  → ads_gl_reconciliation.benchmark_amount (Gold, Section E 的基准侧)
+
+总账 1001/1100 → owd_gl_entries → ads_fr2052a_report.sec_e_cash_total (Gold, 报送侧)
+```
+
+两侧如果都读总账，差异恒为零、任何错误都查不出来；司库口径是外部可见的事实，
+两侧的差由在途存款与未兑现支票逐项解释（见 `docs/tables/ads_gl_reconciliation.md`）。
 
 三张 OWS 表（`ows_hqla_summary`、`ows_collateral_summary`、`ows_funding_summary`）当前无下游消费者：
 报表读的是 OWD 明细，OWS 只有 `ows_cash_position` 与 `ows_cashflow_projection` 被引用。
