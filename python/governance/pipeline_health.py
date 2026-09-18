@@ -89,7 +89,10 @@ def collect_pg(connection: psycopg2.extensions.connection) -> dict[str, Any]:
 
         cursor.execute(
             "SELECT report_date, count(*) AS files, "
-            "min(submission_status) AS status, max(submitted_at) AS submitted_at "
+            "count(*) FILTER (WHERE submission_status = 'ACCEPTED') AS accepted, "
+            "count(*) FILTER (WHERE submission_status = 'REJECTED') AS rejected, "
+            "string_agg(DISTINCT submission_status, '/') AS status, "
+            "max(submitted_at) AS submitted_at "
             "FROM ads.ads_fr2052a_submission GROUP BY report_date "
             "ORDER BY report_date DESC LIMIT 1"
         )
@@ -219,6 +222,10 @@ def main() -> int:
         f"  报送          {submission.get('report_date', '无记录')}  {submission.get('files', 0)} 个文件"
         f"  状态 {submission.get('status', '-')}  提交于 {submission.get('submitted_at')}"
     )
+    if submission.get("rejected"):
+        findings.append(
+            f"{submission.get('report_date', '未知')} 有 {submission['rejected']} 个文件回执被拒（REJECTED）"
+        )
     print(f"  重述          累计 {pg['restatements']} 次")
     print(f"  实时事件      {realtime.get('total', 0)} 条，最近 {realtime.get('last_event')}")
 

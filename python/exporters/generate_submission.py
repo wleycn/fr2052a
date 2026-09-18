@@ -114,18 +114,24 @@ def to_amount(value: Any) -> str:
     return f"{Decimal(value):.2f}"
 
 
+def to_cell(value: Any) -> str:
+    """CSV 单元格取值：布尔先于数值判断（bool 是 int 的子类），与 XML 的同名字段取值保持一致。"""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float, Decimal)):
+        return to_amount(value)
+    return str(value)
+
+
 def write_csv_file(path: Path, columns: list[str], rows: list[dict[str, Any]]) -> None:
     """按给定列序写出 CSV。"""
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(columns)
         for row in rows:
-            writer.writerow(
-                [
-                    to_amount(row[name]) if isinstance(row[name], (int, float, Decimal)) else (row[name] or "")
-                    for name in columns
-                ]
-            )
+            writer.writerow([to_cell(row[name]) for name in columns])
 
 
 def write_xml_file(path: Path, report_date: str, columns: list[str], rows: list[dict[str, Any]]) -> None:

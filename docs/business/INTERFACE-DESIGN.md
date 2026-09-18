@@ -79,6 +79,8 @@ python lakehouse/load_ref_tables.py <csv_dir>
 
 **幂等**：INSERT OVERWRITE，重复运行不重复写入
 
+**退出码**：`0` 成功 / `1` 有表失败或目录下无 CSV / `2` 目录不存在
+
 ### 3.3 `export_gold_to_pg.py`
 
 ```bash
@@ -121,6 +123,8 @@ python producers/replay_ods_to_kafka.py --data-dir <dir> --config <json>
 | `python/lakehouse/verify_gold.py` | 验证 Gold 层数据 |
 | `python/lakehouse/verify_ods_schema.py` | 验证 ODS 表结构 |
 | `python/exporters/export_gold_to_pg.py` | Gold → PG 导出 |
+
+> `verify_*` 系列在核对对象为零时退出 `1`（零命中不算通过）。
 
 ## 4. Kafka Topic 契约
 

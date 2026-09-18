@@ -32,6 +32,7 @@ SCD2 语义（与 OWD 层 owd_scd2.py 同一套，只是对象换成了报表）
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -76,12 +77,25 @@ def json_default(value: object) -> float | str:
     raise TypeError(f"无法序列化的类型：{type(value).__name__}")
 
 
+def canonical_hash(payload: dict[str, Any]) -> str:
+    """把一行内容规范化成 JSON 文本再取 md5。
+
+    两侧（当前报表行 / 历史快照）必须走同一个函数：jsonb 落库会归一化（键序、冒号空格、
+    numeric 的 scale），因此「SQL 侧算一个、jsonb 文本算一个」永远对不上，等于「内容没变」
+    这条短路判据永不成立。规范化取 sort_keys 消掉键序差异，取紧凑分隔符消掉空格差异。
+
+    存量行的 snapshot_hash 是旧算法写的，本次起不再参与比较（比较一律从 snapshot 现算），
+    旧值只作历史信息保留。禁在 SQL 侧算哈希：两侧必须走这一个 Python 函数。
+    """
+    text = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=json_default)
+    return hashlib.md5(text.encode("utf-8")).hexdigest()
+
+
 def fetch_report_row(cursor: psycopg2.extensions.cursor, report_date: str, entity_code: str) -> dict[str, Any] | None:
     """取某实体某报告日的当前报表行，作为重述前的留痕快照。"""
     cursor.execute(
         """
-        SELECT *, md5(row_to_json(t)::text) AS snapshot_hash
-        FROM ads.ads_fr2052a_report t
+        SELECT * FROM ads.ads_fr2052a_report
         WHERE report_date = %s AND entity_code = %s
         """,
         (report_date, entity_code),
@@ -102,18 +116,19 @@ def capture(connection: psycopg2.extensions.connection, args: argparse.Namespace
         return 1
 
     report_id = report["report_id"]
-    snapshot_hash = report.pop("snapshot_hash")
+    snapshot_hash = canonical_hash(report)
 
     with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
         cursor.execute(
-            "SELECT record_version, begin_date, md5(snapshot::text) AS snapshot_hash "
+            "SELECT record_version, begin_date, snapshot "
             "FROM ads.ads_fr2052a_report_history WHERE report_id = %s AND is_active",
             (report_id,),
         )
         existing = cursor.fetchone()
 
     if existing is not None:
-        if existing["snapshot_hash"] == snapshot_hash:
+        existing_hash = canonical_hash(existing["snapshot"])
+        if existing_hash == snapshot_hash:
             print(f"{report_id} 当前版本已登记且内容一致（v{existing['record_version']}），无需重复登记。")
             return 0
         # 内容变了但没走重述流程 —— 说明有人直接改了数据。留痕并继续登记新版本，
@@ -131,11 +146,19 @@ def capture(connection: psycopg2.extensions.connection, args: argparse.Namespace
     effective = args.effective_date or args.report_date
     report_version_id = f"{report_id}-v{next_version}"
 
+    # 版本区间方向兜底：生效日不能早于旧版本自己的生效日，否则区间反向。
+    # 被夹住时取旧版本 begin_date，并打印告警留痕。
+    if existing is not None:
+        old_begin = existing["begin_date"]
+        if effective < old_begin.isoformat():
+            print(f"[WARN] 生效日 {effective} 早于旧版本生效日 {old_begin}，按 {old_begin} 收口，区间不反向")
+            effective = old_begin.isoformat()
+
     with connection.cursor() as cursor:
         if existing is not None:
             cursor.execute(
                 "UPDATE ads.ads_fr2052a_report_history "
-                "SET end_date = date %s, is_active = false "
+                "SET end_date = greatest(date %s, begin_date), is_active = false "
                 "WHERE report_id = %s AND is_active",
                 (effective, report_id),
             )
@@ -176,12 +199,12 @@ def register(connection: psycopg2.extensions.connection, args: argparse.Namespac
         return 1
 
     report_id = report["report_id"]
-    snapshot_hash = report.pop("snapshot_hash")
+    snapshot_hash = canonical_hash(report)
     effective = args.effective_date or args.report_date
 
     with connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cursor:
         cursor.execute(
-            "SELECT record_version, report_version_id, md5(snapshot::text) AS snapshot_hash "
+            "SELECT record_version, report_version_id, begin_date, snapshot "
             "FROM ads.ads_fr2052a_report_history "
             "WHERE report_id = %s AND is_active "
             "ORDER BY record_version DESC LIMIT 1",
@@ -192,7 +215,8 @@ def register(connection: psycopg2.extensions.connection, args: argparse.Namespac
     if previous is None:
         print(f"{report_id} 没有已登记的历史版本，请先跑一次 --mode capture。")
         return 1
-    if previous["snapshot_hash"] == snapshot_hash:
+    previous_hash = canonical_hash(previous["snapshot"])
+    if previous_hash == snapshot_hash:
         print(
             f"{report_id} 重跑前后报文完全一致（仍是 v{previous['record_version']}）。"
             "数字没变，不构成重述，未登记新版本。"
@@ -203,10 +227,17 @@ def register(connection: psycopg2.extensions.connection, args: argparse.Namespac
     report_version_id = f"{report_id}-v{next_version}"
     original_report_version_id = previous["report_version_id"]
 
+    # 版本区间方向兜底：生效日不能早于旧版本自己的生效日，否则区间反向。
+    # 被夹住时取旧版本 begin_date，并打印告警留痕。
+    old_begin = previous["begin_date"]
+    if effective < old_begin.isoformat():
+        print(f"[WARN] 生效日 {effective} 早于旧版本生效日 {old_begin}，按 {old_begin} 收口，区间不反向")
+        effective = old_begin.isoformat()
+
     with connection.cursor() as cursor:
         cursor.execute(
             "UPDATE ads.ads_fr2052a_report_history "
-            "SET end_date = date %s, is_active = false "
+            "SET end_date = greatest(date %s, begin_date), is_active = false "
             "WHERE report_version_id = %s",
             (effective, original_report_version_id),
         )

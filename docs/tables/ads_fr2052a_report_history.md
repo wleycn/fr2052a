@@ -38,7 +38,7 @@
 | `is_active` | BOOLEAN NOT NULL DEFAULT TRUE | end_date 的冗余列，便于建索引 |
 | `last_modified_reason` | TEXT NOT NULL DEFAULT 'ORIGINAL' | ORIGINAL / CORRECTION / RESTATEMENT |
 | `snapshot` | JSONB NOT NULL | 该版本报表的整行快照 |
-| `snapshot_hash` | TEXT | 快照整行哈希，用于比对「这一版到底变没变」 |
+| `snapshot_hash` | TEXT | 快照整行哈希，用于比对「这一版到底变没变」。对规范化 JSON 取 md5：键排序、紧凑分隔符；由重述脚本计算，两处比较都从 `snapshot` 现算 |
 | `captured_at` | TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP |  |
 
 ## 金额单位约定
@@ -64,4 +64,4 @@ PostgreSQL 常驻表，按环节写入或覆盖；无快照与压缩策略。
 
 ## 质量规则清单
 
-`CHECK ((end_date IS NULL) = is_active)`：`is_active` 是冗余列，允许冗余但不允许与 `end_date` 分叉。`snapshot_hash` 用来判断「这一版到底变没变」。
+`CHECK ((end_date IS NULL) = is_active)`：`is_active` 是冗余列，允许冗余但不允许与 `end_date` 分叉。`snapshot_hash` 用来判断「这一版到底变没变」，对规范化 JSON 取 md5（键排序、紧凑分隔符），由重述脚本计算，两处比较都从 `snapshot` 现算。`CHECK (end_date IS NULL OR end_date >= begin_date)`：版本区间不得反向。

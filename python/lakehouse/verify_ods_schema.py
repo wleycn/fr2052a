@@ -69,9 +69,16 @@ def main(argv: list[str]) -> int:
     spark.sparkContext.setLogLevel("WARN")
 
     checked = 0
+    ref_count = 0
+    bronze_count = 0
     failed: list[str] = []
     for namespace, subdir in LAYOUT:
-        for csv_path in sorted((data_root / subdir).glob("*.csv")):
+        side_files = sorted((data_root / subdir).glob("*.csv"))
+        if namespace == "ref":
+            ref_count = len(side_files)
+        else:
+            bronze_count = len(side_files)
+        for csv_path in side_files:
             table = f"{namespace}.{csv_path.stem}"
             checked += 1
             try:
@@ -87,7 +94,15 @@ def main(argv: list[str]) -> int:
             else:
                 print(f"  [PASS] {table}")
 
+    if checked == 0:
+        print(
+            f"核对对象为空：{data_root}/ref 与 {data_root}/ods 下都没有 CSV，无法判断表结构是否一致",
+            file=sys.stderr,
+        )
+        return 1
+
     print()
+    print(f"核对对象：ref {ref_count} 张 + bronze {bronze_count} 张")
     print(f"共核对 {checked} 张表，失败 {len(failed)} 张")
     if failed:
         print(f"失败清单：{failed}")

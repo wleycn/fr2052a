@@ -4,7 +4,7 @@
 -- 幂等：全部 IF NOT EXISTS，可重复执行
 --
 -- 列序与 python/generators 产出的 CSV 表头逐列一致，多出的 etl_load_timestamp
--- 由入湖作业在写入时用 current_timestamp() 补齐。
+-- 由入湖作业按「报告日 + 1 天的 02:00」派生（数据时间线，不用真实时钟，见 python/consumers/kafka_to_iceberg.py）。
 --
 -- 相对 [99] §3.3 的三处扩展（日报批次必需）：
 --   report_date  业务日期，同时作为分区键，保证按日重跑幂等

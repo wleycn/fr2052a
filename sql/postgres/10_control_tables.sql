@@ -345,6 +345,21 @@ BEGIN
     END IF;
 END $$;
 
+-- 版本区间不得反向：失效日为空或不得早于生效日。
+-- 幂等添加：按 conname 查 pg_constraint，不存在才 ADD。
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'ads_fr2052a_report_history_interval_ck'
+          AND conrelid = 'ads.ads_fr2052a_report_history'::regclass
+    ) THEN
+        ALTER TABLE ads.ads_fr2052a_report_history
+            ADD CONSTRAINT ads_fr2052a_report_history_interval_ck
+            CHECK (end_date IS NULL OR end_date >= begin_date);
+    END IF;
+END $$;
+
 -- ---------------------------------------------------------------------------
 -- 8. 审计三表。变更留痕用触发器归档，不原地覆盖 —— 历史不可变。
 -- ---------------------------------------------------------------------------

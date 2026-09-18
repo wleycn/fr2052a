@@ -1,7 +1,7 @@
 """核对 ADS 报送层：报表内部一致、合并口径正确、监管上限确实生效。
 
 dbt 跑通只说明 SQL 没报错，不说明数字对。这里逐项验算：
-  1. 报表行数 = 交易实体数 + 1 行合并口径
+  1. 报表实体覆盖 = bronze 存款表的实体集合，且实体集合与 ref 层级表一致
   2. 合并口径 = 各实体口径之和（逐 Section 验算）
   3. 明细合计 = 报表 Section 合计（对应 VDQ-013）
   4. 二级资产占比 ≤ HQLA 总额的 40%（对应 VDQ-017）
@@ -22,6 +22,8 @@ from pyspark.sql import SparkSession
 REPORT = "gold.ads_fr2052a_report"
 DETAIL = "gold.ads_fr2052a_detail"
 RECONCILIATION = "gold.ads_gl_reconciliation"
+SOURCE_DEPOSITS = "bronze.ods_deposits"
+REF_ENTITY = "ref.ref_entity_hierarchy"
 
 # Section 的报表合计列、明细金额列，以及明细需要附加的行项目过滤
 SECTION_AMOUNTS = {
@@ -55,15 +57,56 @@ class CheckResult:
 
 
 def check_row_shape(spark: SparkSession) -> list[CheckResult]:
-    """核对报表行形状：每个实体一行，合并行只有一行。"""
-    entity_rows = spark.table(REPORT).filter("not is_consolidated").count()
+    """核对报表行形状：报表实体覆盖与 ref 一致，合并行只有一行。
+
+    报表行形状的期望来自两处独立来源，不是常量：
+      ref.ref_entity_hierarchy 声明哪些实体承接业务（层级 > 1 且有效）
+      bronze.ods_deposits      声明本轮实际有哪些实体记了账
+    """
+    # 报表实体覆盖：报表里的非合并行实体集合必须与 bronze 存款表一致
+    report_entities = {
+        row["entity_code"] for row in spark.table(REPORT).filter("not is_consolidated").select("entity_code").collect()
+    }
+    source_entities = {
+        row["entity_code"] for row in spark.table(SOURCE_DEPOSITS).select("entity_code").distinct().collect()
+    }
+    expected_entities = {
+        row["entity_code"]
+        for row in spark.table(REF_ENTITY).filter("is_active and entity_level > 1").select("entity_code").collect()
+    }
     consolidated_rows = spark.table(REPORT).filter("is_consolidated").count()
+
+    missing_in_report = source_entities - report_entities
+    extra_in_report = report_entities - source_entities
+
     return [
         CheckResult(
-            name="报表行数",
-            passed=entity_rows >= 2 and consolidated_rows == 1,
-            detail=f"实体口径 {entity_rows} 行，合并口径 {consolidated_rows} 行",
-        )
+            name="报表实体覆盖",
+            passed=report_entities == source_entities and consolidated_rows == 1,
+            detail=(
+                f"报表 {len(report_entities)} 实体，bronze {len(source_entities)} 实体，"
+                f"合并 {consolidated_rows} 行"
+                + (f"，报表缺 {sorted(missing_in_report)}" if missing_in_report else "")
+                + (f"，报表多 {sorted(extra_in_report)}" if extra_in_report else "")
+            ),
+        ),
+        CheckResult(
+            name="实体集合与 ref 一致",
+            passed=source_entities == expected_entities,
+            detail=(
+                f"bronze {len(source_entities)} 实体，ref {len(expected_entities)} 实体"
+                + (
+                    f"，差异 bronze 多 {sorted(source_entities - expected_entities)}"
+                    if source_entities - expected_entities
+                    else ""
+                )
+                + (
+                    f"，ref 多 {sorted(expected_entities - source_entities)}"
+                    if expected_entities - source_entities
+                    else ""
+                )
+            ),
+        ),
     ]
 
 
@@ -97,14 +140,44 @@ def check_detail_rollup(spark: SparkSession) -> list[CheckResult]:
     consolidated = spark.table(REPORT).filter("is_consolidated").collect()[0]
     for section, (report_column, detail_column, line_item) in SECTION_AMOUNTS.items():
         line_filter = f" and line_item = '{line_item}'" if line_item else ""
-        detail_total = (
-            spark.sql(
-                f"select round(sum({detail_column}), 2) as total from {DETAIL} "
-                f"where section_code = '{section}'{line_filter}"
-            ).collect()[0]["total"]
-            or 0
-        )
-        report_total = consolidated[report_column] or 0
+        row = spark.sql(
+            f"select count(*) as rows, round(sum({detail_column}), 2) as total "
+            f"from {DETAIL} where section_code = '{section}'{line_filter}"
+        ).collect()[0]
+        detail_rows = row["rows"]
+        detail_total = row["total"]
+
+        if detail_rows == 0:
+            results.append(
+                CheckResult(
+                    name=f"明细汇总 Section {section}",
+                    passed=False,
+                    detail=f"过滤条件未命中明细表（section={section}、line_item={line_item}）",
+                )
+            )
+            continue
+
+        if detail_total is None:
+            results.append(
+                CheckResult(
+                    name=f"明细汇总 Section {section}",
+                    passed=False,
+                    detail="明细合计为 NULL",
+                )
+            )
+            continue
+
+        report_total = consolidated[report_column]
+        if report_total is None:
+            results.append(
+                CheckResult(
+                    name=f"明细汇总 Section {section}",
+                    passed=False,
+                    detail="报表侧该列为 NULL",
+                )
+            )
+            continue
+
         variance = round(float(detail_total) - float(report_total), 2)
         results.append(
             CheckResult(

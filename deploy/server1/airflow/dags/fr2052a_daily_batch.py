@@ -127,7 +127,7 @@ with DAG(
     publish_access = ssh_task(
         "publish_access",
         pipeline_command("publish-access"),
-        "重建库对象：Spark 的覆盖写会 DROP + CREATE 报表表，授权与触发器必须补回",
+        "在导出之前施加结构迁移与授权（导出用 truncate=true 覆盖写，保住授权与库侧列）",
     )
     liquidity_monitor = ssh_task(
         "liquidity_monitor",

@@ -59,9 +59,14 @@ def main(argv: list[str]) -> int:
     spark.sparkContext.setLogLevel("WARN")
     spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {NAMESPACE}")
 
+    csv_files = sorted(ref_dir.glob("*.csv"))
+    if not csv_files:
+        print(f"REF 目录下没有 CSV：{ref_dir}", file=sys.stderr)
+        return 1
+
     loaded: dict[str, int] = {}
     failures: list[str] = []
-    for csv_path in sorted(ref_dir.glob("*.csv")):
+    for csv_path in csv_files:
         table = f"{NAMESPACE}.{csv_path.stem}"
         try:
             frame = align_columns(spark, csv_path, table)

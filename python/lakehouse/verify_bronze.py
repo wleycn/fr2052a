@@ -44,6 +44,10 @@ def main(argv: list[str]) -> int:
     config = json.loads(args.config.read_text(encoding="utf-8"))
     targets = [topic for topic in config["topics"] if topic.get("has_producer")]
 
+    if not targets:
+        print("核对对象为空：配置里没有声明生产者的主题", file=sys.stderr)
+        return 1
+
     spark = SparkSession.builder.appName("fr2052a-verify-bronze").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
 
@@ -53,6 +57,10 @@ def main(argv: list[str]) -> int:
     for target in targets:
         table = target["target_table"]
         csv_path = args.data_dir / f"{table.split('.')[-1]}.csv"
+        if not csv_path.is_file():
+            mismatch.append(table)
+            print(f"  [FAIL] {table:<34} 源文件不存在：{csv_path}")
+            continue
         expected = count_csv_rows(csv_path)
         actual = spark.table(table).count()
         csv_total += expected
@@ -64,6 +72,7 @@ def main(argv: list[str]) -> int:
         print(f"  [{mark}] {table:<34} CSV {expected:>5} 行，bronze {actual:>5} 行")
 
     print()
+    print(f"核对对象 {len(targets)} 张表")
     print(f"合计：CSV {csv_total} 行，bronze {bronze_total} 行")
     if mismatch:
         print(f"不一致的表：{mismatch}")

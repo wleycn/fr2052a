@@ -42,7 +42,7 @@
 | 命令 | 参数 | 行为 | 退出码 |
 |------|------|------|--------|
 | `generate_sample_data.py` | `--out`（默认 `sample_data/`）、`--gl-break-amount`、`--correct-deposit-record`、`--correct-deposit-amount` | 生成 ref/ods CSV，随后自检 | 0 全过 / 1 自检不通过 |
-| `load_ref_tables.py` | 位置参数：ref 目录（默认 `/opt/fr2052a-app/sample_data/ref`）| 覆盖写入 Iceberg 的 ref 命名空间 | 0 / 1 失败 / 2 目录不存在 |
+| `load_ref_tables.py` | 位置参数：ref 目录（默认 `/opt/fr2052a-app/sample_data/ref`）| 覆盖写入 Iceberg 的 ref 命名空间 | 0 / 1 有表失败或目录下无 CSV / 2 目录不存在 |
 | `export_gold_to_pg.py` | 无参数 | 把 gold 层三张表导出到 PG 的 ads 层，覆盖写 | 0 / 1 |
 | `run_dq_rules.py` | `--batch-id`（默认 `UNKNOWN`）| 执行规则集并把结论落审计表 | 0 / 1 |
 | `replay_ods_to_kafka.py` | `--data-dir`、`--config`（均有默认）| 重放 ODS 数据到 Kafka | 0 / 1 |

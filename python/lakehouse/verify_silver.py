@@ -88,34 +88,47 @@ def check_maturity_buckets(spark: SparkSession) -> list[CheckResult]:
 
 
 def check_fx_conversion(spark: SparkSession) -> list[CheckResult]:
-    """折算核对：拿上游原币金额按 ref 汇率重算一遍，与本层 USD 金额逐行比对。"""
+    """折算核对：拿上游原币金额按 ref 汇率重算一遍，与本层 USD 金额逐行比对。
+
+    以 ODS 上游为基准做 left join：缺汇率的行不会从分母里消失，而是被统计为
+    unjoined。checked == upstream_rows 才说明本层每一条上游行都进了核对，
+    否则 inner join 会让缺汇率的行静默缩水分母。
+    """
     results = []
     for owd_table, usd_column, ods_table, lc_column in FX_CHECKS:
         row = spark.sql(
             f"""
-            select count(*) as checked,
-                   sum(
-                       case
+            -- 以 ODS 上游为基准：left join 本层与汇率表，缺汇率的行留在结果里计入 unjoined，
+            -- 不像 inner join 那样从分母消失。join 带报告日，避免多报告日共存时行数相乘。
+            select count(*) as upstream_rows,
+                   count(o.source_system) as checked,
+                   sum(case when f.spot_rate is null then 1 else 0 end) as unjoined,
+                   sum(case
+                           when f.spot_rate is null then 0
                            when abs(o.{usd_column} - round(s.{lc_column} * f.spot_rate, 2)) > {TOLERANCE}
                            then 1 else 0
-                       end
-                   ) as mismatched
-            from {owd_table} o
-            join {ods_table} s
-              on s.source_system = o.source_system
-             and s.source_record_id = o.source_record_id
-            join ref.ref_exchange_rates f
+                       end) as mismatched
+            from {ods_table} s
+            left join {owd_table} o
+              on o.source_system = s.source_system
+             and o.source_record_id = s.source_record_id
+             and o.report_date = s.report_date
+            left join ref.ref_exchange_rates f
               on f.from_currency = s.currency
              and f.rate_date = s.report_date
             """
         ).collect()[0]
+        upstream_rows = row["upstream_rows"]
         checked = row["checked"]
+        unjoined = row["unjoined"] or 0
         mismatched = row["mismatched"] or 0
         results.append(
             CheckResult(
                 name=f"折算 {owd_table}",
-                passed=checked > 0 and mismatched == 0,
-                detail=f"逐行重算 {checked} 条，偏差超限 {mismatched} 条",
+                passed=upstream_rows > 0 and unjoined == 0 and mismatched == 0 and checked == upstream_rows,
+                detail=(
+                    f"上游 {upstream_rows} 行，逐行重算 {checked} 条，缺汇率 {unjoined} 条，偏差超限 {mismatched} 条"
+                ),
             )
         )
     return results

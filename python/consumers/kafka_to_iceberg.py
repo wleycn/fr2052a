@@ -36,7 +36,7 @@ LOADER_MANAGED_COLUMNS = ("etl_load_timestamp",)
 
 MERGE_TEMPLATE = """
 MERGE INTO {table} AS target
-USING staging AS source
+USING {staging} AS source
 ON target.source_system = source.source_system
    AND target.source_record_id = source.source_record_id
    AND target.report_date = source.report_date
@@ -78,11 +78,16 @@ def upsert_batch(batch: DataFrame, batch_id: int, table: str) -> None:
         return
 
     # 辅助列不进 MERGE：建视图时只保留目标表的列，免得 MERGE ... SET * 多带一列。
+    # 视图名按表派生：同一 SparkSession 内多流并发，同名 staging_raw / staging
+    # 会被别的批覆盖，因此用表名做后缀隔离。
+    key = table.replace(".", "_")
+    raw_view = f"staging_raw_{key}"
+    staging_view = f"staging_{key}"
     columns = [name for name in valid.columns if name != "_kafka_offset"]
-    valid.createOrReplaceTempView("staging_raw")
+    valid.createOrReplaceTempView(raw_view)
     spark.sql(
         f"""
-        CREATE OR REPLACE TEMPORARY VIEW staging AS
+        CREATE OR REPLACE TEMPORARY VIEW {staging_view} AS
         SELECT {", ".join(columns)}
         FROM (
             SELECT *, row_number() OVER (
@@ -90,12 +95,12 @@ def upsert_batch(batch: DataFrame, batch_id: int, table: str) -> None:
                 -- 一行、丢掉一天的数据，因此去重窗口也含 report_date
                 PARTITION BY source_system, source_record_id, report_date ORDER BY _kafka_offset DESC
             ) AS _rank
-            FROM staging_raw
+            FROM {raw_view}
         )
         WHERE _rank = 1
         """
     )
-    spark.sql(MERGE_TEMPLATE.format(table=table))
+    spark.sql(MERGE_TEMPLATE.format(table=table, staging=staging_view))
     print(f"    [{table}] 微批 {batch_id}：本批 {valid.count()} 行，表内合计 {spark.table(table).count()} 行")
 
 
