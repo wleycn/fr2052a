@@ -9,6 +9,10 @@
   2. 每行统一带 entity_code，合并口径与子公司口径都能切；
   3. 日期字段按业务含义生成（开户日必早于报告日、到期日必晚于报告日），
      不会出现"未来开户"这类反常识数据。
+
+多期能力：generate_all 接受 report_dates 列表，逐期生成各表。
+每期用 ods_rng(table_name, report_date) 派生独立随机源，
+保证同一报告日的数据与共生成了几期无关 —— 加期不扰动已有期。
 """
 
 from __future__ import annotations
@@ -29,8 +33,8 @@ from .config import (
     ODS_SOURCE_FILES,
     REPORT_DATE,
     VOLUMES,
+    ods_rng,
     source_file,
-    table_rng,
     weighted_choice,
     write_csv,
 )
@@ -120,17 +124,17 @@ def _token(rng: random.Random, length: int = 8) -> str:
     return "".join(rng.choices(string.ascii_uppercase + string.digits, k=length))
 
 
-def _business_day_before(rng: random.Random, min_days: int, max_days: int) -> str:
+def _business_day_before(rng: random.Random, report_date: date, min_days: int, max_days: int) -> str:
     """报告日往前推若干天的最近工作日。"""
-    day = REPORT_DATE - timedelta(days=rng.randint(min_days, max_days))
+    day = report_date - timedelta(days=rng.randint(min_days, max_days))
     while day.weekday() >= 5:
         day -= timedelta(days=1)
     return day.isoformat()
 
 
-def _business_day_after(rng: random.Random, min_days: int, max_days: int) -> str:
+def _business_day_after(rng: random.Random, report_date: date, min_days: int, max_days: int) -> str:
     """报告日往后推若干天的最近工作日（所有到期日均晚于报告日）。"""
-    day = REPORT_DATE + timedelta(days=rng.randint(min_days, max_days))
+    day = report_date + timedelta(days=rng.randint(min_days, max_days))
     while day.weekday() >= 5:
         day += timedelta(days=1)
     return day.isoformat()
@@ -151,17 +155,18 @@ def _assemble(
     entity_code: str,
     business_values: Sequence[object],
     event_time: str,
+    report_date: date,
 ) -> list[object]:
     """拼一行 ODS 记录：前缀列 + 业务列 + ETL 尾部列（列序与表头一致）。"""
     return [
         ODS_SOURCE_FILES[table_name][0],
         source_record_id,
-        REPORT_DATE.isoformat(),
+        report_date.isoformat(),
         entity_code,
         *business_values,
         event_time,
         BATCH_ID,
-        source_file(table_name, REPORT_DATE),
+        source_file(table_name, report_date),
     ]
 
 
@@ -169,10 +174,10 @@ def _header(business_columns: list[str]) -> list[str]:
     return [*ODS_COLUMNS_HEAD, *business_columns, *ODS_COLUMNS_TAIL]
 
 
-def generate_deposits(ods_dir: Path, ref: ReferenceData) -> int:
+def generate_deposits(ods_dir: Path, ref: ReferenceData, report_date: date, append: bool = False) -> int:
     """存款头寸：零售/对公/同业存款，含活期与定期。"""
-    rng = table_rng("ods_deposits")
-    clock = EventClock(REPORT_DATE)
+    rng = ods_rng("ods_deposits", report_date)
+    clock = EventClock(report_date)
     rows = []
     for index in range(1, VOLUMES["ods_deposits"] + 1):
         entity_code, currency = _pick_entity_currency(rng, ref)
@@ -181,7 +186,7 @@ def generate_deposits(ods_dir: Path, ref: ReferenceData) -> int:
         principal = round(rng.uniform(1_000, 5_000_000), 2)
         interest_rate = round(rng.uniform(0.0005, 0.0525), 6)
         accrued_interest = round(principal * interest_rate * rng.uniform(0.05, 1.0), 2)
-        maturity_date = _business_day_after(rng, 15, 400) if deposit_type in TERM_DEPOSIT_TYPES else ""
+        maturity_date = _business_day_after(rng, report_date, 15, 400) if deposit_type in TERM_DEPOSIT_TYPES else ""
 
         business = [
             f"ACC-{rng.randint(100000, 999999)}",
@@ -192,13 +197,13 @@ def generate_deposits(ods_dir: Path, ref: ReferenceData) -> int:
             principal,
             accrued_interest,
             interest_rate,
-            _business_day_before(rng, 30, 3650),
+            _business_day_before(rng, report_date, 30, 3650),
             maturity_date,
             f"BR-{entity_code}",
             rng.choice(CUSTOMER_TYPES),
             rng.choice(("Y", "N")),
         ]
-        rows.append(_assemble("ods_deposits", f"DEP-{index:06d}", entity_code, business, clock.next()))
+        rows.append(_assemble("ods_deposits", f"DEP-{index:06d}", entity_code, business, clock.next(), report_date))
 
     business_columns = [
         "account_number",
@@ -215,13 +220,13 @@ def generate_deposits(ods_dir: Path, ref: ReferenceData) -> int:
         "customer_type_raw",
         "insured_flag",
     ]
-    return write_csv(ods_dir / "ods_deposits.csv", _header(business_columns), rows)
+    return write_csv(ods_dir / "ods_deposits.csv", _header(business_columns), rows, append=append)
 
 
-def generate_repo_transactions(ods_dir: Path, ref: ReferenceData) -> int:
+def generate_repo_transactions(ods_dir: Path, ref: ReferenceData, report_date: date, append: bool = False) -> int:
     """回购与逆回购：质押式融资的存量交易。"""
-    rng = table_rng("ods_repo_transactions")
-    clock = EventClock(REPORT_DATE)
+    rng = ods_rng("ods_repo_transactions", report_date)
+    clock = EventClock(report_date)
     rows = []
     for index in range(1, VOLUMES["ods_repo_transactions"] + 1):
         entity_code, currency = _pick_entity_currency(rng, ref)
@@ -238,13 +243,15 @@ def generate_repo_transactions(ods_dir: Path, ref: ReferenceData) -> int:
             collateral_market_value,
             haircut_pct,
             round(rng.uniform(0.01, 0.08), 6),
-            _business_day_before(rng, 0, 60),
-            _business_day_after(rng, 1, 90),
+            _business_day_before(rng, report_date, 0, 60),
+            _business_day_after(rng, report_date, 1, 90),
             f"US{rng.randint(1000000000, 9999999999)}",
             rng.choice(COLLATERAL_TYPES),
             f"GMRA-{_token(rng, 6)}",
         ]
-        rows.append(_assemble("ods_repo_transactions", f"REPO-{index:06d}", entity_code, business, clock.next()))
+        rows.append(
+            _assemble("ods_repo_transactions", f"REPO-{index:06d}", entity_code, business, clock.next(), report_date)
+        )
 
     business_columns = [
         "deal_id",
@@ -261,13 +268,13 @@ def generate_repo_transactions(ods_dir: Path, ref: ReferenceData) -> int:
         "collateral_type_raw",
         "netting_agreement_id",
     ]
-    return write_csv(ods_dir / "ods_repo_transactions.csv", _header(business_columns), rows)
+    return write_csv(ods_dir / "ods_repo_transactions.csv", _header(business_columns), rows, append=append)
 
 
-def generate_loans(ods_dir: Path, ref: ReferenceData) -> int:
+def generate_loans(ods_dir: Path, ref: ReferenceData, report_date: date, append: bool = False) -> int:
     """贷款台账：已用额度与未提取额度，支撑表内外融资口径。"""
-    rng = table_rng("ods_loans")
-    clock = EventClock(REPORT_DATE)
+    rng = ods_rng("ods_loans", report_date)
+    clock = EventClock(report_date)
     rows = []
     for index in range(1, VOLUMES["ods_loans"] + 1):
         entity_code, currency = _pick_entity_currency(rng, ref)
@@ -284,16 +291,16 @@ def generate_loans(ods_dir: Path, ref: ReferenceData) -> int:
             currency,
             round(rng.uniform(0.01, 0.12), 6),
             rng.choice(("FIXED", "FLOAT")),
-            _business_day_before(rng, 90, 1500),
+            _business_day_before(rng, report_date, 90, 1500),
             # 到期日从 1 天起：贷款簿里必然有 30 天内到期的余额，
             # 否则 Section F（30 天流入）恒为 0，报表会失真
-            _business_day_after(rng, 1, 1800),
-            _business_day_after(rng, 1, 120),
+            _business_day_after(rng, report_date, 1, 1800),
+            _business_day_after(rng, report_date, 1, 120),
             rng.choice(("Y", "N")),
             rng.choice(("CORP", "IND", "FI")),
             rng.choice(CREDIT_RATINGS),
         ]
-        rows.append(_assemble("ods_loans", f"LOAN-{index:06d}", entity_code, business, clock.next()))
+        rows.append(_assemble("ods_loans", f"LOAN-{index:06d}", entity_code, business, clock.next(), report_date))
 
     business_columns = [
         "loan_id",
@@ -312,13 +319,13 @@ def generate_loans(ods_dir: Path, ref: ReferenceData) -> int:
         "borrower_type_raw",
         "credit_grade_raw",
     ]
-    return write_csv(ods_dir / "ods_loans.csv", _header(business_columns), rows)
+    return write_csv(ods_dir / "ods_loans.csv", _header(business_columns), rows, append=append)
 
 
-def generate_securities(ods_dir: Path, ref: ReferenceData) -> int:
+def generate_securities(ods_dir: Path, ref: ReferenceData, report_date: date, append: bool = False) -> int:
     """证券持仓：HQLA 分级的原始依据，含质押标记。"""
-    rng = table_rng("ods_securities")
-    clock = EventClock(REPORT_DATE)
+    rng = ods_rng("ods_securities", report_date)
+    clock = EventClock(report_date)
     rows = []
     for index in range(1, VOLUMES["ods_securities"] + 1):
         entity_code, currency = _pick_entity_currency(rng, ref)
@@ -336,12 +343,12 @@ def generate_securities(ods_dir: Path, ref: ReferenceData) -> int:
             round(face_amount * rng.uniform(0.95, 1.05), 2),
             round(face_amount * rng.uniform(0.98, 1.02), 2),
             round(rng.uniform(0.01, 0.08), 6),
-            _business_day_before(rng, 30, 1200),
-            _business_day_after(rng, 60, 3650),
+            _business_day_before(rng, report_date, 30, 1200),
+            _business_day_after(rng, report_date, 60, 3650),
             rng.choice(("AAA", "AA", "A", "BBB")),
             rng.choice(("Y", "N")),
         ]
-        rows.append(_assemble("ods_securities", f"SEC-{index:06d}", entity_code, business, clock.next()))
+        rows.append(_assemble("ods_securities", f"SEC-{index:06d}", entity_code, business, clock.next(), report_date))
 
     business_columns = [
         "security_id",
@@ -360,13 +367,13 @@ def generate_securities(ods_dir: Path, ref: ReferenceData) -> int:
         "credit_rating_raw",
         "pledged_flag",
     ]
-    return write_csv(ods_dir / "ods_securities.csv", _header(business_columns), rows)
+    return write_csv(ods_dir / "ods_securities.csv", _header(business_columns), rows, append=append)
 
 
-def generate_derivatives(ods_dir: Path, ref: ReferenceData) -> int:
+def generate_derivatives(ods_dir: Path, ref: ReferenceData, report_date: date, append: bool = False) -> int:
     """衍生品交易：盯市价值与双边抵押品，支撑衍生品融资口径。"""
-    rng = table_rng("ods_derivatives")
-    clock = EventClock(REPORT_DATE)
+    rng = ods_rng("ods_derivatives", report_date)
+    clock = EventClock(report_date)
     rows = []
     for index in range(1, VOLUMES["ods_derivatives"] + 1):
         entity_code, currency = _pick_entity_currency(rng, ref)
@@ -378,8 +385,8 @@ def generate_derivatives(ods_dir: Path, ref: ReferenceData) -> int:
             round(rng.uniform(1_000_000, 500_000_000), 2),
             currency,
             f"{currency}/USD",
-            _business_day_before(rng, 1, 60),
-            _business_day_after(rng, 30, 1800),
+            _business_day_before(rng, report_date, 1, 60),
+            _business_day_after(rng, report_date, 30, 1800),
             round(rng.uniform(-10_000_000, 10_000_000), 2),
             "USD",
             rng.choice(("Y", "N")),
@@ -387,7 +394,7 @@ def generate_derivatives(ods_dir: Path, ref: ReferenceData) -> int:
             round(rng.uniform(0, 5_000_000), 2),
             round(rng.uniform(0, 5_000_000), 2),
         ]
-        rows.append(_assemble("ods_derivatives", f"DRV-{index:06d}", entity_code, business, clock.next()))
+        rows.append(_assemble("ods_derivatives", f"DRV-{index:06d}", entity_code, business, clock.next(), report_date))
 
     business_columns = [
         "trade_id",
@@ -405,7 +412,7 @@ def generate_derivatives(ods_dir: Path, ref: ReferenceData) -> int:
         "collateral_posted",
         "collateral_received",
     ]
-    return write_csv(ods_dir / "ods_derivatives.csv", _header(business_columns), rows)
+    return write_csv(ods_dir / "ods_derivatives.csv", _header(business_columns), rows, append=append)
 
 
 def _split_amount(rng: random.Random, total: float, parts: int) -> list[float]:
@@ -424,13 +431,28 @@ def _amount_usd(row: dict[str, str], amount_column: str) -> float:
     return float(row[amount_column]) * FX_RATES.get(row["currency"], 1.0)
 
 
-def _read_ods_rows(ods_dir: Path, table_name: str) -> list[dict[str, str]]:
-    """读回已经写出的 ODS 明细，供总账倒推使用。"""
+def _read_ods_rows(ods_dir: Path, table_name: str, report_date: date | None = None) -> list[dict[str, str]]:
+    """读回已经写出的 ODS 明细，供总账倒推使用。
+
+    Args:
+        ods_dir: ODS 输出目录。
+        table_name: 表名（不含 .csv 后缀）。
+        report_date: 给定时只返回该报告日的行；不给时返回全部行。
+    """
     with (ods_dir / f"{table_name}.csv").open(newline="", encoding="utf-8") as handle:
-        return list(csv.DictReader(handle))
+        rows = list(csv.DictReader(handle))
+    if report_date is not None:
+        target = report_date.isoformat()
+        rows = [row for row in rows if row["report_date"] == target]
+    return rows
 
 
-def generate_gl_balances(ods_dir: Path, gl_break_amount: float = 0.0) -> int:
+def generate_gl_balances(
+    ods_dir: Path,
+    report_date: date,
+    gl_break_amount: float = 0.0,
+    append: bool = False,
+) -> int:
     """集团总账余额：由业务明细倒推，而不是独立随机生成。
 
     为什么必须倒推：GL 对账是把总账余额与报送口径逐科目比对，若总账是另一套随机数字，
@@ -451,15 +473,18 @@ def generate_gl_balances(ods_dir: Path, gl_break_amount: float = 0.0) -> int:
     为什么缺口落在科目侧而不是权益侧：权益不参与任何 Section 对账，
     少记权益只会让「资产 = 负债 + 权益」不成立，而分科目对账照旧全 PASS ——
     剧本里什么都抓不到。异常要造在能被判据碰到的地方。
-    """
-    rng = table_rng("ods_gl_balances")
-    clock = EventClock(REPORT_DATE)
 
-    deposits = _read_ods_rows(ods_dir, "ods_deposits")
-    repo = _read_ods_rows(ods_dir, "ods_repo_transactions")
-    loans = _read_ods_rows(ods_dir, "ods_loans")
-    securities = _read_ods_rows(ods_dir, "ods_securities")
-    derivatives = _read_ods_rows(ods_dir, "ods_derivatives")
+    本函数按单个报告日生成总账：只读该期的业务明细来倒推该期余额，
+    因此多期数据下每期总账各自平衡，不会把两期的借贷混在一起算。
+    """
+    rng = ods_rng("ods_gl_balances", report_date)
+    clock = EventClock(report_date)
+
+    deposits = _read_ods_rows(ods_dir, "ods_deposits", report_date)
+    repo = _read_ods_rows(ods_dir, "ods_repo_transactions", report_date)
+    loans = _read_ods_rows(ods_dir, "ods_loans", report_date)
+    securities = _read_ods_rows(ods_dir, "ods_securities", report_date)
+    derivatives = _read_ods_rows(ods_dir, "ods_derivatives", report_date)
 
     demand_deposits = round(
         sum(_amount_usd(row, "principal_amount") for row in deposits if row["deposit_type"] in ("CHK", "SAV", "MMDA")),
@@ -518,18 +543,19 @@ def generate_gl_balances(ods_dir: Path, gl_break_amount: float = 0.0) -> int:
             GL_ENTITY,
             [entry.account_id, entry.account_name, entry.debit, entry.credit, entry.currency],
             clock.next(),
+            report_date,
         )
         for index, entry in enumerate(ledger, start=1)
     ]
 
     business_columns = ["gl_account_id", "account_name", "debit_balance", "credit_balance", "currency"]
-    return write_csv(ods_dir / "ods_gl_balances.csv", _header(business_columns), rows)
+    return write_csv(ods_dir / "ods_gl_balances.csv", _header(business_columns), rows, append=append)
 
 
-def generate_off_bs_commitments(ods_dir: Path, ref: ReferenceData) -> int:
+def generate_off_bs_commitments(ods_dir: Path, ref: ReferenceData, report_date: date, append: bool = False) -> int:
     """表外承诺：授信承诺、信用证、担保，进 Section J。"""
-    rng = table_rng("ods_off_bs_commitments")
-    clock = EventClock(REPORT_DATE)
+    rng = ods_rng("ods_off_bs_commitments", report_date)
+    clock = EventClock(report_date)
     rows = []
     for index in range(1, VOLUMES["ods_off_bs_commitments"] + 1):
         entity_code, currency = _pick_entity_currency(rng, ref)
@@ -542,9 +568,11 @@ def generate_off_bs_commitments(ods_dir: Path, ref: ReferenceData) -> int:
             facility_amount,
             round(facility_amount * rng.uniform(0.10, 0.90), 2),
             currency,
-            _business_day_after(rng, 30, 720),
+            _business_day_after(rng, report_date, 30, 720),
         ]
-        rows.append(_assemble("ods_off_bs_commitments", f"OFFBS-{index:06d}", entity_code, business, clock.next()))
+        rows.append(
+            _assemble("ods_off_bs_commitments", f"OFFBS-{index:06d}", entity_code, business, clock.next(), report_date)
+        )
 
     business_columns = [
         "commitment_id",
@@ -555,26 +583,32 @@ def generate_off_bs_commitments(ods_dir: Path, ref: ReferenceData) -> int:
         "currency",
         "maturity_date",
     ]
-    return write_csv(ods_dir / "ods_off_bs_commitments.csv", _header(business_columns), rows)
+    return write_csv(ods_dir / "ods_off_bs_commitments.csv", _header(business_columns), rows, append=append)
 
 
 def apply_deposit_correction(ods_dir: Path, record_id: str, new_amount: float) -> None:
-    """演示用：对单笔存款的本金做一笔修正，用于重述剧本。
+    """演示用：对锚定报告日的单笔存款本金做一笔修正，用于重述剧本。
 
     为什么做成生成器的一个开关，而不是手工改 CSV：
     手工改出来的样本与生成器的输出不再一致，下一次重跑生成器就被抹掉了，剧本不可复现。
     修正必须发生在总账倒推之前 —— 总账余额是由业务明细倒推的，
     若在总账生成之后再改明细，就会凭空造出一个对账缺口，重述剧本会误报成对账失败。
+
+    多期数据下的语义：source_record_id 跨期会重号（同一个账户在不同报告日是同一个源记录号，
+    这是有意的、也符合 bronze 主键 (source_system, source_record_id, report_date)）。
+    因此修正只作用于锚定报告日（REPORT_DATE = 2026-09-16）那一行，
+    不会静默改掉其他报告日的同号记录。
     """
+    target_date = REPORT_DATE.isoformat()
     path = ods_dir / "ods_deposits.csv"
     with path.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         fieldnames = list(reader.fieldnames or [])
         rows = list(reader)
 
-    matched = [row for row in rows if row["source_record_id"] == record_id]
+    matched = [row for row in rows if row["source_record_id"] == record_id and row["report_date"] == target_date]
     if not matched:
-        raise ValueError(f"ods_deposits 里没有 source_record_id = {record_id} 的记录")
+        raise ValueError(f"ods_deposits 里没有 source_record_id = {record_id} 且 report_date = {target_date} 的记录")
     for row in matched:
         row["principal_amount"] = f"{new_amount:.4f}"
 
@@ -584,26 +618,64 @@ def apply_deposit_correction(ods_dir: Path, record_id: str, new_amount: float) -
         writer.writerows(rows)
 
 
+# 6 张业务明细表的生成器函数（不含总账，总账在存款修正之后生成）
+_BUSINESS_GENERATORS = [
+    ("ods_deposits", generate_deposits),
+    ("ods_repo_transactions", generate_repo_transactions),
+    ("ods_loans", generate_loans),
+    ("ods_securities", generate_securities),
+    ("ods_derivatives", generate_derivatives),
+    ("ods_off_bs_commitments", generate_off_bs_commitments),
+]
+
+
 def generate_all(
     ods_dir: Path,
     ref: ReferenceData,
-    gl_variance_pct: float = 0.0,
+    gl_break_amount: float = 0.0,
     correction: tuple[str, float] | None = None,
+    report_dates_list: list[date] | None = None,
 ) -> dict[str, int]:
-    """生成全部 7 张 ODS 表，返回各表行数。
+    """生成全部 7 张 ODS 表，返回各表行数（各期行数之和）。
 
-    correction 给定时，先修正单笔存款本金再倒推总账，保证总账与业务明细仍然自洽。
+    多期生成：report_dates_list 给多个报告日时，按期顺序逐期生成各表。
+    每期用 ods_rng(table_name, report_date) 派生独立随机源，
+    保证加期不扰动已有期。返回的 counts 是各期合计。
+
+    correction 给定时，先修正锚定报告日的单笔存款本金再倒推总账，保证总账与业务明细仍然自洽。
+
+    Args:
+        ods_dir: ODS 输出目录。
+        ref: 引用数据。
+        gl_break_amount: 总账故意少记的金额，用于演示对账阻断。
+        correction: (record_id, new_amount) 或 None。
+        report_dates_list: 报告日列表；None 时默认 [REPORT_DATE]
+            （单期行为与改造前完全一致）。
     """
-    counts = {
-        "ods_deposits": generate_deposits(ods_dir, ref),
-        "ods_repo_transactions": generate_repo_transactions(ods_dir, ref),
-        "ods_loans": generate_loans(ods_dir, ref),
-        "ods_securities": generate_securities(ods_dir, ref),
-        "ods_derivatives": generate_derivatives(ods_dir, ref),
+    if report_dates_list is None:
+        report_dates_list = [REPORT_DATE]
+
+    counts: dict[str, int] = {
+        "ods_deposits": 0,
+        "ods_repo_transactions": 0,
+        "ods_loans": 0,
+        "ods_securities": 0,
+        "ods_derivatives": 0,
         "ods_gl_balances": 0,
-        "ods_off_bs_commitments": generate_off_bs_commitments(ods_dir, ref),
+        "ods_off_bs_commitments": 0,
     }
+
+    # 逐期生成：第一期覆盖建文件，后续期追加数据行（表头只出现一次）
+    for i, rd in enumerate(report_dates_list):
+        append = i > 0
+        for table_name, gen_func in _BUSINESS_GENERATORS:
+            counts[table_name] += gen_func(ods_dir, ref, rd, append=append)
+
     if correction is not None:
         apply_deposit_correction(ods_dir, correction[0], correction[1])
-    counts["ods_gl_balances"] = generate_gl_balances(ods_dir, gl_variance_pct)
+
+    # 总账在存款修正之后逐期生成，每期各自平衡
+    for i, rd in enumerate(report_dates_list):
+        counts["ods_gl_balances"] += generate_gl_balances(ods_dir, rd, gl_break_amount, append=i > 0)
+
     return counts

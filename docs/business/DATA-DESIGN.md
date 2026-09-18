@@ -229,6 +229,7 @@ CREATE TABLE ads.ads_fr2052a_alerts (
 | HQLA 二级资产上限 | Level 2A + Level 2B ≤ 总 HQLA × 40% |
 | Operational 存款 | 流出率低于 Non-Operational |
 | 币种转换 | 报告日即期汇率转 USD；汇率表必须覆盖业务数据里出现的全部（报告日, 币种）组合，缺行由 `dbt/tests/assert_fx_covered.sql` 断言失败拦住（折算失败必须出声，不允许静默变 NULL） |
+| 报告期隔离 | 跨期不混算：所有聚合与关联都按 `report_date` 分组与匹配（金额列、对账、核对脚本同理）。多个报告期共存时，每期只汇总自己的明细 |
 | 净额结算 | 仅有有效净额协议时允许 |
 
 ### 3.4 数据质量规则（VDQ）

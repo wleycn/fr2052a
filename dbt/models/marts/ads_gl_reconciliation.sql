@@ -9,6 +9,9 @@
 --   总账按借贷方向记账，负债权益类科目余额在贷方（净额为负），报送口径一律取正数，
 --   因此比对时对总账取绝对值。
 --   差异在容差内（报送金额的 1%，且不少于 1 分钱）判 PASS，否则 FAIL —— FAIL 会阻断报送。
+--
+--   对账按报告期逐期独立进行：每个 report_date 的总账与报表口径各自按期汇总，
+--   再按 section_code 和 report_date 两边对上。多期数据共存时不会把不同期的金额混到一起。
 
 with account_section as (
 
@@ -28,6 +31,7 @@ with account_section as (
 gl_by_section as (
 
     select
+        g.report_date,
         m.section_code,
         max(m.comparison_basis) as comparison_basis,
         -- 一个 Section 可能由多个科目构成，列出构成便于人工追查
@@ -36,83 +40,89 @@ gl_by_section as (
     from {{ ref('owd_gl_entries') }} g
     join account_section m
         on m.gl_account_id = g.gl_account_id
-    group by m.section_code
+    group by g.report_date, m.section_code
 
 ),
 
 report_amounts as (
 
     -- 报送口径按集团（ENT001）汇总取数：总账本身就是集团口径
+    -- 每个报告期独立汇总，不跨期串加
     select
+        report_date,
         'C' as section_code,
         round(sum(principal_amount_usd), 2) as report_amount
     from {{ ref('owd_deposits') }}
+    group by report_date
 
     union all
 
     select
+        report_date,
         'B' as section_code,
         round(sum(case when transaction_type = 'REPO' then cash_amount_usd else 0 end), 2) as report_amount
     from {{ ref('owd_secured_financing') }}
+    group by report_date
 
     union all
 
     select
+        report_date,
         'B2' as section_code,
         round(sum(case when transaction_type = 'REVERSE_REPO' then cash_amount_usd else 0 end), 2) as report_amount
     from {{ ref('owd_secured_financing') }}
+    group by report_date
 
     union all
 
     select
+        report_date,
         'E' as section_code,
         round(sum(net_balance_usd), 2) as report_amount
     from {{ ref('owd_gl_entries') }}
     where gl_account_id in ('1001', '1100')
+    group by report_date
 
     union all
 
     select
+        report_date,
         'G' as section_code,
         round(sum(market_value_usd), 2) as report_amount
     from {{ ref('owd_securities') }}
+    group by report_date
 
     union all
 
     select
+        report_date,
         'F' as section_code,
         round(sum(outstanding_usd), 2) as report_amount
     from {{ ref('owd_loans') }}
+    group by report_date
 
     union all
 
     select
+        report_date,
         'H' as section_code,
         round(sum(case when mtm_value_usd > 0 then mtm_value_usd else 0 end), 2) as report_amount
     from {{ ref('owd_derivatives') }}
+    group by report_date
 
     union all
 
     select
+        report_date,
         'H2' as section_code,
         round(-sum(case when mtm_value_usd < 0 then mtm_value_usd else 0 end), 2) as report_amount
     from {{ ref('owd_derivatives') }}
-
-),
-
--- 报告日取数据自身的报告日，不用 current_date()：
--- 对账结果由熔断判定按报告日查询（liquidity_monitor 传 --report-date），
--- 用处理日打标会让两边日期对不上，查询永远查不到行 —— 于是对账失败也报不出预警，
--- 报送闸照旧放行。这条静默失效只能在「故意造一个缺口」时才暴露。
-report_date as (
-
-    select max(report_date) as report_date
-    from {{ ref('owd_gl_entries') }}
+    group by report_date
 
 )
 
 select
-    d.report_date,
+    g.report_date,
     g.section_code,
     g.gl_account_group as gl_account_id,
     g.comparison_basis as account_name,
@@ -128,6 +138,6 @@ select
     end as status
 
 from gl_by_section g
-cross join report_date d
 left join report_amounts r
     on r.section_code = g.section_code
+    and r.report_date = g.report_date

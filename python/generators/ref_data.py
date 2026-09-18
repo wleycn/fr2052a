@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import random
 import string
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
@@ -537,6 +538,7 @@ def _generate_exchange_rates(
     ref_dir: Path,
     ref: ReferenceData,
     inject_missing_fx: set[str] | None = None,
+    report_dates: Sequence[date] | None = None,
 ) -> None:
     """生成汇率表，并把「全量币种集合」交给 ODS 抽取使用。
 
@@ -552,6 +554,8 @@ def _generate_exchange_rates(
         inject_missing_fx: 故意不写汇率行的币种集合，用于验证「缺汇率必须失败」。
             正常生产时不传。传入后：汇率表少这些行，但 ODS 的抽币种池不收缩
             （否则 ODS 会退化成不抽该币种，缺汇率的场景反而造不出来）。
+        report_dates: 要出汇率行的报告日列表；None 时只出锚定报告日那一组。
+            多期样本里每一期都要能折算出 USD，缺了就会被汇率覆盖断言判为缺汇率。
     """
     inject_missing_fx = inject_missing_fx or set()
     if inject_missing_fx:
@@ -560,13 +564,16 @@ def _generate_exchange_rates(
         print("  [INJECT] 预期效果：dbt 的汇率覆盖断言报红（这才是缺陷数据该有的样子）")
 
     header = ["rate_date", "from_currency", "to_currency", "spot_rate", "rate_type", "rate_source"]
-    rows = [
-        [REPORT_DATE.isoformat(), currency, "USD", rate, "MID", USD_RATE_SOURCE]
-        for currency, rate in FX_RATES.items()
-        if currency not in inject_missing_fx
-    ]
-    if "USD" not in inject_missing_fx:
-        rows.append([REPORT_DATE.isoformat(), "USD", "USD", 1.0, "MID", "INTERNAL"])
+    dates = list(report_dates) if report_dates else [REPORT_DATE]
+    rows: list[list[object]] = []
+    for rate_date in dates:
+        rows.extend(
+            [rate_date.isoformat(), currency, "USD", rate, "MID", USD_RATE_SOURCE]
+            for currency, rate in FX_RATES.items()
+            if currency not in inject_missing_fx
+        )
+        if "USD" not in inject_missing_fx:
+            rows.append([rate_date.isoformat(), "USD", "USD", 1.0, "MID", "INTERNAL"])
     ref.row_counts["ref_exchange_rates"] = write_csv(ref_dir / "ref_exchange_rates.csv", header, rows)
 
     # 唯一键断言：(rate_date, from_currency, to_currency, rate_type) 不得重复
@@ -647,19 +654,26 @@ def _generate_validation_rules(ref_dir: Path, ref: ReferenceData) -> None:
     ref.row_counts["ref_validation_rules"] = write_csv(ref_dir / "ref_validation_rules.csv", header, rows)
 
 
-def generate_all(ref_dir: Path, inject_missing_fx: set[str] | None = None) -> ReferenceData:
+def generate_all(
+    ref_dir: Path,
+    inject_missing_fx: set[str] | None = None,
+    report_dates: Sequence[date] | None = None,
+) -> ReferenceData:
     """生成全部 9 张 REF 表，返回可复用的外键集合。
 
     Args:
         ref_dir: REF 输出目录
         inject_missing_fx: 故意不写汇率行的币种集合，传给 _generate_exchange_rates。
+        report_dates: 要出汇率行的报告日列表；None 时只出锚定报告日那一组。
+            多期样本下每期都参与折算，汇率表缺了非锚定期的行就会被 dbt 的
+            汇率覆盖断言判为缺汇率。
     """
     ref = ReferenceData()
     _generate_entity_hierarchy(ref_dir, ref)
     _generate_counterparty(ref_dir, ref)
     _generate_maturity_bucket(ref_dir, ref)
     _generate_line_items(ref_dir, ref)
-    _generate_exchange_rates(ref_dir, ref, inject_missing_fx)
+    _generate_exchange_rates(ref_dir, ref, inject_missing_fx, report_dates)
     _generate_regulatory_mapping(ref_dir, ref)
     _generate_behavior_assumptions(ref_dir, ref)
     _generate_calendar(ref_dir, ref)

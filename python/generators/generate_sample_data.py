@@ -5,6 +5,7 @@
     python -m generators.generate_sample_data --out ../sample_data
     python -m generators.generate_sample_data --gl-break-amount 5000000
     python -m generators.generate_sample_data --inject-missing-fx JPY
+    python -m generators.generate_sample_data --report-days 2
 
 产出：
     <out>/ref/*.csv   9 张引用数据表，走批加载入 Iceberg 的 ref 命名空间
@@ -14,6 +15,9 @@
 
 --inject-missing-fx 故意不写指定币种的汇率行，用于验证「缺汇率必须失败」。
 传入后汇率表少行，ODS 生成器将对应币种兜底为 USD，自检放行但打印明示。
+
+--report-days N 生成 N 个连续日历日的多期数据，末尾一期是锚定报告日。
+加期不扰动已有期：每期用独立随机源，同一报告日的数据与共生成了几期无关。
 """
 
 from __future__ import annotations
@@ -38,6 +42,7 @@ from .config import (
     REF_SUBDIR,
     REPORT_DATE,
     VOLUMES,
+    report_dates,
 )
 from .ref_data import FX_RATES, ReferenceData
 from .ref_data import generate_all as generate_ref
@@ -90,42 +95,50 @@ def read_csv_rows(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
-def check_row_counts(output_dir: Path, inject_missing_fx: set[str] | None = None) -> list[CheckResult]:
+def check_row_counts(
+    output_dir: Path,
+    inject_missing_fx: set[str] | None = None,
+    num_periods: int = 1,
+) -> list[CheckResult]:
     """核对每张表的行数与设定值是否一致。
 
     汇率表在注入缺汇率时行数会少，按注入数调整期望值。
+    多期时 ODS 各表期望行数 = 单期行数 × N；汇率表期望行数 = 10 × N。
     """
     inject = inject_missing_fx or set()
     expected_ref = dict(EXPECTED_REF_ROWS)
-    if inject:
-        expected_ref["ref_exchange_rates"] = len(FX_RATES) + 1 - len(inject)
+    # 汇率表每期一组（10 行），注入缺汇率时每期少 len(inject) 行
+    fx_per_period = len(FX_RATES) + 1 - len(inject)
+    expected_ref["ref_exchange_rates"] = fx_per_period * num_periods
     results = []
     for table_name, expected in {**expected_ref, **VOLUMES}.items():
         subdir = REF_SUBDIR if table_name.startswith("ref_") else ODS_SUBDIR
         path = output_dir / subdir / f"{table_name}.csv"
         actual = len(read_csv_rows(path)) if path.exists() else -1
+        # ODS 表多期时期望 = 单期 × N
+        adjusted_expected = expected * num_periods if not table_name.startswith("ref_") else expected
         results.append(
             CheckResult(
                 name=f"行数 {table_name}",
-                passed=actual == expected,
-                detail=f"期望 {expected}，实际 {actual}",
+                passed=actual == adjusted_expected,
+                detail=f"期望 {adjusted_expected}，实际 {actual}",
             )
         )
     return results
 
 
-def check_report_date(output_dir: Path) -> list[CheckResult]:
-    """核对每行的报告日都等于约定的报告日。"""
+def check_report_date(output_dir: Path, valid_dates: list[date]) -> list[CheckResult]:
+    """核对每行的报告日都在允许的报告日集合内。"""
     results = []
-    expected = REPORT_DATE.isoformat()
+    valid_set = {d.isoformat() for d in valid_dates}
     for table_name in VOLUMES:
         rows = read_csv_rows(output_dir / ODS_SUBDIR / f"{table_name}.csv")
-        offenders = {row["report_date"] for row in rows if row["report_date"] != expected}
+        offenders = {row["report_date"] for row in rows if row["report_date"] not in valid_set}
         results.append(
             CheckResult(
                 name=f"报告日一致 {table_name}",
                 passed=not offenders,
-                detail="全部落在报告日" if not offenders else f"异常值 {sorted(offenders)}",
+                detail="全部在允许集合内" if not offenders else f"异常值 {sorted(offenders)}",
             )
         )
     return results
@@ -239,19 +252,23 @@ def check_fx_coverage(
 
 
 def check_date_ordering(output_dir: Path) -> list[CheckResult]:
-    """核对日期先后：业务日期不晚于报告日，到期日不早于起始日。"""
+    """核对日期先后：业务日期不晚于该行报告日，到期日不早于该行报告日。
+
+    多期数据下用每行自己的 report_date 作基准，而不是用全局 REPORT_DATE。
+    """
     results = []
     for table_name, rules in DATE_RULES.items():
         rows = read_csv_rows(output_dir / ODS_SUBDIR / f"{table_name}.csv")
         bad: list[str] = []
         for row in rows:
+            row_report_date = date.fromisoformat(row["report_date"])
             for field, rule in rules:
                 raw = row.get(field, "")
                 if not raw:
                     continue  # 活期存款等无到期日，允许为空
                 value = date.fromisoformat(raw)
-                too_late = rule == "le" and value > REPORT_DATE
-                too_early = rule == "gt" and value <= REPORT_DATE
+                too_late = rule == "le" and value > row_report_date
+                too_early = rule == "gt" and value <= row_report_date
                 if too_late or too_early:
                     bad.append(f"{row['source_record_id']}.{field}={raw}")
         results.append(
@@ -264,19 +281,25 @@ def check_date_ordering(output_dir: Path) -> list[CheckResult]:
     return results
 
 
-def check_gl_balanced(output_dir: Path) -> CheckResult:
-    """核对总账借贷平衡：借方合计等于贷方合计。"""
+def check_gl_balanced(output_dir: Path, valid_dates: list[date]) -> list[CheckResult]:
+    """核对总账借贷平衡：每个报告期各自平衡，不把不同期的借贷混在一起算。"""
     rows = read_csv_rows(output_dir / ODS_SUBDIR / "ods_gl_balances.csv")
-    debit_total = sum(float(row["debit_balance"]) for row in rows)
-    credit_total = sum(float(row["credit_balance"]) for row in rows)
-    gap = round(debit_total - credit_total, 2)
-    if abs(gap) < 0.01:
-        gap = 0.0  # 抹掉浮点尾差，避免报告里出现 "-0.00"
-    return CheckResult(
-        name="总账借贷平衡",
-        passed=gap == 0.0,
-        detail=f"借方 {debit_total:,.2f}，贷方 {credit_total:,.2f}，差额 {gap:,.2f}",
-    )
+    results = []
+    for rd in valid_dates:
+        period_rows = [row for row in rows if row["report_date"] == rd.isoformat()]
+        debit_total = sum(float(row["debit_balance"]) for row in period_rows)
+        credit_total = sum(float(row["credit_balance"]) for row in period_rows)
+        gap = round(debit_total - credit_total, 2)
+        if abs(gap) < 0.01:
+            gap = 0.0  # 抹掉浮点尾差，避免报告里出现 "-0.00"
+        results.append(
+            CheckResult(
+                name=f"总账借贷平衡 {rd.isoformat()}",
+                passed=gap == 0.0,
+                detail=f"借方 {debit_total:,.2f}，贷方 {credit_total:,.2f}，差额 {gap:,.2f}",
+            )
+        )
+    return results
 
 
 def check_amount_signs(output_dir: Path) -> list[CheckResult]:
@@ -311,16 +334,23 @@ def check_amount_signs(output_dir: Path) -> list[CheckResult]:
     return results
 
 
-def run_checks(output_dir: Path, ref: ReferenceData, inject_missing_fx: set[str] | None = None) -> list[CheckResult]:
+def run_checks(
+    output_dir: Path,
+    ref: ReferenceData,
+    inject_missing_fx: set[str] | None = None,
+    valid_dates: list[date] | None = None,
+) -> list[CheckResult]:
     """跑完全部自检项，返回结论清单。"""
+    if valid_dates is None:
+        valid_dates = [REPORT_DATE]
     results: list[CheckResult] = []
-    results.extend(check_row_counts(output_dir, inject_missing_fx))
-    results.extend(check_report_date(output_dir))
+    results.extend(check_row_counts(output_dir, inject_missing_fx, len(valid_dates)))
+    results.extend(check_report_date(output_dir, valid_dates))
     results.extend(check_references(output_dir, ref))
     results.extend(check_fx_coverage(output_dir, ref, inject_missing_fx))
     results.extend(check_date_ordering(output_dir))
     results.extend(check_amount_signs(output_dir))
-    results.append(check_gl_balanced(output_dir))
+    results.extend(check_gl_balanced(output_dir, valid_dates))
     return results
 
 
@@ -360,7 +390,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="",
         help="故意不写这些币种的汇率行，用于验证「缺汇率必须失败」；逗号分隔多个，如 JPY,EUR",
     )
+    parser.add_argument(
+        "--report-days",
+        type=int,
+        default=1,
+        help="生成几个连续日历日的多期数据，末尾一期是锚定报告日；默认 1 表示单期",
+    )
     args = parser.parse_args(argv)
+    if args.report_days < 1:
+        parser.error("--report-days 必须 >= 1")
     if (args.correct_deposit_record is None) != (args.correct_deposit_amount is None):
         parser.error(
             "--correct-deposit-record 与 --correct-deposit-amount 必须同时给出："
@@ -377,10 +415,13 @@ def main(argv: list[str] | None = None) -> int:
 
     inject_missing_fx: set[str] = {c.strip() for c in args.inject_missing_fx.split(",") if c.strip()}
 
+    valid_dates = report_dates(args.report_days)
+
     print("=" * 72)
     print(f"生成 REF 层引用数据 → {ref_dir}")
     print("=" * 72)
-    ref = generate_ref(ref_dir, inject_missing_fx=inject_missing_fx or None)
+    ref = generate_ref(ref_dir, inject_missing_fx=inject_missing_fx or None, report_dates=valid_dates)
+
     for table_name, count in ref.row_counts.items():
         print(f"  [WRITE] {table_name:<28} {count} 行")
 
@@ -395,6 +436,7 @@ def main(argv: list[str] | None = None) -> int:
         correction=(
             None if args.correct_deposit_record is None else (args.correct_deposit_record, args.correct_deposit_amount)
         ),
+        report_dates_list=valid_dates,
     )
     for table_name, count in ods_counts.items():
         print(f"  [WRITE] {table_name:<28} {count} 行")
@@ -403,7 +445,9 @@ def main(argv: list[str] | None = None) -> int:
     print("=" * 72)
     print("完整性自检")
     print("=" * 72)
-    passed = print_report(run_checks(args.out, ref, inject_missing_fx=inject_missing_fx or None))
+    passed = print_report(
+        run_checks(args.out, ref, inject_missing_fx=inject_missing_fx or None, valid_dates=valid_dates)
+    )
 
     print()
     if passed:

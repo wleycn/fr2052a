@@ -8,7 +8,7 @@ from __future__ import annotations
 import csv
 import random
 from collections.abc import Iterable, Sequence
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 # python/generators/config.py -> 上溯两级得到项目根目录
@@ -65,17 +65,70 @@ ODS_COLUMNS_TAIL = ["event_time", "etl_batch_id", "etl_source_file"]
 
 
 def table_rng(table_name: str) -> random.Random:
-    """按表名派生独立随机源，保证单表数据可复现且互不干扰。"""
+    """按表名派生独立随机源，保证单表数据可复现且互不干扰。
+
+    本函数用于 REF 层（引用数据不随报告日变化），ODS 层请用 ods_rng。
+    """
     return random.Random(f"{RANDOM_SEED}:{table_name}")
 
 
-def write_csv(path: Path, header: Sequence[str], rows: Iterable[Sequence[object]]) -> int:
-    """写出 CSV（UTF-8、LF），返回行数。"""
+def report_dates(count: int, anchor: date = REPORT_DATE) -> list[date]:
+    """返回连续日历日列表，末尾是锚定报告日。
+
+    Args:
+        count: 要生成几个报告日。
+        anchor: 锚定报告日，列表的最后一个元素。默认为 REPORT_DATE。
+
+    Returns:
+        连续日历日列表，末尾是 anchor。count=1 时返回 [anchor]，
+        count=2 时返回 [anchor-1天, anchor]。
+
+    Raises:
+        ValueError: count < 1 时直接报错。
+    """
+    if count < 1:
+        raise ValueError(f"report_dates count 必须 >= 1，收到 {count}")
+    return [anchor - timedelta(days=count - 1 - i) for i in range(count)]
+
+
+def ods_rng(table_name: str, report_date: date) -> random.Random:
+    """按 (表名, 报告日) 派生独立随机源，供 ODS 层生成器使用。
+
+    同一天的数据必须与「本次共生成了几期」无关。如果随机源只按表名派生
+    （像 table_rng 那样），加期时已有期的随机序列会被推后，导致同一报告日
+    的数据悄悄变化，多期回归测试就无法拿 1 期与 2 期的同一报告日逐字节比对。
+
+    本函数把报告日纳入种子，使每个 (表名, 报告日) 组合得到独立且确定的随机源：
+    不管共生成了几期，同一天的种子相同、数据相同。
+
+    Args:
+        table_name: ODS 表名。
+        report_date: 该期的报告日。
+
+    Returns:
+        确定性的随机源，同一 (表名, 报告日) 每次返回相同的随机序列。
+    """
+    return random.Random(f"{RANDOM_SEED}:{table_name}:{report_date.isoformat()}")
+
+
+def write_csv(
+    path: Path,
+    header: Sequence[str],
+    rows: Iterable[Sequence[object]],
+    append: bool = False,
+) -> int:
+    """写出 CSV（UTF-8、LF），返回**本次写入**的行数。
+
+    append=True 时只追加数据行、不重复写表头：多期生成按报告日逐期追加，
+    每期写出的行与表头都与单期生成时一致。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     materialized = list(rows)
-    with path.open("w", newline="", encoding="utf-8") as handle:
+    mode = "a" if append and path.exists() else "w"
+    with path.open(mode, newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(header)
+        if mode == "w":
+            writer.writerow(header)
         writer.writerows(materialized)
     return len(materialized)
 

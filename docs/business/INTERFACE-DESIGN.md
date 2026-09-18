@@ -57,16 +57,26 @@
 ### 3.1 `generate_sample_data.py`
 
 ```bash
-python -m generators.generate_sample_data --out <dir> [--gl-break-amount <N>]
+python -m generators.generate_sample_data --out <dir> [--report-days <N>] [--gl-break-amount <N>]
 ```
 
 | 参数 | 类型 | 必填 | 默认 | 说明 |
 |------|------|------|------|------|
 | `--out` | path | 否 | `../sample_data` | 输出目录 |
+| `--report-days` | int | 否 | `1` | 生成几个连续日历日的多期数据，末尾一期是锚定报告日（`2026-09-16`）|
 | `--gl-break-amount` | int | 否 | `0` | GL 对账缺口（用于演示对账失败场景）|
+| `--correct-deposit-record` | string | 否 | 空 | 重述剧本：要修正的存款记录号，与下一个参数必须同时给出 |
+| `--correct-deposit-amount` | float | 否 | 空 | 重述剧本：把该记录的本金改成这个数（记账币种原币金额）|
 | `--inject-missing-fx` | string | 否 | 空 | 故意不写这些币种的汇率行（逗号分隔），用于演示「缺汇率必须失败」|
 
 `--inject-missing-fx` 造的是**刻意的缺陷数据**：汇率表少这些行，但业务数据仍会照常抽到这些币种，于是 dbt 的汇率覆盖断言报红、日批在这一环停住。它不是一个「宽容模式」，用完必须重新生成正常数据。
+
+`--report-days N` 的语义有两层：
+
+- **加期不扰动已有期**：每期用 `(表名, 报告日)` 派生的独立随机源，同一个报告日的数据与「本次生成了几期」无关。回归检查因此可以拿 1 期与 2 期的同一报告日逐字节比对。
+- **锚定时点**：`--correct-deposit-record` 只作用于锚定报告日那一行。同一账户在不同报告日是同一个源记录号（bronze 主键是 `source_system + source_record_id + report_date`），不限定日期会静默改掉其他期的同号记录。
+
+汇率表按报告日逐期出行（每期 10 个币种）：多期数据里每一期都要能折算出 USD，缺了会被汇率覆盖断言判为缺汇率。
 
 **退出码**：`0` = 成功，`1` = 失败
 

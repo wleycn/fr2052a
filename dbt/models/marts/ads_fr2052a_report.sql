@@ -4,6 +4,10 @@
 --   每个法人实体一行（is_consolidated = false），外加一行集团合并口径（ENT001，is_consolidated = true）。
 --   合并口径由实体口径相加得到，不重复计算。
 --
+--   每个报告期独立成行，任何聚合都不跨期。
+--   多期数据（补报、重跑、演示多期）共存时，每个 report_date 的金额只汇总该期明细，
+--   不会把不同报告期的金额加到一起。
+--
 --   没有数据来源的 Section 字段留 NULL，不写 0 —— 0 意味着"查过且确实为零"，
 --   而本演示的 ODS 里根本没有这些业务（商业票据、联邦基金、证券借贷、经纪存款），
 --   置 NULL 才是诚实的表达。
@@ -13,6 +17,7 @@
 with deposits as (
 
     select
+        report_date,
         entity_code,
         round(sum(principal_amount_usd), 2) as total_deposits_usd,
         round(sum(case when customer_segment = 'RETAIL' and product_category = 'DEMAND' then principal_amount_usd else 0 end), 2) as retail_demand,
@@ -21,29 +26,31 @@ with deposits as (
         round(sum(case when customer_segment <> 'RETAIL' and product_category = 'DEMAND' then principal_amount_usd else 0 end), 2) as wholesale_demand,
         round(sum(case when customer_segment <> 'RETAIL' and product_category in ('TIME', 'CD') then principal_amount_usd else 0 end), 2) as wholesale_time
     from {{ ref('owd_deposits') }}
-    group by entity_code
+    group by report_date, entity_code
 
 ),
 
 secured_financing as (
 
     select
+        report_date,
         entity_code,
         round(sum(case when transaction_type = 'REPO' then cash_amount_usd else 0 end), 2) as repo_outstanding,
         round(sum(case when transaction_type = 'REVERSE_REPO' then cash_amount_usd else 0 end), 2) as reverse_repo
     from {{ ref('owd_secured_financing') }}
-    group by entity_code
+    group by report_date, entity_code
 
 ),
 
 cash as (
 
     select
+        report_date,
         entity_code,
         round(sum(cash_on_hand_usd), 2) as cash_on_hand,
         round(sum(total_cash_usd), 2) as total_cash
     from {{ ref('ows_cash_position') }}
-    group by entity_code
+    group by report_date, entity_code
 
 ),
 
@@ -51,6 +58,7 @@ loan_inflows as (
 
     -- 30 天内到期的贷款本金构成预期流入
     select
+        report_date,
         entity_code,
         round(sum(case when loan_type = 'COMMERCIAL' then outstanding_usd else 0 end), 2) as commercial_inflow,
         round(sum(case when loan_type = 'RETAIL' then outstanding_usd else 0 end), 2) as retail_inflow,
@@ -58,13 +66,14 @@ loan_inflows as (
         round(sum(outstanding_usd), 2) as total_inflow
     from {{ ref('owd_loans') }}
     where days_to_maturity <= 30
-    group by entity_code
+    group by report_date, entity_code
 
 ),
 
 hqla as (
 
     select
+        report_date,
         entity_code,
         round(sum(case when hqla_classification = 'LEVEL_1' then market_value_usd else 0 end), 2) as l1_mv,
         round(sum(case when hqla_classification = 'LEVEL_2A' then market_value_usd else 0 end), 2) as l2a_mv,
@@ -77,7 +86,7 @@ hqla as (
         round(sum(case when hqla_classification = 'NON_HQLA' and not is_encumbered then market_value_usd else 0 end), 2) as unencumbered_non_hqla,
         round(sum(case when is_encumbered then market_value_usd else 0 end), 2) as encumbered_total
     from {{ ref('owd_securities') }}
-    group by entity_code
+    group by report_date, entity_code
 
 ),
 
@@ -86,26 +95,28 @@ derivatives as (
     -- 用原始盯市口径而非抵押品净额口径：FR 2052a Section H 报的是净盯市，
     -- 且这样才与总账的衍生品资产负债科目（1500/2200）对得上，GL 对账才能成立。
     select
+        report_date,
         entity_code,
         round(sum(case when mtm_value_usd > 0 then mtm_value_usd else 0 end), 2) as net_mtm_asset,
         round(-sum(case when mtm_value_usd < 0 then mtm_value_usd else 0 end), 2) as net_mtm_liability,
         round(sum(collateral_posted_usd), 2) as collateral_posted,
         round(sum(collateral_received_usd), 2) as collateral_received
     from {{ ref('owd_derivatives') }}
-    group by entity_code
+    group by report_date, entity_code
 
 ),
 
 contingent as (
 
     select
+        report_date,
         entity_code,
         round(sum(case when commitment_type = 'CREDIT_COMMITMENT' then undrawn_amount_usd else 0 end), 2) as credit_commitments,
         round(sum(case when commitment_type = 'LETTER_OF_CREDIT' then undrawn_amount_usd else 0 end), 2) as letters_of_credit,
         round(sum(case when commitment_type = 'GUARANTEE' then undrawn_amount_usd else 0 end), 2) as guarantees,
         round(sum(undrawn_amount_usd), 2) as total_contingent
     from {{ ref('owd_off_bs') }}
-    group by entity_code
+    group by report_date, entity_code
 
 ),
 
@@ -113,12 +124,13 @@ cashflow_30d as (
 
     -- 30 天内到期的现金流，含 FR 2052a 的流入上限规则
     select
+        report_date,
         entity_code,
         round(sum(expected_inflow_usd), 2) as raw_inflow,
         round(sum(expected_outflow_usd), 2) as total_outflow
     from {{ ref('ows_cashflow_projection') }}
     where maturity_bucket in ('O/N', '1-7D', '8-30D')
-    group by entity_code
+    group by report_date, entity_code
 
 ),
 
@@ -212,14 +224,14 @@ entity_level as (
         -- 把新列插在中途会让 create or replace table 直接失败。
         e.report_date
     from entities e
-    left join deposits d on d.entity_code = e.entity_code
-    left join secured_financing f on f.entity_code = e.entity_code
-    left join cash c on c.entity_code = e.entity_code
-    left join loan_inflows l on l.entity_code = e.entity_code
-    left join hqla h on h.entity_code = e.entity_code
-    left join derivatives v on v.entity_code = e.entity_code
-    left join contingent t on t.entity_code = e.entity_code
-    left join cashflow_30d cf on cf.entity_code = e.entity_code
+    left join deposits d on d.entity_code = e.entity_code and d.report_date = e.report_date
+    left join secured_financing f on f.entity_code = e.entity_code and f.report_date = e.report_date
+    left join cash c on c.entity_code = e.entity_code and c.report_date = e.report_date
+    left join loan_inflows l on l.entity_code = e.entity_code and l.report_date = e.report_date
+    left join hqla h on h.entity_code = e.entity_code and h.report_date = e.report_date
+    left join derivatives v on v.entity_code = e.entity_code and v.report_date = e.report_date
+    left join contingent t on t.entity_code = e.entity_code and t.report_date = e.report_date
+    left join cashflow_30d cf on cf.entity_code = e.entity_code and cf.report_date = e.report_date
 
 ),
 
@@ -227,6 +239,7 @@ consolidated as (
 
     -- 合并口径：实体口径逐列相加。总资产/总负债类金额直接累加，不做内部交易抵消
     -- （演示数据里实体之间没有内部交易，抵消项为零）。
+    -- 每个报告期独立聚合，不跨期串加。
     select
         'ENT001' as entity_code,
         cast(null as decimal(20, 2)) as sec_a_cp_outstanding,
@@ -295,8 +308,9 @@ consolidated as (
             least(sum(sec_h_expected_inflow_30d), 0.75 * sum(sec_k_total_outflows)) - sum(sec_k_total_outflows),
             2
         ) as sec_k_cumulative_30d_gap,
-        max(report_date) as report_date
+        report_date
     from entity_level
+    group by report_date
 
 ),
 
