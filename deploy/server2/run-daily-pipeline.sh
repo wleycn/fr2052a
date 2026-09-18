@@ -145,7 +145,10 @@ execute_step() {
         && bash spark-submit-fr2052a.sh "$APP_DIR/python/validators/run_dq_rules.py" --batch-id "$BATCH_ID"
       ;;
     export-pg)
-      bash spark-submit-fr2052a.sh "$APP_DIR/python/exporters/export_gold_to_pg.py"
+      # 批次号显式传进去：导出作业要用它核对运行上下文（覆盖写前置闸的一条判据），
+      # 而包装脚本只透传数据库凭据，不保证 BATCH_ID 会进容器环境。
+      bash spark-submit-fr2052a.sh "$APP_DIR/python/exporters/export_gold_to_pg.py" \
+        --batch-id "$BATCH_ID"
       ;;
     publish-access)
       # 必须在 export-pg 之前：先施加结构迁移与授权，导出用 truncate=true 保住它们。

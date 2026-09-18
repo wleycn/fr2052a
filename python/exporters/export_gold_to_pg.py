@@ -46,7 +46,9 @@ when the new data has a different schema」。实测确认：模型多一列时�
 
 from __future__ import annotations
 
+import argparse
 import os
+import re
 import sys
 from typing import Any
 
@@ -60,6 +62,21 @@ TABLES = (
     "ads_fr2052a_detail",
     "ads_gl_reconciliation",
 )
+
+
+def parse_args() -> argparse.Namespace:
+    """解析命令行参数。
+
+    `--batch-id` 默认取环境变量 `BATCH_ID`：跑批脚本在宿主侧把它作为参数传进来，
+    不依赖容器内的环境变量透传。批次号只允许字母数字与短横线 —— 它会被拼进 SQL 字面量，
+    白名单校验比转义更不容易出错。
+    """
+    parser = argparse.ArgumentParser(description="把 gold 层报送表导出到 PostgreSQL 的 ads 层")
+    parser.add_argument("--batch-id", default=os.environ.get("BATCH_ID", ""), help="本批批次号，用于核对运行上下文")
+    args = parser.parse_args()
+    if args.batch_id and not re.fullmatch(r"[A-Za-z0-9-]+", args.batch_id):
+        parser.error(f"批次号只允许字母、数字与短横线，收到：{args.batch_id!r}")
+    return args
 
 
 def jdbc_url() -> str:
@@ -100,6 +117,82 @@ def target_columns(spark: SparkSession, url: str, table: str, properties: dict[s
     return spark.read.jdbc(url, f"(SELECT * FROM {table} WHERE 1 = 0) AS probe", properties=properties).columns
 
 
+def _scalar(spark: SparkSession, url: str, properties: dict[str, Any], query: str) -> int:
+    """跑一条只返回一个整数的查询；走 JDBC 子查询，不把整表拉到驱动端。"""
+    frame = spark.read.jdbc(url, f"({query}) AS probe", properties=properties)
+    return int(frame.collect()[0][0])
+
+
+def preflight(spark: SparkSession, url: str, properties: dict[str, Any], batch_id: str) -> list[str]:
+    """覆盖写之前的**业务前提**检查；返回未通过的条目（空 = 可以写）。
+
+    为什么必须在写之前检：三张表是 `truncate=true` 覆盖写，写错了没有回退路径。
+    结构比对只能证明「列对得上」，证明不了「这批数据该不该写进去」。以下四种情况都会让一次
+    「结构完全正确」的覆盖写把好数据换成坏数据：
+
+      1. gold 里有空表 —— 上游没跑完，不是「本期确实没有数据」
+      2. 本批的运行上下文缺失或已失败 —— 不知道自己在写哪一批
+      3. 对账里有 FAIL 行 —— 报表与总账都没对上，不该进服务层
+      4. 报表与对账的报告期集合不一致 —— 只导了一半期
+
+    检完再写：任一条不过就整批退出非零，**一张表都不碰**。
+    """
+    failures: list[str] = []
+
+    for table in TABLES:
+        rows = spark.table(f"{GOLD_SCHEMA}.{table}").count()
+        if rows == 0:
+            failures.append(f"gold.{table} 是空表，先确认上游跑完再导出")
+        else:
+            print(f"  [OK]   gold.{table:<26} {rows} 行")
+
+    if not batch_id:
+        failures.append("未提供批次号（--batch-id 或 BATCH_ID 环境变量），无法核对本批运行上下文")
+    else:
+        context_rows = _scalar(
+            spark,
+            url,
+            properties,
+            "SELECT count(*) FROM ads.ads_pipeline_run_context "
+            f"WHERE batch_id = '{batch_id}' AND status IN ('OPEN', 'RUNNING', 'SUCCEEDED')",
+        )
+        failed_rows = _scalar(
+            spark,
+            url,
+            properties,
+            f"SELECT count(*) FROM ads.ads_pipeline_run_context WHERE batch_id = '{batch_id}' AND status = 'FAILED'",
+        )
+        if context_rows == 0 or failed_rows > 0:
+            failures.append(
+                f"本批运行上下文不成立（batch_id={batch_id}，成立 {context_rows} 行，失败 {failed_rows} 行）"
+            )
+        else:
+            print(f"  [OK]   运行上下文 {batch_id} 成立")
+
+    # 以下两项查的是 **gold（本次要写的那份数据）**，不是 PG 里上一批的存量 ——
+    # 拿存量判新数据等于用旧结论放行新批次。
+    recon_fails = spark.table(f"{GOLD_SCHEMA}.ads_gl_reconciliation").filter("status = 'FAIL'").count()
+    if recon_fails > 0:
+        failures.append(f"对账有 {recon_fails} 行 FAIL，先查清再导出")
+    else:
+        print("  [OK]   对账无 FAIL 行")
+
+    report_periods = {
+        str(row["report_date"])
+        for row in spark.sql(f"SELECT DISTINCT report_date FROM {GOLD_SCHEMA}.ads_fr2052a_report").collect()
+    }
+    recon_periods = {
+        str(row["report_date"])
+        for row in spark.sql(f"SELECT DISTINCT report_date FROM {GOLD_SCHEMA}.ads_gl_reconciliation").collect()
+    }
+    if report_periods != recon_periods:
+        failures.append(f"报表与对账的报告期集合不一致（报表 {sorted(report_periods)}，对账 {sorted(recon_periods)}）")
+    else:
+        print(f"  [OK]   报表与对账的报告期集合一致（{len(report_periods)} 期）")
+
+    return failures
+
+
 def schema_diff(frame: DataFrame, existing: list[str]) -> tuple[list[str], list[str]]:
     """返回 (模型有而表没有的列, 表有而模型没有的列)。"""
     missing = [name for name in frame.columns if name not in existing]
@@ -116,6 +209,19 @@ def main() -> int:
     spark.sparkContext.setLogLevel("WARN")
 
     print(f"导出 gold 层报表到 PostgreSQL（{url.split('@')[-1]}）")
+
+    # 覆盖写是不可逆的：先检业务前提，再动任何一张表。
+    # 检查与写入分两段，正是为了让「不合格」表现为「一张表都没改」，而不是「改了一半」。
+    print("覆盖写前置检查：")
+    blockers = preflight(spark, url, properties, parse_args().batch_id)
+    if blockers:
+        print()
+        print("导出未开始，一张表都没写。未通过的前提：")
+        for item in blockers:
+            print(f"  [FAIL] {item}")
+        return 1
+    print()
+
     failures: list[str] = []
     for table in TABLES:
         target = f"{ADS_SCHEMA}.{table}"
