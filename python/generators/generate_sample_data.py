@@ -18,6 +18,8 @@
 
 --report-days N 生成 N 个连续日历日的多期数据，末尾一期是锚定报告日。
 加期不扰动已有期：每期用独立随机源，同一报告日的数据与共生成了几期无关。
+
+[AI-GENERATED] model=qianfan-code-latest date=2026-09-18 reviewed_by=pending
 """
 
 from __future__ import annotations
@@ -37,15 +39,23 @@ if __package__ in (None, ""):
 
 from . import ods_data
 from .config import (
+    BOOKING_ENTITIES,
     DEFAULT_OUTPUT_DIR,
+    INTRACOMPANY_PAIRS,
     ODS_SUBDIR,
+    PARENT_VOLUMES,
     REF_SUBDIR,
     REPORT_DATE,
     VOLUMES,
     report_dates,
 )
+from .ods_data import GL_ACCOUNTS, GL_ROWS_PER_ACCOUNT
 from .ref_data import FX_RATES, ReferenceData
 from .ref_data import generate_all as generate_ref
+
+# 外部对手方数（CP0001–CP0050）+ 集团内对手方数（CP9001–CP9005，每实体一个）
+EXTERNAL_COUNTERPARTIES = 50
+AFFILIATE_COUNTERPARTIES = len(BOOKING_ENTITIES)  # ENT001–ENT005 各一个
 
 # 各表参与外键校验的交易对手类字段
 COUNTERPARTY_FIELDS: dict[str, tuple[str, ...]] = {
@@ -68,7 +78,8 @@ DATE_RULES: dict[str, tuple[tuple[str, str], ...]] = {
 
 EXPECTED_REF_ROWS: dict[str, int] = {
     "ref_entity_hierarchy": 5,
-    "ref_counterparty": 50,
+    # 派生：外部对手方数 + 集团内对手方数（每实体一个）
+    "ref_counterparty": EXTERNAL_COUNTERPARTIES + AFFILIATE_COUNTERPARTIES,
     "ref_maturity_bucket": 8,
     "ref_fr2052a_line_items": 19,
     # 由 FX_RATES 币种数 + 1（USD→USD）派生，加币种不会因硬编码挡路
@@ -77,6 +88,19 @@ EXPECTED_REF_ROWS: dict[str, int] = {
     "ref_behavior_assumptions": 6,
     "ref_calendar": 122,
     "ref_validation_rules": 20,
+}
+
+# 派生 ODS 单期期望行数：子公司配额 + 母公司追加 + 配对腿追加
+# ods_gl_balances 由 GL_ROWS_PER_ACCOUNT × len(GL_ACCOUNTS) × len(BOOKING_ENTITIES) 派生
+PAIRS_PER_PERIOD = len(INTRACOMPANY_PAIRS)
+EXPECTED_ODS_ROWS: dict[str, int] = {
+    "ods_deposits": VOLUMES["ods_deposits"] + PARENT_VOLUMES["ods_deposits"] + PAIRS_PER_PERIOD,
+    "ods_repo_transactions": VOLUMES["ods_repo_transactions"] + PARENT_VOLUMES["ods_repo_transactions"],
+    "ods_loans": VOLUMES["ods_loans"] + PARENT_VOLUMES["ods_loans"] + PAIRS_PER_PERIOD,
+    "ods_securities": VOLUMES["ods_securities"] + PARENT_VOLUMES["ods_securities"],
+    "ods_derivatives": VOLUMES["ods_derivatives"] + PARENT_VOLUMES["ods_derivatives"],
+    "ods_gl_balances": GL_ROWS_PER_ACCOUNT * len(GL_ACCOUNTS) * len(BOOKING_ENTITIES),
+    "ods_off_bs_commitments": VOLUMES["ods_off_bs_commitments"] + PARENT_VOLUMES["ods_off_bs_commitments"],
 }
 
 
@@ -104,6 +128,7 @@ def check_row_counts(
 
     汇率表在注入缺汇率时行数会少，按注入数调整期望值。
     多期时 ODS 各表期望行数 = 单期行数 × N；汇率表期望行数 = 10 × N。
+    单期 ODS 期望行数 = 子公司配额 + 母公司追加 + 配对腿追加（全部派生，无魔数）。
     """
     inject = inject_missing_fx or set()
     expected_ref = dict(EXPECTED_REF_ROWS)
@@ -111,7 +136,9 @@ def check_row_counts(
     fx_per_period = len(FX_RATES) + 1 - len(inject)
     expected_ref["ref_exchange_rates"] = fx_per_period * num_periods
     results = []
-    for table_name, expected in {**expected_ref, **VOLUMES}.items():
+    # ODS 行数期望用派生值（子公司 + 母公司 + 配对腿）
+    all_expected = {**expected_ref, **EXPECTED_ODS_ROWS}
+    for table_name, expected in all_expected.items():
         subdir = REF_SUBDIR if table_name.startswith("ref_") else ODS_SUBDIR
         path = output_dir / subdir / f"{table_name}.csv"
         actual = len(read_csv_rows(path)) if path.exists() else -1
@@ -131,7 +158,7 @@ def check_report_date(output_dir: Path, valid_dates: list[date]) -> list[CheckRe
     """核对每行的报告日都在允许的报告日集合内。"""
     results = []
     valid_set = {d.isoformat() for d in valid_dates}
-    for table_name in VOLUMES:
+    for table_name in EXPECTED_ODS_ROWS:
         rows = read_csv_rows(output_dir / ODS_SUBDIR / f"{table_name}.csv")
         offenders = {row["report_date"] for row in rows if row["report_date"] not in valid_set}
         results.append(
@@ -149,13 +176,14 @@ def check_references(output_dir: Path, ref: ReferenceData) -> list[CheckResult]:
     results: list[CheckResult] = []
     entity_set = set(ref.entity_codes)
     currency_set = set(ref.currencies)
-    counterparty_set = set(ref.counterparties)
+    # 集团内对手方也算合法引用：它们只在刻意构造的内部往来配对腿里出现，见 ref_data 的说明
+    counterparty_set = set(ref.counterparties) | set(ref.affiliate_counterparties)
 
     entity_offenders: list[str] = []
     currency_offenders: list[str] = []
     counterparty_offenders: list[str] = []
 
-    for table_name in VOLUMES:
+    for table_name in EXPECTED_ODS_ROWS:
         rows = read_csv_rows(output_dir / ODS_SUBDIR / f"{table_name}.csv")
         for row in rows:
             if row["entity_code"] not in entity_set:
@@ -282,23 +310,107 @@ def check_date_ordering(output_dir: Path) -> list[CheckResult]:
 
 
 def check_gl_balanced(output_dir: Path, valid_dates: list[date]) -> list[CheckResult]:
-    """核对总账借贷平衡：每个报告期各自平衡，不把不同期的借贷混在一起算。"""
+    """核对总账借贷平衡：逐实体 × 逐报告期，每个实体每期各自平衡。
+
+    旧实现只按报告期判平衡（整本总账一起算）。逐实体记账后，必须每个实体各自平衡，
+    否则某个实体的借贷缺口会被其它实体的盈余掩盖。
+    """
     rows = read_csv_rows(output_dir / ODS_SUBDIR / "ods_gl_balances.csv")
     results = []
     for rd in valid_dates:
-        period_rows = [row for row in rows if row["report_date"] == rd.isoformat()]
-        debit_total = sum(float(row["debit_balance"]) for row in period_rows)
-        credit_total = sum(float(row["credit_balance"]) for row in period_rows)
-        gap = round(debit_total - credit_total, 2)
-        if abs(gap) < 0.01:
-            gap = 0.0  # 抹掉浮点尾差，避免报告里出现 "-0.00"
-        results.append(
-            CheckResult(
-                name=f"总账借贷平衡 {rd.isoformat()}",
-                passed=gap == 0.0,
-                detail=f"借方 {debit_total:,.2f}，贷方 {credit_total:,.2f}，差额 {gap:,.2f}",
+        for entity_code in BOOKING_ENTITIES:
+            period_rows = [
+                row for row in rows if row["report_date"] == rd.isoformat() and row["entity_code"] == entity_code
+            ]
+            debit_total = sum(float(row["debit_balance"]) for row in period_rows)
+            credit_total = sum(float(row["credit_balance"]) for row in period_rows)
+            gap = round(debit_total - credit_total, 2)
+            if abs(gap) < 0.01:
+                gap = 0.0  # 抹掉浮点尾差，避免报告里出现 "-0.00"
+            results.append(
+                CheckResult(
+                    name=f"总账借贷平衡 {entity_code} {rd.isoformat()}",
+                    passed=gap == 0.0,
+                    detail=f"借方 {debit_total:,.2f}，贷方 {credit_total:,.2f}，差额 {gap:,.2f}",
+                )
             )
+    return results
+
+
+def check_intracompany_pairs(output_dir: Path) -> list[CheckResult]:
+    """内部往来配对自检：逐对核对存款腿本金 == 贷款腿 outstanding，且两侧实体与对手方编号互相对得上。
+
+    判据：
+    1. 存款腿：ods_deposits 里 customer_type_raw='AFFIL' 的行，entity_code 应为母公司 ENT001，
+       customer_id 应为对应子公司的集团内对手方编号，principal_amount 应等于 INTRACOMPANY_PAIRS 里的金额。
+    2. 贷款腿：ods_loans 里 source_record_id 以 'ICA-L-' 开头的行，entity_code 应为对应子公司，
+       borrower_id 应为母公司的集团内对手方编号 CP9001，outstanding_amount 应等于同一金额。
+    3. 两条腿金额必须相等（它们共用同一个常量，所以天然相等）。
+    """
+    from .config import INTRACOMPANY_PAIRS as PAIRS
+
+    deposits = read_csv_rows(output_dir / ODS_SUBDIR / "ods_deposits.csv")
+    loans = read_csv_rows(output_dir / ODS_SUBDIR / "ods_loans.csv")
+
+    # 按 customer_id 索引存款腿（AFFIL 类型的行）
+    dep_by_customer: dict[str, dict[str, str]] = {}
+    for row in deposits:
+        if row.get("customer_type_raw") == "AFFIL":
+            dep_by_customer[row["customer_id"]] = row
+
+    # 按 source_record_id 索引贷款腿（ICA-L- 开头）
+    loan_by_id: dict[str, dict[str, str]] = {}
+    for row in loans:
+        if row["source_record_id"].startswith("ICA-L-"):
+            loan_by_id[row["source_record_id"]] = row
+
+    results: list[CheckResult] = []
+    all_match = True
+    details: list[str] = []
+
+    for pair_index, (parent_code, sub_code, expected_amount) in enumerate(PAIRS):
+        # 存款腿：母公司账上，customer_id = 子公司的对手方编号
+        sub_cp = f"CP900{int(sub_code[-1])}"  # ENT002 → CP9002
+        dep_row = dep_by_customer.get(sub_cp)
+        if dep_row is None:
+            all_match = False
+            details.append(f"对 {pair_index + 1}：找不到存款腿（customer_id={sub_cp}）")
+            continue
+        dep_principal = float(dep_row["principal_amount"])
+        dep_entity_ok = dep_row["entity_code"] == parent_code
+
+        # 贷款腿：子公司账上，borrower_id = 母公司的对手方编号 CP9001
+        loan_id = f"ICA-L-{pair_index:06d}"
+        loan_row = loan_by_id.get(loan_id)
+        if loan_row is None:
+            all_match = False
+            details.append(f"对 {pair_index + 1}：找不到贷款腿（source_record_id={loan_id}）")
+            continue
+        loan_outstanding = float(loan_row["outstanding_amount"])
+        loan_entity_ok = loan_row["entity_code"] == sub_code
+        loan_cp_ok = loan_row["borrower_id"] == "CP9001"
+
+        amounts_equal = abs(dep_principal - loan_outstanding) < 0.01
+        amount_ok = abs(dep_principal - expected_amount) < 0.01
+
+        if not (dep_entity_ok and loan_entity_ok and loan_cp_ok and amounts_equal and amount_ok):
+            all_match = False
+            details.append(
+                f"对 {pair_index + 1} ({parent_code}↔{sub_code}, 预期 {expected_amount}): "
+                f"存款腿 entity={dep_row['entity_code']}({'OK' if dep_entity_ok else 'BAD'}), "
+                f"贷款腿 entity={loan_row['entity_code']}({'OK' if loan_entity_ok else 'BAD'}), "
+                f"loan_cp={'OK' if loan_cp_ok else 'BAD'}, "
+                f"dep_principal={dep_principal}, loan_outstanding={loan_outstanding}, "
+                f"金额相等={'YES' if amounts_equal else 'NO'}"
+            )
+
+    results.append(
+        CheckResult(
+            name="内部往来配对自检",
+            passed=all_match,
+            detail="全部匹配" if all_match else f"{len(details)} 处不匹配：{details[0] if details else ''}",
         )
+    )
     return results
 
 
@@ -351,6 +463,7 @@ def run_checks(
     results.extend(check_date_ordering(output_dir))
     results.extend(check_amount_signs(output_dir))
     results.extend(check_gl_balanced(output_dir, valid_dates))
+    results.extend(check_intracompany_pairs(output_dir))
     return results
 
 
@@ -372,7 +485,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--gl-break-amount",
         type=float,
         default=0.0,
-        help="让总账故意少记这么多（USD），供合规剧本演示对账阻断；默认 0 表示严格平衡",
+        help="让 ENT002 的 2100 科目（贷款）故意少记这么多（USD），供合规剧本演示对账阻断；默认 0 表示严格平衡",
     )
     parser.add_argument(
         "--correct-deposit-record",

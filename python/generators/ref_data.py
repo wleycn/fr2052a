@@ -6,6 +6,8 @@ REF 是本批数据的字典：ODS 中出现的法人实体、交易对手、币
 汇率契约：ref_exchange_rates 是全量币种来源，ref.currencies 由它派生。
 ODS 各表的币种只能取汇率表里有的；两者不一致即数据缺陷，
 由 generate_sample_data.py 自检与 dbt/tests/assert_fx_covered.sql 共同守住。
+
+[AI-GENERATED] model=qianfan-code-latest date=2026-09-18 reviewed_by=pending
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from .config import (
     CALENDAR_END,
     CALENDAR_START,
     REPORT_DATE,
+    TRADING_ENTITIES,
     table_rng,
     write_csv,
 )
@@ -121,8 +124,8 @@ ENTITY_ROWS: list[tuple[str, str, str, str, int, str, str, bool, str, bool, str,
     ),
 ]
 
-# 承接业务的实体（母公司不直接记账）
-TRADING_ENTITIES = ("ENT002", "ENT003", "ENT004", "ENT005")
+# 承接业务的实体（母公司不直接记账）——此常量已移至 config.py，此处从 config 导入。
+# 承接业务记账实体与全部记账实体（含母公司）的定义都在 config.py，保持单一来源。
 
 MATURITY_BUCKET_ROWS = [
     ("O/N", "Overnight", 0, 0, 1, 1),
@@ -443,6 +446,10 @@ class ReferenceData:
     trading_entities: list[str] = field(default_factory=list)
     counterparties: list[str] = field(default_factory=list)
     counterparty_types: dict[str, str] = field(default_factory=dict)
+    # 集团内对手方映射：法人实体码 → 对手方编号（CP9001 ↔ ENT001，依此类推）
+    affiliate_by_entity: dict[str, str] = field(default_factory=dict)
+    # 集团内对手方编号清单（counterparties 只放外部对手方，见 _generate_counterparty 的说明）
+    affiliate_counterparties: list[str] = field(default_factory=list)
     currencies: list[str] = field(default_factory=list)
     spot_rates: dict[str, float] = field(default_factory=dict)
     business_dates: list[str] = field(default_factory=list)
@@ -498,6 +505,31 @@ def _generate_counterparty(ref_dir: Path, ref: ReferenceData) -> None:
         )
         ref.counterparty_types[counterparty_id] = counterparty_type
 
+    # 追加集团内实体作为对手方（CP9001 ↔ ENT001，依此类推）。
+    # lei_code 取该实体在 ref_entity_hierarchy 里的同一个 LEI（全局法人标识，两表同源）。
+    # credit_rating 与 industry_code 给固定值，是演示假设。
+    affiliate_credit_rating = "AA"
+    affiliate_industry_code = "6010"
+    for entity_index, entity_row in enumerate(ENTITY_ROWS, start=1):
+        entity_code = entity_row[0]
+        entity_name = entity_row[1]
+        entity_lei = entity_row[2]
+        entity_jurisdiction = entity_row[5]
+        cp_id = f"CP900{entity_index}"
+        rows.append(
+            [
+                cp_id,
+                entity_name,
+                entity_lei,
+                "AFFILIATE",
+                entity_jurisdiction,
+                affiliate_credit_rating,
+                affiliate_industry_code,
+            ]
+        )
+        ref.counterparty_types[cp_id] = "AFFILIATE"
+        ref.affiliate_by_entity[entity_code] = cp_id
+
     header = [
         "counterparty_id",
         "counterparty_name",
@@ -508,7 +540,12 @@ def _generate_counterparty(ref_dir: Path, ref: ReferenceData) -> None:
         "industry_code",
     ]
     ref.row_counts["ref_counterparty"] = write_csv(ref_dir / "ref_counterparty.csv", header, rows)
-    ref.counterparties = [row[0] for row in rows]
+
+    # 随机抽取池只放**外部**对手方：集团内对手方只在刻意构造的内部往来配对腿里出现。
+    # 若把它们混进随机池，数据里会出现「只存在一条腿」的内部头寸（例如一笔对母公司的回购，
+    # 却没有对应的另一腿），合并抵销就会只抵掉一边、把差额留在合并口径里 —— 抵销必须成对。
+    ref.counterparties = [row[0] for row in rows if row[3] != "AFFILIATE"]
+    ref.affiliate_counterparties = [row[0] for row in rows if row[3] == "AFFILIATE"]
 
 
 def _generate_maturity_bucket(ref_dir: Path, ref: ReferenceData) -> None:

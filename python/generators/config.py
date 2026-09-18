@@ -1,6 +1,8 @@
 """FR 2052a 演示数据生成器 —— 共用配置与工具。
 
 本模块只放常量与通用 IO 帮助函数，不含业务逻辑。
+
+[AI-GENERATED] model=qianfan-code-latest date=2026-09-18 reviewed_by=pending
 """
 
 from __future__ import annotations
@@ -28,20 +30,53 @@ RANDOM_SEED = 42
 
 BATCH_ID = "BATCH-20260916-001"
 
-# 各表行数（演示规模，与 [97] 方案一致）
+# 各表行数（演示规模，与 [97] 方案一致）。
+# ods_gl_balances 的行数由 GL_ROWS_PER_ACCOUNT × len(GL_ACCOUNTS) × len(BOOKING_ENTITIES) 派生，
+# 不在此硬编码——改实体数或科目数时行数自动跟上。这里保留键占位，值在 generate_sample_data.py 里派生填充。
 VOLUMES: dict[str, int] = {
     "ods_deposits": 500,
     "ods_repo_transactions": 200,
     "ods_loans": 300,
     "ods_securities": 200,
     "ods_derivatives": 150,
-    "ods_gl_balances": 55,
+    "ods_gl_balances": 0,  # 派生填充，见上注释
     "ods_off_bs_commitments": 100,
 }
 
+# 承接业务记账的法人实体。母公司 ENT001 现在也记账（母公司单体口径需要数据），
+# 但既有四家子公司的生成逻辑一行不改——母公司单独追加。
+TRADING_ENTITIES = ("ENT002", "ENT003", "ENT004", "ENT005")
+PARENT_ENTITY = "ENT001"
+BOOKING_ENTITIES = ("ENT001", "ENT002", "ENT003", "ENT004", "ENT005")
+
+# 母公司各表追加行数（小账，显著小于子公司配额）。演示假设。
+PARENT_VOLUMES: dict[str, int] = {
+    "ods_deposits": 40,
+    "ods_repo_transactions": 10,
+    "ods_loans": 25,
+    "ods_securities": 20,
+    "ods_derivatives": 10,
+    "ods_off_bs_commitments": 10,
+    # ods_gl_balances 不在此列：总账行数由 BOOKING_ENTITIES × GL_ACCOUNTS × GL_ROWS_PER_ACCOUNT 派生
+}
+
+# 母公司是小账：金额类字段的抽取区间上限乘以这个系数。演示假设。
+PARENT_AMOUNT_SCALE = 0.08
+
+# 集团内往来配对排期：(母公司码, 子公司码, 固定金额 USD)。
+# 金额取整十万级、各不相同，且两条腿共用同一常量——因此天然相等，不是两边各抽随机数碰巧相等。
+INTRACOMPANY_PAIRS: tuple[tuple[str, str, float], ...] = (
+    (PARENT_ENTITY, "ENT002", 3_000_000),
+    (PARENT_ENTITY, "ENT003", 1_200_000),
+    (PARENT_ENTITY, "ENT004", 2_500_000),
+    (PARENT_ENTITY, "ENT005", 800_000),
+)
+
 # 各法人实体的记账币种权重：伦敦分行以英镑为主、东京分行以日元为主，
 # 保证后续汇率折算与合并报表口径不是空跑。
+# 母公司 ENT001 以美元为主（美国控股公司，大部分本币记账）。
 ENTITY_CURRENCY_WEIGHTS: dict[str, dict[str, float]] = {
+    "ENT001": {"USD": 0.85, "EUR": 0.08, "GBP": 0.04, "JPY": 0.03},
     "ENT002": {"USD": 0.70, "EUR": 0.10, "GBP": 0.08, "JPY": 0.05, "CNY": 0.04, "HKD": 0.03},
     "ENT003": {"USD": 0.80, "EUR": 0.08, "GBP": 0.06, "JPY": 0.04, "CHF": 0.02},
     "ENT004": {"GBP": 0.50, "USD": 0.25, "EUR": 0.20, "CHF": 0.05},

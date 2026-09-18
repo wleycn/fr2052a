@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS ref.ref_counterparty (
     counterparty_id STRING COMMENT '交易对手编号',
     counterparty_name STRING COMMENT '交易对手名称',
     lei_code STRING COMMENT 'LEI 代码',
-    counterparty_type STRING COMMENT '交易对手类型：BANK/BROKER/CORPORATE/SOVEREIGN/CENTRAL_BANK',
+    counterparty_type STRING COMMENT '交易对手类型：BANK/BROKER/CORPORATE/SOVEREIGN/CENTRAL_BANK/AFFILIATE',
     country_code STRING COMMENT '国家/地区代码',
     credit_rating STRING COMMENT '信用评级',
     industry_code STRING COMMENT '行业代码'

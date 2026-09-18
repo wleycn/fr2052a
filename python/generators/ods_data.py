@@ -13,6 +13,8 @@
 多期能力：generate_all 接受 report_dates 列表，逐期生成各表。
 每期用 ods_rng(table_name, report_date) 派生独立随机源，
 保证同一报告日的数据与共生成了几期无关 —— 加期不扰动已有期。
+
+[AI-GENERATED] model=qianfan-code-latest date=2026-09-18 reviewed_by=pending
 """
 
 from __future__ import annotations
@@ -27,10 +29,15 @@ from pathlib import Path
 
 from .config import (
     BATCH_ID,
+    BOOKING_ENTITIES,
     ENTITY_CURRENCY_WEIGHTS,
+    INTRACOMPANY_PAIRS,
     ODS_COLUMNS_HEAD,
     ODS_COLUMNS_TAIL,
     ODS_SOURCE_FILES,
+    PARENT_AMOUNT_SCALE,
+    PARENT_ENTITY,
+    PARENT_VOLUMES,
     REPORT_DATE,
     VOLUMES,
     ods_rng,
@@ -86,7 +93,6 @@ GL_ACCOUNTS: tuple[tuple[str, str, str], ...] = (
     ("5001", "Shareholders Equity", "CREDIT"),
 )
 GL_ROWS_PER_ACCOUNT = 5
-GL_ENTITY = "ENT001"
 
 # 现金与同业存放没有对应的业务明细表，按存款余额的一个比例设定（演示假设）
 CASH_TO_DEPOSIT_RATIO = 0.08
@@ -449,16 +455,18 @@ def _read_ods_rows(ods_dir: Path, table_name: str, report_date: date | None = No
 
 def generate_gl_balances(
     ods_dir: Path,
+    ref: ReferenceData,
     report_date: date,
     gl_break_amount: float = 0.0,
     append: bool = False,
 ) -> int:
-    """集团总账余额：由业务明细倒推，而不是独立随机生成。
+    """逐实体一本账：对每个 BOOKING_ENTITIES 各生成一组科目余额，各自借贷平衡。
 
-    为什么必须倒推：GL 对账是把总账余额与报送口径逐科目比对，若总账是另一套随机数字，
-    对账永远不平，这个环节就只是个摆设。
+    为什么从「一本总账挂在 ENT001」改为逐实体：旧实现整本总账挂在母公司名下、
+    却由全部实体的明细倒推，导致总账里的现金（Section E）无法归属到任何法人实体。
+    逐实体记账后，每个实体的 Section E 都有自己的现金行。
 
-    倒推关系：
+    倒推关系（与旧实现一致，只是按实体过滤明细）：
         资产  1001 现金、1100 同业存放（按存款余额比例设定，属演示假设）
               1200 证券、1300 逆回购、1500 衍生品资产、2100 贷款
         负债  2001/2002 存款、2010 正回购、2200 衍生品负债
@@ -466,16 +474,26 @@ def generate_gl_balances(
 
     资产负债表本就是"资产 = 负债 + 权益"，权益作轧差后借贷天然相等。
 
-    gl_break_amount 给正值时故意让贷款科目（2100）少记这么多（USD），制造受控的分科目缺口：
-    总账整体借贷仍然平衡（权益是轧差项，替它吸收），但 2100 科目余额小于贷款明细合计，
-    与 Section F 对不上，供合规剧本演示 GL 对账阻断。
+    gl_break_amount 给正值时故意让 ENT002 的 2100 科目少记这么多（USD），制造受控缺口：
+    总账整体借贷仍然平衡（权益是轧差项，替它吸收），但 ENT002 的 2100 科目余额
+    小于该实体贷款明细合计，与 Section F 对不上，供合规剧本演示 GL 对账阻断。
 
     为什么缺口落在科目侧而不是权益侧：权益不参与任何 Section 对账，
-    少记权益只会让「资产 = 负债 + 权益」不成立，而分科目对账照旧全 PASS ——
-    剧本里什么都抓不到。异常要造在能被判据碰到的地方。
+    少记权益只会让「资产 = 负债 + 权益」不成立，而分科目对账照旧全 PASS。
+    异常要造在能被判据碰到的地方。
 
     本函数按单个报告日生成总账：只读该期的业务明细来倒推该期余额，
     因此多期数据下每期总账各自平衡，不会把两期的借贷混在一起算。
+
+    Args:
+        ods_dir: ODS 输出目录。
+        ref: 引用数据（用于 affiliate_by_entity 识别内部往来存款腿）。
+        report_date: 该期的报告日。
+        gl_break_amount: 总账故意少记的金额，落在 ENT002 的 2100 科目。
+        append: 追加模式。
+
+    Returns:
+        本次写入的总账行数。
     """
     rng = ods_rng("ods_gl_balances", report_date)
     clock = EventClock(report_date)
@@ -486,70 +504,90 @@ def generate_gl_balances(
     securities = _read_ods_rows(ods_dir, "ods_securities", report_date)
     derivatives = _read_ods_rows(ods_dir, "ods_derivatives", report_date)
 
-    demand_deposits = round(
-        sum(_amount_usd(row, "principal_amount") for row in deposits if row["deposit_type"] in ("CHK", "SAV", "MMDA")),
-        2,
-    )
-    time_deposits = round(
-        sum(_amount_usd(row, "principal_amount") for row in deposits if row["deposit_type"] in ("CD", "TIME")), 2
-    )
-    total_deposits = round(demand_deposits + time_deposits, 2)
+    all_rows: list[list[object]] = []
+    row_index = 0
 
-    balances = {
-        "1001": round(total_deposits * CASH_TO_DEPOSIT_RATIO, 2),
-        "1100": round(total_deposits * DUE_FROM_BANKS_TO_DEPOSIT_RATIO, 2),
-        "1200": round(sum(_amount_usd(row, "market_value") for row in securities), 2),
-        "1300": round(sum(_amount_usd(row, "cash_amount") for row in repo if row["repo_type"] == "REVERSE_REPO"), 2),
-        "1500": round(
-            sum(_amount_usd(row, "mark_to_market") for row in derivatives if float(row["mark_to_market"]) > 0), 2
-        ),
-        # 演示缺口落在贷款科目：它是 Section F 的对账对象，动它才能被分科目对账抓到。
-        "2100": round(sum(_amount_usd(row, "outstanding_amount") for row in loans) - gl_break_amount, 2),
-        "2001": demand_deposits,
-        "2002": time_deposits,
-        "2010": round(sum(_amount_usd(row, "cash_amount") for row in repo if row["repo_type"] == "REPO"), 2),
-        "2200": round(
-            -sum(_amount_usd(row, "mark_to_market") for row in derivatives if float(row["mark_to_market"]) < 0), 2
-        ),
-    }
+    for entity_code in BOOKING_ENTITIES:
+        # 按实体过滤明细：该实体自己的业务倒推该实体的总账
+        dep_entity = [row for row in deposits if row["entity_code"] == entity_code]
+        repo_entity = [row for row in repo if row["entity_code"] == entity_code]
+        loans_entity = [row for row in loans if row["entity_code"] == entity_code]
+        sec_entity = [row for row in securities if row["entity_code"] == entity_code]
+        deriv_entity = [row for row in derivatives if row["entity_code"] == entity_code]
 
-    assets = round(sum(balances[account] for account, _, side in GL_ACCOUNTS if side == "DEBIT"), 2)
-    # 权益尚未入表（它是下面的轧差项），因此只累加已算出的负债科目
-    liabilities = round(
-        sum(balances[account] for account, _, side in GL_ACCOUNTS if side == "CREDIT" and account in balances), 2
-    )
-    # 权益仍是轧差项：缺口留在科目侧，总账借贷因此仍然平衡。
-    equity = round(assets - liabilities, 2)
-    if equity < 0:
-        raise ValueError(f"倒推出的权益为负（{equity}），请检查业务明细规模与现金比例假设")
-    balances["5001"] = equity
+        demand_deposits = round(
+            sum(
+                _amount_usd(row, "principal_amount")
+                for row in dep_entity
+                if row["deposit_type"] in ("CHK", "SAV", "MMDA")
+            ),
+            2,
+        )
+        time_deposits = round(
+            sum(_amount_usd(row, "principal_amount") for row in dep_entity if row["deposit_type"] in ("CD", "TIME")),
+            2,
+        )
+        total_deposits = round(demand_deposits + time_deposits, 2)
 
-    ledger: list[GlEntry] = []
-    for account_id, account_name, normal_side in GL_ACCOUNTS:
-        for amount in _split_amount(rng, balances[account_id], GL_ROWS_PER_ACCOUNT):
-            ledger.append(
-                GlEntry(
+        balances = {
+            "1001": round(total_deposits * CASH_TO_DEPOSIT_RATIO, 2),
+            "1100": round(total_deposits * DUE_FROM_BANKS_TO_DEPOSIT_RATIO, 2),
+            "1200": round(sum(_amount_usd(row, "market_value") for row in sec_entity), 2),
+            "1300": round(
+                sum(_amount_usd(row, "cash_amount") for row in repo_entity if row["repo_type"] == "REVERSE_REPO"), 2
+            ),
+            "1500": round(
+                sum(_amount_usd(row, "mark_to_market") for row in deriv_entity if float(row["mark_to_market"]) > 0), 2
+            ),
+            "2100": round(sum(_amount_usd(row, "outstanding_amount") for row in loans_entity), 2),
+            "2001": demand_deposits,
+            "2002": time_deposits,
+            "2010": round(sum(_amount_usd(row, "cash_amount") for row in repo_entity if row["repo_type"] == "REPO"), 2),
+            "2200": round(
+                -sum(_amount_usd(row, "mark_to_market") for row in deriv_entity if float(row["mark_to_market"]) < 0), 2
+            ),
+        }
+
+        # gl_break_amount 只落在 ENT002 的 2100 科目
+        if entity_code == "ENT002" and gl_break_amount > 0:
+            balances["2100"] = round(balances["2100"] - gl_break_amount, 2)
+
+        assets = round(sum(balances[account] for account, _, side in GL_ACCOUNTS if side == "DEBIT"), 2)
+        liabilities = round(
+            sum(balances[account] for account, _, side in GL_ACCOUNTS if side == "CREDIT" and account in balances), 2
+        )
+        equity = round(assets - liabilities, 2)
+        if equity < 0:
+            raise ValueError(f"倒推出的权益为负（实体 {entity_code}，权益 {equity}），请检查业务明细规模与现金比例假设")
+        balances["5001"] = equity
+
+        # 该实体没有业务的科目记 0（0 = 查过且确实为零）
+        for account_id, _, _ in GL_ACCOUNTS:
+            if account_id not in balances:
+                balances[account_id] = 0.0
+
+        for account_id, account_name, normal_side in GL_ACCOUNTS:
+            for amount in _split_amount(rng, balances[account_id], GL_ROWS_PER_ACCOUNT):
+                entry = GlEntry(
                     account_id=account_id,
                     account_name=account_name,
                     debit=amount if normal_side == "DEBIT" else 0.0,
                     credit=amount if normal_side == "CREDIT" else 0.0,
                 )
-            )
-
-    rows = [
-        _assemble(
-            "ods_gl_balances",
-            f"GL-{index:06d}",
-            GL_ENTITY,
-            [entry.account_id, entry.account_name, entry.debit, entry.credit, entry.currency],
-            clock.next(),
-            report_date,
-        )
-        for index, entry in enumerate(ledger, start=1)
-    ]
+                all_rows.append(
+                    _assemble(
+                        "ods_gl_balances",
+                        f"GL-{row_index:06d}",
+                        entity_code,
+                        [entry.account_id, entry.account_name, entry.debit, entry.credit, entry.currency],
+                        clock.next(),
+                        report_date,
+                    )
+                )
+                row_index += 1
 
     business_columns = ["gl_account_id", "account_name", "debit_balance", "credit_balance", "currency"]
-    return write_csv(ods_dir / "ods_gl_balances.csv", _header(business_columns), rows, append=append)
+    return write_csv(ods_dir / "ods_gl_balances.csv", _header(business_columns), all_rows, append=append)
 
 
 def generate_off_bs_commitments(ods_dir: Path, ref: ReferenceData, report_date: date, append: bool = False) -> int:
@@ -618,6 +656,414 @@ def apply_deposit_correction(ods_dir: Path, record_id: str, new_amount: float) -
         writer.writerows(rows)
 
 
+def generate_parent_deposits(ods_dir: Path, ref: ReferenceData, report_date: date, append: bool = False) -> int:
+    """母公司对第三方的存款（负债）：追加行，与子公司互不干扰。
+
+    母公司是小账：金额区间上限乘以 PARENT_AMOUNT_SCALE（演示假设）。
+    customer_type_raw 不取 AFFIL——那只有配对腿用。
+    """
+    rng = ods_rng("ods_deposits_parent", report_date)
+    clock = EventClock(report_date)
+    rows = []
+    for index in range(1, PARENT_VOLUMES["ods_deposits"] + 1):
+        currency = weighted_choice(rng, ENTITY_CURRENCY_WEIGHTS[PARENT_ENTITY])
+        if currency not in ref.spot_rates:
+            currency = "USD"
+        product_code = rng.choice(list(PRODUCT_DEPOSIT_TYPES))
+        deposit_type = PRODUCT_DEPOSIT_TYPES[product_code]
+        principal = round(rng.uniform(1_000, 5_000_000 * PARENT_AMOUNT_SCALE), 2)
+        interest_rate = round(rng.uniform(0.0005, 0.0525), 6)
+        accrued_interest = round(principal * interest_rate * rng.uniform(0.05, 1.0), 2)
+        maturity_date = _business_day_after(rng, report_date, 15, 400) if deposit_type in TERM_DEPOSIT_TYPES else ""
+
+        business = [
+            f"ACC-{rng.randint(100000, 999999)}",
+            f"CUST-{rng.randint(1000, 9999)}",
+            product_code,
+            deposit_type,
+            currency,
+            principal,
+            accrued_interest,
+            interest_rate,
+            _business_day_before(rng, report_date, 30, 3650),
+            maturity_date,
+            f"BR-{PARENT_ENTITY}",
+            rng.choice(CUSTOMER_TYPES),
+            rng.choice(("Y", "N")),
+        ]
+        rows.append(_assemble("ods_deposits", f"PDEP-{index:06d}", PARENT_ENTITY, business, clock.next(), report_date))
+
+    business_columns = [
+        "account_number",
+        "customer_id",
+        "product_code",
+        "deposit_type",
+        "currency",
+        "principal_amount",
+        "accrued_interest",
+        "interest_rate",
+        "open_date",
+        "maturity_date",
+        "branch_code",
+        "customer_type_raw",
+        "insured_flag",
+    ]
+    return write_csv(ods_dir / "ods_deposits.csv", _header(business_columns), rows, append=append)
+
+
+def generate_parent_repo(ods_dir: Path, ref: ReferenceData, report_date: date, append: bool = False) -> int:
+    """母公司对第三方的回购交易：追加行。"""
+    rng = ods_rng("ods_repo_parent", report_date)
+    clock = EventClock(report_date)
+    external_cps = [cp for cp in ref.counterparties if ref.counterparty_types.get(cp) != "AFFILIATE"]
+    rows = []
+    for index in range(1, PARENT_VOLUMES["ods_repo_transactions"] + 1):
+        currency = weighted_choice(rng, ENTITY_CURRENCY_WEIGHTS[PARENT_ENTITY])
+        if currency not in ref.spot_rates:
+            currency = "USD"
+        cash_amount = round(rng.uniform(100_000, 50_000_000 * PARENT_AMOUNT_SCALE), 2)
+        haircut_pct = round(rng.uniform(0.01, 0.10), 4)
+        collateral_market_value = round(cash_amount * (1 + haircut_pct + rng.uniform(0.0, 0.03)), 2)
+
+        business = [
+            f"RPO-{_token(rng)}",
+            rng.choice(external_cps),
+            rng.choice(("REPO", "REVERSE_REPO")),
+            currency,
+            cash_amount,
+            collateral_market_value,
+            haircut_pct,
+            round(rng.uniform(0.01, 0.08), 6),
+            _business_day_before(rng, report_date, 0, 60),
+            _business_day_after(rng, report_date, 1, 90),
+            f"US{rng.randint(1000000000, 9999999999)}",
+            rng.choice(COLLATERAL_TYPES),
+            f"GMRA-{_token(rng, 6)}",
+        ]
+        rows.append(
+            _assemble("ods_repo_transactions", f"PREPO-{index:06d}", PARENT_ENTITY, business, clock.next(), report_date)
+        )
+
+    business_columns = [
+        "deal_id",
+        "counterparty_id",
+        "repo_type",
+        "currency",
+        "cash_amount",
+        "collateral_market_value",
+        "haircut_pct",
+        "interest_rate",
+        "start_date",
+        "end_date",
+        "collateral_isin",
+        "collateral_type_raw",
+        "netting_agreement_id",
+    ]
+    return write_csv(ods_dir / "ods_repo_transactions.csv", _header(business_columns), rows, append=append)
+
+
+def generate_parent_loans(ods_dir: Path, ref: ReferenceData, report_date: date, append: bool = False) -> int:
+    """母公司对第三方的贷款：追加行。"""
+    rng = ods_rng("ods_loans_parent", report_date)
+    clock = EventClock(report_date)
+    external_cps = [cp for cp in ref.counterparties if ref.counterparty_types.get(cp) != "AFFILIATE"]
+    rows = []
+    for index in range(1, PARENT_VOLUMES["ods_loans"] + 1):
+        currency = weighted_choice(rng, ENTITY_CURRENCY_WEIGHTS[PARENT_ENTITY])
+        if currency not in ref.spot_rates:
+            currency = "USD"
+        facility_amount = round(rng.uniform(10_000, 20_000_000 * PARENT_AMOUNT_SCALE), 2)
+        outstanding_amount = round(facility_amount * rng.uniform(0.10, 0.95), 2)
+
+        business = [
+            f"LN-{_token(rng)}",
+            rng.choice(external_cps),
+            rng.choice(LOAN_TYPES),
+            facility_amount,
+            outstanding_amount,
+            round(facility_amount - outstanding_amount, 2),
+            currency,
+            round(rng.uniform(0.01, 0.12), 6),
+            rng.choice(("FIXED", "FLOAT")),
+            _business_day_before(rng, report_date, 90, 1500),
+            _business_day_after(rng, report_date, 1, 1800),
+            _business_day_after(rng, report_date, 1, 120),
+            rng.choice(("Y", "N")),
+            rng.choice(("CORP", "IND", "FI")),
+            rng.choice(CREDIT_RATINGS),
+        ]
+        rows.append(_assemble("ods_loans", f"PLOAN-{index:06d}", PARENT_ENTITY, business, clock.next(), report_date))
+
+    business_columns = [
+        "loan_id",
+        "borrower_id",
+        "loan_type",
+        "facility_amount",
+        "outstanding_amount",
+        "undrawn_amount",
+        "currency",
+        "interest_rate",
+        "rate_type",
+        "origination_date",
+        "maturity_date",
+        "next_payment_date",
+        "collateral_flag",
+        "borrower_type_raw",
+        "credit_grade_raw",
+    ]
+    return write_csv(ods_dir / "ods_loans.csv", _header(business_columns), rows, append=append)
+
+
+def generate_parent_securities(ods_dir: Path, ref: ReferenceData, report_date: date, append: bool = False) -> int:
+    """母公司的证券持仓：追加行。"""
+    rng = ods_rng("ods_securities_parent", report_date)
+    clock = EventClock(report_date)
+    external_cps = [cp for cp in ref.counterparties if ref.counterparty_types.get(cp) != "AFFILIATE"]
+    rows = []
+    for index in range(1, PARENT_VOLUMES["ods_securities"] + 1):
+        currency = weighted_choice(rng, ENTITY_CURRENCY_WEIGHTS[PARENT_ENTITY])
+        if currency not in ref.spot_rates:
+            currency = "USD"
+        face_amount = round(rng.uniform(100_000, 100_000_000 * PARENT_AMOUNT_SCALE), 2)
+
+        business = [
+            f"SEC-{_token(rng)}",
+            f"US{rng.randint(1000000000, 9999999999)}",
+            f"{rng.randint(100000000, 999999999)}",
+            weighted_choice(rng, SECURITY_TYPE_WEIGHTS),
+            rng.choice(PORTFOLIO_CODES),
+            rng.choice(external_cps),
+            currency,
+            face_amount,
+            round(face_amount * rng.uniform(0.95, 1.05), 2),
+            round(face_amount * rng.uniform(0.98, 1.02), 2),
+            round(rng.uniform(0.01, 0.08), 6),
+            _business_day_before(rng, report_date, 30, 1200),
+            _business_day_after(rng, report_date, 60, 3650),
+            rng.choice(("AAA", "AA", "A", "BBB")),
+            rng.choice(("Y", "N")),
+        ]
+        rows.append(
+            _assemble("ods_securities", f"PSEC-{index:06d}", PARENT_ENTITY, business, clock.next(), report_date)
+        )
+
+    business_columns = [
+        "security_id",
+        "isin",
+        "cusip",
+        "security_type",
+        "portfolio_code",
+        "issuer_id",
+        "currency",
+        "face_amount",
+        "market_value",
+        "book_value",
+        "coupon_rate",
+        "purchase_date",
+        "maturity_date",
+        "credit_rating_raw",
+        "pledged_flag",
+    ]
+    return write_csv(ods_dir / "ods_securities.csv", _header(business_columns), rows, append=append)
+
+
+def generate_parent_derivatives(ods_dir: Path, ref: ReferenceData, report_date: date, append: bool = False) -> int:
+    """母公司对第三方的衍生品交易：追加行。"""
+    rng = ods_rng("ods_derivatives_parent", report_date)
+    clock = EventClock(report_date)
+    external_cps = [cp for cp in ref.counterparties if ref.counterparty_types.get(cp) != "AFFILIATE"]
+    rows = []
+    for index in range(1, PARENT_VOLUMES["ods_derivatives"] + 1):
+        currency = weighted_choice(rng, ENTITY_CURRENCY_WEIGHTS[PARENT_ENTITY])
+        if currency not in ref.spot_rates:
+            currency = "USD"
+
+        business = [
+            f"TRD-{_token(rng)}",
+            rng.choice(external_cps),
+            rng.choice(INSTRUMENT_TYPES),
+            round(rng.uniform(1_000_000, 500_000_000 * PARENT_AMOUNT_SCALE), 2),
+            currency,
+            f"{currency}/USD",
+            _business_day_before(rng, report_date, 1, 60),
+            _business_day_after(rng, report_date, 30, 1800),
+            round(rng.uniform(-10_000_000, 10_000_000) * PARENT_AMOUNT_SCALE, 2),
+            "USD",
+            rng.choice(("Y", "N")),
+            f"CSA-{_token(rng, 6)}",
+            round(rng.uniform(0, 5_000_000) * PARENT_AMOUNT_SCALE, 2),
+            round(rng.uniform(0, 5_000_000) * PARENT_AMOUNT_SCALE, 2),
+        ]
+        rows.append(
+            _assemble("ods_derivatives", f"PDRV-{index:06d}", PARENT_ENTITY, business, clock.next(), report_date)
+        )
+
+    business_columns = [
+        "trade_id",
+        "counterparty_id",
+        "instrument_type",
+        "notional_amount",
+        "currency",
+        "currency_pair",
+        "trade_date",
+        "maturity_date",
+        "mark_to_market",
+        "mtm_currency",
+        "is_central_cleared",
+        "csa_agreement_id",
+        "collateral_posted",
+        "collateral_received",
+    ]
+    return write_csv(ods_dir / "ods_derivatives.csv", _header(business_columns), rows, append=append)
+
+
+def generate_parent_off_bs(ods_dir: Path, ref: ReferenceData, report_date: date, append: bool = False) -> int:
+    """母公司的表外承诺：追加行。"""
+    rng = ods_rng("ods_off_bs_parent", report_date)
+    clock = EventClock(report_date)
+    external_cps = [cp for cp in ref.counterparties if ref.counterparty_types.get(cp) != "AFFILIATE"]
+    rows = []
+    for index in range(1, PARENT_VOLUMES["ods_off_bs_commitments"] + 1):
+        currency = weighted_choice(rng, ENTITY_CURRENCY_WEIGHTS[PARENT_ENTITY])
+        if currency not in ref.spot_rates:
+            currency = "USD"
+        facility_amount = round(rng.uniform(100_000, 50_000_000 * PARENT_AMOUNT_SCALE), 2)
+
+        business = [
+            f"CMT-{_token(rng)}",
+            rng.choice(external_cps),
+            rng.choice(COMMITMENT_TYPES),
+            facility_amount,
+            round(facility_amount * rng.uniform(0.10, 0.90), 2),
+            currency,
+            _business_day_after(rng, report_date, 30, 720),
+        ]
+        rows.append(
+            _assemble(
+                "ods_off_bs_commitments",
+                f"POFFBS-{index:06d}",
+                PARENT_ENTITY,
+                business,
+                clock.next(),
+                report_date,
+            )
+        )
+
+    business_columns = [
+        "commitment_id",
+        "counterparty_id",
+        "commitment_type",
+        "facility_amount",
+        "undrawn_amount",
+        "currency",
+        "maturity_date",
+    ]
+    return write_csv(ods_dir / "ods_off_bs_commitments.csv", _header(business_columns), rows, append=append)
+
+
+def generate_intracompany_pairs(ods_dir: Path, ref: ReferenceData, report_date: date, append: bool = False) -> int:
+    """集团内往来的成对腿：每对生成存款腿（母公司负债）和贷款腿（子公司资产）。
+
+    两条腿的金额来自 INTRACOMPANY_PAIRS 里的同一个常量，因此天然相等。
+    不是两边各抽一个随机数碰巧相等。
+
+    存款腿：子公司在母公司的存款 → ods_deposits，entity_code=ENT001，
+    customer_id = 该子公司的集团内对手方编号，customer_type_raw='AFFIL'。
+    贷款腿：母公司对子公司的放款 → ods_loans，entity_code=该子公司，
+    counterparty_id=CP9001（母公司的集团内对手方编号），loan_type='COMMERCIAL'。
+
+    Returns:
+        本次写入的行数（存款腿 + 贷款腿合计）。
+    """
+    rng = ods_rng("ods_intracompany", report_date)
+    clock = EventClock(report_date)
+    parent_cp = ref.affiliate_by_entity[PARENT_ENTITY]
+
+    dep_rows: list[list[object]] = []
+    loan_rows: list[list[object]] = []
+
+    for pair_index, (parent_code, sub_code, amount) in enumerate(INTRACOMPANY_PAIRS):
+        sub_cp = ref.affiliate_by_entity[sub_code]
+
+        # 存款腿：母公司的负债（子公司在母公司存钱）
+        dep_business = [
+            f"ICA-DEP-{pair_index + 1:03d}",
+            sub_cp,  # customer_id = 子公司的集团内对手方编号
+            "CHK_INTRACOMPANY",
+            "CHK",
+            "USD",
+            amount,
+            0.0,
+            0.0,
+            _business_day_before(rng, report_date, 30, 365),
+            "",
+            f"BR-{parent_code}",
+            "AFFIL",
+            "N",
+        ]
+        dep_rows.append(
+            _assemble("ods_deposits", f"ICA-D-{pair_index:06d}", parent_code, dep_business, clock.next(), report_date)
+        )
+
+        # 贷款腿：母公司对子公司放款（子公司的资产）
+        loan_business = [
+            f"ICA-LOAN-{pair_index + 1:03d}",
+            parent_cp,  # counterparty_id = 母公司的集团内对手方编号
+            "COMMERCIAL",
+            amount,
+            amount,
+            0.0,
+            "USD",
+            round(rng.uniform(0.02, 0.08), 6),
+            "FIXED",
+            _business_day_before(rng, report_date, 90, 365),
+            _business_day_after(rng, report_date, 180, 1800),
+            _business_day_after(rng, report_date, 30, 90),
+            "N",
+            "FI",
+            "AA",
+        ]
+        loan_rows.append(
+            _assemble("ods_loans", f"ICA-L-{pair_index:06d}", sub_code, loan_business, clock.next(), report_date)
+        )
+
+    dep_columns = [
+        "account_number",
+        "customer_id",
+        "product_code",
+        "deposit_type",
+        "currency",
+        "principal_amount",
+        "accrued_interest",
+        "interest_rate",
+        "open_date",
+        "maturity_date",
+        "branch_code",
+        "customer_type_raw",
+        "insured_flag",
+    ]
+    loan_columns = [
+        "loan_id",
+        "borrower_id",
+        "loan_type",
+        "facility_amount",
+        "outstanding_amount",
+        "undrawn_amount",
+        "currency",
+        "interest_rate",
+        "rate_type",
+        "origination_date",
+        "maturity_date",
+        "next_payment_date",
+        "collateral_flag",
+        "borrower_type_raw",
+        "credit_grade_raw",
+    ]
+    dep_count = write_csv(ods_dir / "ods_deposits.csv", _header(dep_columns), dep_rows, append=append)
+    loan_count = write_csv(ods_dir / "ods_loans.csv", _header(loan_columns), loan_rows, append=append)
+    return dep_count + loan_count
+
+
 # 6 张业务明细表的生成器函数（不含总账，总账在存款修正之后生成）
 _BUSINESS_GENERATORS = [
     ("ods_deposits", generate_deposits),
@@ -626,6 +1072,16 @@ _BUSINESS_GENERATORS = [
     ("ods_securities", generate_securities),
     ("ods_derivatives", generate_derivatives),
     ("ods_off_bs_commitments", generate_off_bs_commitments),
+]
+
+# 母公司追加生成器：在子公司数据之后追加，不干扰既有行
+_PARENT_GENERATORS = [
+    ("ods_deposits", generate_parent_deposits),
+    ("ods_repo_transactions", generate_parent_repo),
+    ("ods_loans", generate_parent_loans),
+    ("ods_securities", generate_parent_securities),
+    ("ods_derivatives", generate_parent_derivatives),
+    ("ods_off_bs_commitments", generate_parent_off_bs),
 ]
 
 
@@ -638,6 +1094,13 @@ def generate_all(
 ) -> dict[str, int]:
     """生成全部 7 张 ODS 表，返回各表行数（各期行数之和）。
 
+    生成顺序（每期）：
+    1. 子公司业务明细（_BUSINESS_GENERATORS）—— 既有四家子公司，一行不改
+    2. 母公司追加业务（_PARENT_GENERATORS）—— 对第三方的存款/贷款/证券/衍生品/表外
+    3. 集团内往来配对腿（generate_intracompany_pairs）—— 存款腿 + 贷款腿
+    4. 存款修正（如有）
+    5. 总账逐实体倒推（generate_gl_balances）—— 每个 BOOKING_ENTITIES 各一本账
+
     多期生成：report_dates_list 给多个报告日时，按期顺序逐期生成各表。
     每期用 ods_rng(table_name, report_date) 派生独立随机源，
     保证加期不扰动已有期。返回的 counts 是各期合计。
@@ -647,7 +1110,7 @@ def generate_all(
     Args:
         ods_dir: ODS 输出目录。
         ref: 引用数据。
-        gl_break_amount: 总账故意少记的金额，用于演示对账阻断。
+        gl_break_amount: 总账故意少记的金额，落在 ENT002 的 2100 科目。
         correction: (record_id, new_amount) 或 None。
         report_dates_list: 报告日列表；None 时默认 [REPORT_DATE]
             （单期行为与改造前完全一致）。
@@ -668,14 +1131,23 @@ def generate_all(
     # 逐期生成：第一期覆盖建文件，后续期追加数据行（表头只出现一次）
     for i, rd in enumerate(report_dates_list):
         append = i > 0
+        # 1. 子公司业务明细
         for table_name, gen_func in _BUSINESS_GENERATORS:
             counts[table_name] += gen_func(ods_dir, ref, rd, append=append)
+        # 2. 母公司追加业务（对第三方）
+        for table_name, gen_func in _PARENT_GENERATORS:
+            counts[table_name] += gen_func(ods_dir, ref, rd, append=True)
+        # 3. 集团内往来配对腿（存款腿追加到 ods_deposits，贷款腿追加到 ods_loans）
+        pairs = len(INTRACOMPANY_PAIRS)
+        generate_intracompany_pairs(ods_dir, ref, rd, append=True)
+        counts["ods_deposits"] += pairs  # 存款腿行数
+        counts["ods_loans"] += pairs  # 贷款腿行数
 
     if correction is not None:
         apply_deposit_correction(ods_dir, correction[0], correction[1])
 
     # 总账在存款修正之后逐期生成，每期各自平衡
     for i, rd in enumerate(report_dates_list):
-        counts["ods_gl_balances"] += generate_gl_balances(ods_dir, rd, gl_break_amount, append=i > 0)
+        counts["ods_gl_balances"] += generate_gl_balances(ods_dir, ref, rd, gl_break_amount, append=i > 0)
 
     return counts
