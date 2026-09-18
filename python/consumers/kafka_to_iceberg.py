@@ -1,8 +1,11 @@
+# [AI-GENERATED] model=qianfan-code-latest date=2026-09-18 reviewed_by=pending
 r"""把 Kafka 各主题的 ODS 消息流入 Iceberg bronze 层。
 
 投递语义：Kafka 是至少一次，因此这里按主键做 MERGE 去重
-（source_system + source_record_id），重复消息不会把 bronze 层写重。
-这样重放生产者、重跑消费者都是幂等的，不需要删主题或清偏移量。
+（source_system + source_record_id + report_date），重复消息不会把 bronze 层写重。
+同一源记录在不同报告日是两条独立记录，报告日必须参与匹配，否则后一个报告日
+的消息会把前一个报告日的行原地改写。这样重放生产者、重跑消费者都是幂等的，
+不需要删主题或清偏移量。
 
 批次切分：用 trigger(availableNow=True)，把积压消息一口气消费完即退出，
 行为可预期、可验证；改成连续消费只需去掉这个 trigger。
@@ -36,6 +39,7 @@ MERGE INTO {table} AS target
 USING staging AS source
 ON target.source_system = source.source_system
    AND target.source_record_id = source.source_record_id
+   AND target.report_date = source.report_date
 WHEN MATCHED THEN UPDATE SET *
 WHEN NOT MATCHED THEN INSERT *
 """
@@ -59,7 +63,8 @@ def upsert_batch(batch: DataFrame, batch_id: int, table: str) -> None:
     MERGE_CARDINALITY_VIOLATION 直接失败。实测踩过：样本数据重放几轮之后跑批红在
     bronze 这一环，而报错只说"匹配到多行"，看不出根因是重放。
 
-    去重取同一主键里 Kafka 偏移量最大的那条：偏移量大的后写入，是较新的一版。
+    去重取同一主键（source_system + source_record_id + report_date）里 Kafka 偏移量
+    最大的那条：偏移量大的后写入，是较新的一版。
     """
     if batch.isEmpty():
         return
@@ -81,7 +86,9 @@ def upsert_batch(batch: DataFrame, batch_id: int, table: str) -> None:
         SELECT {", ".join(columns)}
         FROM (
             SELECT *, row_number() OVER (
-                PARTITION BY source_system, source_record_id ORDER BY _kafka_offset DESC
+                -- 同一批里同一源记录可能带不同报告日，只按两列去重会把它们合并成
+                -- 一行、丢掉一天的数据，因此去重窗口也含 report_date
+                PARTITION BY source_system, source_record_id, report_date ORDER BY _kafka_offset DESC
             ) AS _rank
             FROM staging_raw
         )

@@ -10,11 +10,11 @@
 
 ## 粒度
 
-一行 = 一笔事件（`source_topic` + `source_record_id`）。
+一行 = 一笔事件（`source_topic` + `source_record_id` + `report_date`）。
 
 ## 业务主键
 
-`event_id` 主键；业务键为 `source_topic` + `source_record_id`。
+`event_id` 主键；业务键为 `source_topic` + `source_record_id` + `report_date`。
 
 ## 去重方式
 
@@ -29,7 +29,7 @@
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `event_id` | TEXT PRIMARY KEY | 事件唯一键：源记录 + 报告日 + 规则 的哈希 |
-| `report_date` | DATE NOT NULL | 报告日 |
+| `report_date` | DATE NOT NULL | 取自消息里的报告日 |
 | `entity_code` | TEXT NOT NULL | 记账法人实体 |
 | `alert_code` | TEXT NOT NULL | 规则编码 |
 | `severity` | TEXT NOT NULL | CRITICAL / WARNING / INFO |

@@ -14,11 +14,11 @@ Bronze（源系统接入，Iceberg `bronze` 命名空间）
 
 ## 业务主键
 
-`source_system` + `source_record_id`（源系统记录主键）。
+`source_system` + `source_record_id` + `report_date`（源系统记录主键 + 报告日）。
 
 ## 去重方式
 
-入湖按主键 MERGE 去重（`python/consumers/kafka_to_iceberg.py`）：同一批次内按 Kafka offset 取最新一条，重放同一条消息不产生第二行。
+入湖按主键 MERGE 去重（`python/consumers/kafka_to_iceberg.py`）：主键含 report_date，同一源记录在不同报告日是两条独立记录；同一批次内按 Kafka offset 取最新一条，重放同一条消息不产生第二行。
 
 ## 分区
 

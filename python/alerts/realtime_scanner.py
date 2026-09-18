@@ -30,11 +30,22 @@
     为什么不用 psycopg2：本作业跑在 Spark 容器里，容器内没有 psycopg2；
     而实时写入本来就没有 upsert 语义（每笔事件都该独立留痕），JDBC 追加正合适。
 
+    事件表的主键列是事件标识列，写入方式是追加。重复写入会撞主键让作业失败，
+    这是有意的：宁可红，也不重复报。
+    撞主键要两个条件同时成立：
+    ① 事件表里的旧行还在（没被清掉）；
+    ② 消息被重读一次（重投、清 checkpoint、重置作业）。
+    因此重跑必须走完整复位：deploy/reset-demo.sh 会同时清 Kafka 主题内容与消费位点；
+    只清其中一个必然冲突。
+    删掉 checkpoint 会让作业从头重放，而事件表主键会拦下重复写入并让作业失败。
+
+    事件标识列里的报告日取自消息体里的 report_date 字段，而不是命令行 --report-date。
+    这样同一笔敞口跨报告日会算出不同的事件标识，不会因为命令行日期相同而撞主键。
+    --report-date 保留用于日志和汇总，以及「消息报告日与本次运行报告日不一致」的计数提示。
+
 配套：checkpoint 目录记录 Kafka 消费位点，且必须同时挂到 spark-master 与 spark-worker。
       执行器侧要写状态存储，只挂驱动侧时会在执行器上报
       「mkdir of file:/opt/fr2052a-checkpoints/... failed」，看着像权限问题，实为挂载缺失。
-      删掉 checkpoint 会让作业从头重放，而事件表主键会拦下重复写入并让作业失败 ——
-      这是有意的：宁可红，也不重复报。
 
 运行（Server 2，经 spark-submit 包装脚本执行）：
     bash spark-submit-fr2052a.sh /opt/fr2052a-app/python/alerts/realtime_scanner.py \
@@ -125,11 +136,11 @@ def detect(frame: DataFrame, report_date: str, threshold: float) -> DataFrame:
                     "|",
                     F.lit(ALERT_CODE),
                     F.col("source_record_id"),
-                    F.lit(report_date),
+                    F.col("report_date"),
                 )
             ),
         )
-        .withColumn("report_date", F.to_date(F.lit(report_date)))
+        .withColumn("report_date", F.to_date(F.col("report_date")))
         .withColumn("alert_code", F.lit(ALERT_CODE))
         .withColumn("severity", F.lit("WARNING"))
         .withColumn("source_topic", F.lit(SOURCE_TOPIC))
@@ -217,6 +228,10 @@ def main() -> int:
         print(f"  批次 {batch_id}：写入 {len(rows)} 条敞口预警")
         for row in rows[:5]:
             print(f"    {row['entity_code']}  {row['amount_usd']:>16,.2f}  {row['source_record_id']}")
+        # 消息报告日与本次运行报告日不一致的计数提示：只打印，不让作业失败
+        mismatched = batch.filter(F.col("report_date") != F.lit(args.report_date)).count()
+        if mismatched:
+            print(f"    提示：本批 {mismatched} 条消息的报告日与运行参数 --report-date {args.report_date} 不一致")
         # 同时发到告警主题，供告警平台订阅
         candidates.select(
             F.to_json(F.struct(*[F.col(name) for name in candidates.columns])).alias("value")
