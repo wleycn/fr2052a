@@ -14,6 +14,7 @@ with deposit_runoff as (
     select
         d.report_date,
         d.entity_code,
+        d.is_intracompany,
         'C' as section_code,
         'C-OUT' as line_item,
         d.maturity_bucket,
@@ -23,7 +24,7 @@ with deposit_runoff as (
     left join {{ source('ref', 'ref_behavior_assumptions') }} a
         on a.product_category = d.product_category
        and a.maturity_bucket = d.maturity_bucket
-    group by d.report_date, d.entity_code, d.maturity_bucket
+    group by d.report_date, d.entity_code, d.is_intracompany, d.maturity_bucket
 
 ),
 
@@ -32,6 +33,7 @@ repo_maturity as (
     select
         r.report_date,
         r.entity_code,
+        r.is_intracompany,
         'B' as section_code,
         'B-OUT' as line_item,
         r.maturity_bucket,
@@ -39,7 +41,7 @@ repo_maturity as (
         round(sum(r.cash_amount_usd), 2) as expected_outflow_usd
     from {{ ref('owd_secured_financing') }} r
     where r.transaction_type = 'REPO'
-    group by r.report_date, r.entity_code, r.maturity_bucket
+    group by r.report_date, r.entity_code, r.is_intracompany, r.maturity_bucket
 
 ),
 
@@ -48,13 +50,14 @@ loan_maturity as (
     select
         l.report_date,
         l.entity_code,
+        l.is_intracompany,
         'F' as section_code,
         'F-IN' as line_item,
         l.maturity_bucket,
         round(sum(l.outstanding_usd), 2) as expected_inflow_usd,
         cast(0 as decimal(20, 2)) as expected_outflow_usd
     from {{ ref('owd_loans') }} l
-    group by l.report_date, l.entity_code, l.maturity_bucket
+    group by l.report_date, l.entity_code, l.is_intracompany, l.maturity_bucket
 
 ),
 
@@ -63,6 +66,7 @@ security_maturity as (
     select
         s.report_date,
         s.entity_code,
+        s.is_intracompany,
         'G' as section_code,
         'G-IN' as line_item,
         s.maturity_bucket,
@@ -70,7 +74,7 @@ security_maturity as (
         cast(0 as decimal(20, 2)) as expected_outflow_usd
     from {{ ref('owd_securities') }} s
     where not s.is_encumbered
-    group by s.report_date, s.entity_code, s.maturity_bucket
+    group by s.report_date, s.entity_code, s.is_intracompany, s.maturity_bucket
 
 ),
 
@@ -89,6 +93,7 @@ combined as (
 select
     report_date,
     entity_code,
+    is_intracompany,
     section_code,
     line_item,
     maturity_bucket,
@@ -96,5 +101,7 @@ select
     round(sum(expected_outflow_usd), 2) as expected_outflow_usd,
     round(sum(expected_inflow_usd) - sum(expected_outflow_usd), 2) as net_cash_flow_usd
 
+-- is_intracompany 是分组维度：合并口径要能把集团内往来从现金流预测里同样剔除，
+-- 否则会出现「Section C 抵销了、Section K 没抵销」的单边不一致。
 from combined
-group by report_date, entity_code, section_code, line_item, maturity_bucket
+group by report_date, entity_code, is_intracompany, section_code, line_item, maturity_bucket

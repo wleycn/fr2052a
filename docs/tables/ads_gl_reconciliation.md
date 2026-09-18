@@ -10,11 +10,11 @@ Gold（Iceberg）与 ADS（PostgreSQL）同一份数据的两个落点
 
 ## 粒度
 
-一行 = 一个 Section 在一个报告日的一个总账科目。
+一行 = 报告期 × 视角 × Section。视角由 `entity_code` 区分：`GRP001` 为全球合并，其余为法人实体单体。
 
 ## 业务主键
 
-`report_date` + `section_code` + `gl_account_id`。
+`report_date` + `entity_code` + `section_code` + `gl_account_id`。
 
 ## 去重方式
 
@@ -29,6 +29,7 @@ dbt `table` 物化整表重建；导出 PostgreSQL 时先清后写。
 | 字段 |
 |---|
 | `report_date` |
+| `entity_code` |
 | `section_code` |
 | `gl_account_id` |
 | `account_name` |

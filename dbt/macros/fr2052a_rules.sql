@@ -50,8 +50,16 @@
         when {{ customer_type_expr }} = 'CORP' then 'CORPORATE'
         when {{ customer_type_expr }} = 'FI' then 'FINANCIAL'
         when {{ customer_type_expr }} = 'GOV' then 'SOVEREIGN'
+        when {{ customer_type_expr }} = 'AFFIL' then 'AFFILIATE'
         else 'OTHER'
     end
+{%- endmacro %}
+
+
+{#- 集团内往来标记：交易对手类型为 AFFILIATE 即集团内实体。
+    判据只在这一处定义，六张 OWD 表共用同一份实现，避免各写一遍导致口径漂移。 -#}
+{% macro is_affiliate_counterparty(counterparty_type_expr) -%}
+    case when {{ counterparty_type_expr }} = 'AFFILIATE' then true else false end
 {%- endmacro %}
 
 

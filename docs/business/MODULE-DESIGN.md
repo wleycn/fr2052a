@@ -30,8 +30,9 @@
 | `maturity_bucket` | `days_expr` | `VARCHAR`（`O/N`、`1-7D`……）| 到期分桶 |
 | `hqla_level` | `security_type_expr, rating_expr` | `LEVEL_1` / `LEVEL_2A` / `LEVEL_2B` / `NON_HQLA` | HQLA 分类 |
 | `hqla_haircut` | `hqla_level_expr` | 折扣率（小数）| 按分级给折扣 |
-| `customer_segment` | `customer_type_expr` | `VARCHAR` | 客户细分归一 |
+| `customer_segment` | `customer_type_expr` | `VARCHAR` | 客户细分归一（含 `AFFIL` → `AFFILIATE`） |
 | `deposit_product_category` | `deposit_type_expr` | `VARCHAR` | 存款产品归类 |
+| `is_affiliate_counterparty` | `counterparty_type_expr` | `BOOLEAN` | 集团内往来标记（`AFFILIATE` → `true`） |
 | `mask_pii` | `column_name` | `h_` + 16 位十六进制 | PII 脱敏，加盐 SHA-256，模板在 `dbt_project.yml` 的 `vars.pii_mask_template` |
 | `generate_schema_name` | `custom_schema_name, node` | `VARCHAR` | 决定模型落到哪个 schema |
 

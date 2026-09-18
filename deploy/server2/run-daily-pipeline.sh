@@ -96,6 +96,9 @@ declare -A STEP_DESC=(
 )
 
 
+# 注意：一个环节里有多条命令时，必须显式串联（`&&` 或 `|| return $?`）。
+# 本函数被 run_one 当 if 条件调用，而条件上下文里 `set -e` 对函数体不生效，
+# 于是「最后一条命令成功」就会把前面失败的命令盖过去。单条命令的环节不受影响。
 execute_step() {
   case "$1" in
     run-context-open)
@@ -126,8 +129,12 @@ execute_step() {
         --config "$APP_DIR/config/pipeline_topics.json"
       ;;
     dbt-run)
-      bash run-dbt.sh run --target spark --exclude tag:smoke
-      bash run-dbt.sh test --target spark
+      # 两条命令必须用 && 串起来。execute_step 是被 run_one 当 if 条件调用的，
+      # 条件上下文里 `set -e` 对整个函数体不生效 —— 不串联的话，dbt run 失败会被
+      # 后面 dbt test 的成功覆盖掉，环节照样报 OK。实测踩过：对账模型报
+      # AMBIGUOUS_REFERENCE、gold 表没建出来，环节却是 [OK]，直到导出环节才炸。
+      bash run-dbt.sh run --target spark --exclude tag:smoke \
+        && bash run-dbt.sh test --target spark
       ;;
     dq-rules)
       # 先清掉本批次的旧结果再追加。结果表按批次追加、跨批次留历史，

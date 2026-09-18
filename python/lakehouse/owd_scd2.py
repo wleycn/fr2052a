@@ -135,6 +135,15 @@ def ensure_history_table(spark: SparkSession, table: str) -> None:
     )
     migrate_legacy_columns(spark, history)
 
+    # 明细模型加了列、历史表没跟上时，后面会在 Spark 侧抛 UNRESOLVED_COLUMN，
+    # 报错与「该去跑哪个迁移」毫无关系。这里先按列集合前置判一次，把话说明白。
+    missing = [name for name in table_columns(spark, table) if name not in set(spark.table(history).columns)]
+    if missing:
+        raise ValueError(
+            f"{history} 缺少 OWD 明细的列 {missing}：明细模型加了列，版本历史表要跟上。"
+            f"先执行一次性迁移（见 sql/iceberg/08_owd_history_add_intracompany.sql 的用法），再重跑本环节。"
+        )
+
 
 def migrate_legacy_columns(spark: SparkSession, history: str) -> None:
     """把老结构迁到新结构（幂等，只在检测到老列时动手）。

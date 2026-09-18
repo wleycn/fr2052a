@@ -1,8 +1,24 @@
 -- ADS FR 2052a 报送报表：按 Section A–K 装配行项目金额。
 --
--- 口径说明：
---   每个法人实体一行（is_consolidated = false），外加一行集团合并口径（ENT001，is_consolidated = true）。
---   合并口径由实体口径相加得到，不重复计算。
+-- 三档视角与合并抵销说明：
+--   官方指令要求三档视角都报，且合并口径必须双边抵销集团内部往来。
+--
+--   01 全球合并（is_consolidated = true，entity_code = 'GRP001'）：
+--     把集团当一家看，集团内互相的存款与放款都不存在。
+--     实现方式：只汇总 is_intracompany = false 的明细行。集团内往来的两条腿
+--     （存款腿在母公司 Section C、贷款腿在子公司 Section F）都带 is_intracompany = true，
+--     合并口径一律排除，两条腿同时消失，不会只抵一边。
+--     HQLA 40% 上限与流入 75% 上限按抵销后的金额重新计算，不是把各实体的上限结果相加。
+--
+--   02 法人实体单体（is_consolidated = false，entity_code <> 'ENT001'）：
+--     各实体自己的账。内部往来在单体口径里是真实头寸，不抵销。
+--     实现方式：按 (report_date, entity_code) 汇总两种标记的行（含 is_intracompany = true）。
+--
+--   03 母公司单体（is_consolidated = false，entity_code = 'ENT001'）：
+--     母公司自己的账，同样不抵销。
+--
+--   GRP001 是保留码，不代表任何法人实体，只用于合并行。
+--   口径码由 is_consolidated + entity_code 推出，不另加常量列。
 --
 --   每个报告期独立成行，任何聚合都不跨期。
 --   多期数据（补报、重跑、演示多期）共存时，每个 report_date 的金额只汇总该期明细，
@@ -19,6 +35,7 @@ with deposits as (
     select
         report_date,
         entity_code,
+        is_intracompany,
         round(sum(principal_amount_usd), 2) as total_deposits_usd,
         round(sum(case when customer_segment = 'RETAIL' and product_category = 'DEMAND' then principal_amount_usd else 0 end), 2) as retail_demand,
         round(sum(case when customer_segment = 'RETAIL' and product_category = 'SAVINGS' then principal_amount_usd else 0 end), 2) as retail_savings,
@@ -26,7 +43,7 @@ with deposits as (
         round(sum(case when customer_segment <> 'RETAIL' and product_category = 'DEMAND' then principal_amount_usd else 0 end), 2) as wholesale_demand,
         round(sum(case when customer_segment <> 'RETAIL' and product_category in ('TIME', 'CD') then principal_amount_usd else 0 end), 2) as wholesale_time
     from {{ ref('owd_deposits') }}
-    group by report_date, entity_code
+    group by report_date, entity_code, is_intracompany
 
 ),
 
@@ -35,10 +52,11 @@ secured_financing as (
     select
         report_date,
         entity_code,
+        is_intracompany,
         round(sum(case when transaction_type = 'REPO' then cash_amount_usd else 0 end), 2) as repo_outstanding,
         round(sum(case when transaction_type = 'REVERSE_REPO' then cash_amount_usd else 0 end), 2) as reverse_repo
     from {{ ref('owd_secured_financing') }}
-    group by report_date, entity_code
+    group by report_date, entity_code, is_intracompany
 
 ),
 
@@ -47,6 +65,8 @@ cash as (
     select
         report_date,
         entity_code,
+        -- ows_cash_position 没有 is_intracompany，现金头寸不涉及集团内往来
+        cast(false as boolean) as is_intracompany,
         round(sum(cash_on_hand_usd), 2) as cash_on_hand,
         round(sum(total_cash_usd), 2) as total_cash
     from {{ ref('ows_cash_position') }}
@@ -60,13 +80,14 @@ loan_inflows as (
     select
         report_date,
         entity_code,
+        is_intracompany,
         round(sum(case when loan_type = 'COMMERCIAL' then outstanding_usd else 0 end), 2) as commercial_inflow,
         round(sum(case when loan_type = 'RETAIL' then outstanding_usd else 0 end), 2) as retail_inflow,
         round(sum(case when loan_type = 'MORTGAGE' then outstanding_usd else 0 end), 2) as mortgage_inflow,
         round(sum(outstanding_usd), 2) as total_inflow
     from {{ ref('owd_loans') }}
     where days_to_maturity <= 30
-    group by report_date, entity_code
+    group by report_date, entity_code, is_intracompany
 
 ),
 
@@ -75,6 +96,7 @@ hqla as (
     select
         report_date,
         entity_code,
+        is_intracompany,
         round(sum(case when hqla_classification = 'LEVEL_1' then market_value_usd else 0 end), 2) as l1_mv,
         round(sum(case when hqla_classification = 'LEVEL_2A' then market_value_usd else 0 end), 2) as l2a_mv,
         round(sum(case when hqla_classification = 'LEVEL_2B' then market_value_usd else 0 end), 2) as l2b_mv,
@@ -86,7 +108,7 @@ hqla as (
         round(sum(case when hqla_classification = 'NON_HQLA' and not is_encumbered then market_value_usd else 0 end), 2) as unencumbered_non_hqla,
         round(sum(case when is_encumbered then market_value_usd else 0 end), 2) as encumbered_total
     from {{ ref('owd_securities') }}
-    group by report_date, entity_code
+    group by report_date, entity_code, is_intracompany
 
 ),
 
@@ -97,12 +119,13 @@ derivatives as (
     select
         report_date,
         entity_code,
+        is_intracompany,
         round(sum(case when mtm_value_usd > 0 then mtm_value_usd else 0 end), 2) as net_mtm_asset,
         round(-sum(case when mtm_value_usd < 0 then mtm_value_usd else 0 end), 2) as net_mtm_liability,
         round(sum(collateral_posted_usd), 2) as collateral_posted,
         round(sum(collateral_received_usd), 2) as collateral_received
     from {{ ref('owd_derivatives') }}
-    group by report_date, entity_code
+    group by report_date, entity_code, is_intracompany
 
 ),
 
@@ -111,12 +134,13 @@ contingent as (
     select
         report_date,
         entity_code,
+        is_intracompany,
         round(sum(case when commitment_type = 'CREDIT_COMMITMENT' then undrawn_amount_usd else 0 end), 2) as credit_commitments,
         round(sum(case when commitment_type = 'LETTER_OF_CREDIT' then undrawn_amount_usd else 0 end), 2) as letters_of_credit,
         round(sum(case when commitment_type = 'GUARANTEE' then undrawn_amount_usd else 0 end), 2) as guarantees,
         round(sum(undrawn_amount_usd), 2) as total_contingent
     from {{ ref('owd_off_bs') }}
-    group by report_date, entity_code
+    group by report_date, entity_code, is_intracompany
 
 ),
 
@@ -126,17 +150,29 @@ cashflow_30d as (
     select
         report_date,
         entity_code,
+        is_intracompany,
         round(sum(expected_inflow_usd), 2) as raw_inflow,
         round(sum(expected_outflow_usd), 2) as total_outflow
     from {{ ref('ows_cashflow_projection') }}
     where maturity_bucket in ('O/N', '1-7D', '8-30D')
-    group by report_date, entity_code
+    group by report_date, entity_code, is_intracompany
 
 ),
 
 entities as (
 
-    select distinct report_date, entity_code from {{ ref('owd_deposits') }}
+    -- 所有业务表里出现的 (report_date, entity_code, is_intracompany) 组合。
+    -- 不只用 deposits：一个实体可能只有贷款没有存款，只用 deposits 会丢行。
+    -- cash 与 cashflow 没有 is_intracompany，它们的标记恒为 false。
+    select distinct report_date, entity_code, is_intracompany from {{ ref('owd_deposits') }}
+    union select distinct report_date, entity_code, is_intracompany from {{ ref('owd_loans') }}
+    union select distinct report_date, entity_code, is_intracompany from {{ ref('owd_secured_financing') }}
+    union select distinct report_date, entity_code, is_intracompany from {{ ref('owd_securities') }}
+    union select distinct report_date, entity_code, is_intracompany from {{ ref('owd_derivatives') }}
+    union select distinct report_date, entity_code, is_intracompany from {{ ref('owd_off_bs') }}
+    -- cash 与 cashflow 的行也作为 is_intracompany = false 的键
+    union select distinct report_date, entity_code, cast(false as boolean) as is_intracompany from {{ ref('ows_cash_position') }}
+    union select distinct report_date, entity_code, cast(false as boolean) as is_intracompany from {{ ref('ows_cashflow_projection') }}
 
 ),
 
@@ -166,7 +202,7 @@ entity_level as (
         d.total_deposits_usd as sec_c_total,
         -- Section D：其他融资，演示环境无数据
         cast(null as decimal(20, 2)) as sec_d_total,
-        -- Section E：现金
+        -- Section E：现金（不区分集团内，只在 is_intracompany = false 时 join）
         c.total_cash as sec_e_cash_total,
         c.cash_on_hand as sec_e_central_bank_dep,
         c.total_cash as sec_e_cash_equiv_total,
@@ -222,26 +258,115 @@ entity_level as (
         ) as sec_k_cumulative_30d_gap,
         -- report_date 追加在列尾而不是列首：Iceberg 不支持列重排，
         -- 把新列插在中途会让 create or replace table 直接失败。
-        e.report_date
+        e.report_date,
+        -- is_intracompany 作为分组维度，用于合并口径排除集团内往来
+        e.is_intracompany
     from entities e
-    left join deposits d on d.entity_code = e.entity_code and d.report_date = e.report_date
-    left join secured_financing f on f.entity_code = e.entity_code and f.report_date = e.report_date
-    left join cash c on c.entity_code = e.entity_code and c.report_date = e.report_date
-    left join loan_inflows l on l.entity_code = e.entity_code and l.report_date = e.report_date
-    left join hqla h on h.entity_code = e.entity_code and h.report_date = e.report_date
-    left join derivatives v on v.entity_code = e.entity_code and v.report_date = e.report_date
-    left join contingent t on t.entity_code = e.entity_code and t.report_date = e.report_date
-    left join cashflow_30d cf on cf.entity_code = e.entity_code and cf.report_date = e.report_date
+    left join deposits d
+        on d.entity_code = e.entity_code and d.report_date = e.report_date and d.is_intracompany = e.is_intracompany
+    left join secured_financing f
+        on f.entity_code = e.entity_code and f.report_date = e.report_date and f.is_intracompany = e.is_intracompany
+    left join cash c
+        on c.entity_code = e.entity_code and c.report_date = e.report_date and e.is_intracompany = false
+    left join loan_inflows l
+        on l.entity_code = e.entity_code and l.report_date = e.report_date and l.is_intracompany = e.is_intracompany
+    left join hqla h
+        on h.entity_code = e.entity_code and h.report_date = e.report_date and h.is_intracompany = e.is_intracompany
+    left join derivatives v
+        on v.entity_code = e.entity_code and v.report_date = e.report_date and v.is_intracompany = e.is_intracompany
+    left join contingent t
+        on t.entity_code = e.entity_code and t.report_date = e.report_date and t.is_intracompany = e.is_intracompany
+    left join cashflow_30d cf
+        on cf.entity_code = e.entity_code
+        and cf.report_date = e.report_date
+        and cf.is_intracompany = e.is_intracompany
 
 ),
 
+-- 法人实体单体行（02/03）：按 (report_date, entity_code) 汇总两种标记的行。
+-- 单体口径不抵销：与子公司的应收应付是真实头寸。
+entity_standalone as (
+
+    select
+        entity_code,
+        cast(null as decimal(20, 2)) as sec_a_cp_outstanding,
+        cast(null as decimal(20, 2)) as sec_a_cd_outstanding,
+        cast(null as decimal(20, 2)) as sec_a_unsecured_borrow,
+        cast(null as decimal(20, 2)) as sec_a_fed_funds,
+        cast(null as decimal(20, 2)) as sec_a_total,
+        sum(sec_b_repo_outstanding) as sec_b_repo_outstanding,
+        sum(sec_b_reverse_repo) as sec_b_reverse_repo,
+        cast(null as decimal(20, 2)) as sec_b_sec_lending,
+        cast(null as decimal(20, 2)) as sec_b_fhlb_advances,
+        sum(sec_b_total) as sec_b_total,
+        sum(sec_c_retail_demand) as sec_c_retail_demand,
+        sum(sec_c_retail_savings) as sec_c_retail_savings,
+        sum(sec_c_retail_time) as sec_c_retail_time,
+        sum(sec_c_wholesale_demand) as sec_c_wholesale_demand,
+        sum(sec_c_wholesale_time) as sec_c_wholesale_time,
+        cast(null as decimal(20, 2)) as sec_c_brokered,
+        sum(sec_c_total) as sec_c_total,
+        cast(null as decimal(20, 2)) as sec_d_total,
+        sum(sec_e_cash_total) as sec_e_cash_total,
+        sum(sec_e_central_bank_dep) as sec_e_central_bank_dep,
+        sum(sec_e_cash_equiv_total) as sec_e_cash_equiv_total,
+        sum(sec_f_commercial_inflow) as sec_f_commercial_inflow,
+        sum(sec_f_retail_inflow) as sec_f_retail_inflow,
+        sum(sec_f_mortgage_inflow) as sec_f_mortgage_inflow,
+        sum(sec_f_total_inflow) as sec_f_total_inflow,
+        sum(sec_g_hqla_l1_mv) as sec_g_hqla_l1_mv,
+        sum(sec_g_hqla_l2a_mv) as sec_g_hqla_l2a_mv,
+        sum(sec_g_hqla_l2b_mv) as sec_g_hqla_l2b_mv,
+        sum(sec_g_non_hqla_mv) as sec_g_non_hqla_mv,
+        sum(sec_g_total_mv) as sec_g_total_mv,
+        -- 单体口径的二级资产上限按单体总额重新计算
+        round(
+            sum(sec_g_hqla_l1_mv)
+            + least(
+                sum(sec_g_hqla_l2a_mv) + sum(sec_g_hqla_l2b_mv),
+                0.40 * (sum(sec_g_hqla_l1_mv) + sum(sec_g_hqla_l2a_mv) + sum(sec_g_hqla_l2b_mv))
+            ),
+            2
+        ) as sec_g_hqla_capped_total_usd,
+        sum(sec_h_net_mtm_asset) as sec_h_net_mtm_asset,
+        sum(sec_h_net_mtm_liability) as sec_h_net_mtm_liability,
+        sum(sec_h_collateral_posted) as sec_h_collateral_posted,
+        sum(sec_h_collateral_received) as sec_h_collateral_received,
+        sum(sec_h_expected_inflow_30d) as sec_h_expected_inflow_30d,
+        sum(sec_h_expected_outflow_30d) as sec_h_expected_outflow_30d,
+        sum(sec_i_unencumbered_hqla_l1) as sec_i_unencumbered_hqla_l1,
+        sum(sec_i_unencumbered_hqla_l2a) as sec_i_unencumbered_hqla_l2a,
+        sum(sec_i_unencumbered_hqla_l2b) as sec_i_unencumbered_hqla_l2b,
+        sum(sec_i_unencumbered_non_hqla) as sec_i_unencumbered_non_hqla,
+        sum(sec_i_encumbered_total) as sec_i_encumbered_total,
+        sum(sec_j_credit_commitments) as sec_j_credit_commitments,
+        sum(sec_j_letters_of_credit) as sec_j_letters_of_credit,
+        sum(sec_j_guarantees) as sec_j_guarantees,
+        sum(sec_j_total_contingent) as sec_j_total_contingent,
+        sum(sec_k_total_funding) as sec_k_total_funding,
+        -- 单体口径的流入上限按单体总额重新计算
+        round(least(sum(sec_h_expected_inflow_30d), 0.75 * sum(sec_k_total_outflows)), 2) as sec_k_total_inflows,
+        sum(sec_k_total_outflows) as sec_k_total_outflows,
+        round(
+            least(sum(sec_h_expected_inflow_30d), 0.75 * sum(sec_k_total_outflows)) - sum(sec_k_total_outflows),
+            2
+        ) as sec_k_net_funding_gap,
+        round(
+            least(sum(sec_h_expected_inflow_30d), 0.75 * sum(sec_k_total_outflows)) - sum(sec_k_total_outflows),
+            2
+        ) as sec_k_cumulative_30d_gap,
+        report_date
+    from entity_level
+    group by report_date, entity_code
+
+),
+
+-- 全球合并行（01）：只汇总 is_intracompany = false 的行，按 report_date 汇总。
+-- 集团内往来的两条腿都带 is_intracompany = true，合并口径一律排除。
 consolidated as (
 
-    -- 合并口径：实体口径逐列相加。总资产/总负债类金额直接累加，不做内部交易抵消
-    -- （演示数据里实体之间没有内部交易，抵消项为零）。
-    -- 每个报告期独立聚合，不跨期串加。
     select
-        'ENT001' as entity_code,
+        'GRP001' as entity_code,
         cast(null as decimal(20, 2)) as sec_a_cp_outstanding,
         cast(null as decimal(20, 2)) as sec_a_cd_outstanding,
         cast(null as decimal(20, 2)) as sec_a_unsecured_borrow,
@@ -310,6 +435,7 @@ consolidated as (
         ) as sec_k_cumulative_30d_gap,
         report_date
     from entity_level
+    where is_intracompany = false
     group by report_date
 
 ),
@@ -317,9 +443,14 @@ consolidated as (
 -- is_consolidated 放在最后一列，避免与 entity_level 里已有的 entity_code 重名。
 --
 -- report_id 是业务标识，按「机构-报表-报告期-口径」四段区位码拼装，例如
---   ENT001-FR2052A-20260916-01
+--   GRP001-FR2052A-20260916-01
 -- 每一段都有确定含义，读的人不必查表就知道这条报表是谁报的、什么报表、哪一期、什么口径。
--- 最后一段是口径码：01 = 并表，02 = 法人单体。
+--
+-- 口径码三档（末段）：
+--   01 = 全球合并（is_consolidated 为真，entity_code = 'GRP001'）
+--   02 = 法人实体单体（is_consolidated 为假且 entity_code <> 'ENT001'）
+--   03 = 母公司单体（is_consolidated 为假且 entity_code = 'ENT001'）
+-- 口径码由 is_consolidated + entity_code 推出，不另加来源不明的常量列。
 --
 -- 为什么不用自增序列：本表每轮导出是全量覆盖，序列值属于数据库状态而不是数据，
 -- 同一个业务报表在不同批次会拿到不同的号。而重述登记要跨批次引用「原报表 / 新报表」，
@@ -337,7 +468,7 @@ unioned as (
     select
         e.*,
         false as is_consolidated
-    from entity_level e
+    from entity_standalone e
 
     union all
 
@@ -355,6 +486,10 @@ select
         u.entity_code,
         '{{ var("report_code") }}',
         date_format(u.report_date, 'yyyyMMdd'),
-        case when u.is_consolidated then '01' else '02' end
+        case
+            when u.is_consolidated then '01'
+            when u.entity_code = 'ENT001' then '03'
+            else '02'
+        end
     ) as report_id
 from unioned u

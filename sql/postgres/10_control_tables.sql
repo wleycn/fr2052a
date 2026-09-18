@@ -443,3 +443,50 @@ COMMENT ON TABLE ads.ads_fr2052a_validation_log IS '数据质量校验结果，�
 
 CREATE INDEX IF NOT EXISTS idx_validation_log_batch
     ON ads.ads_fr2052a_validation_log (batch_id, check_result);
+
+-- ---------------------------------------------------------------------------
+-- 11. 导出表迁移：ads_fr2052a_detail 与 ads_gl_reconciliation 由 Spark JDBC
+--     用 truncate=true 覆盖写。truncate=true 保留表上的授权与触发器，但不会
+--     自己建列。模型结构变了必须走显式迁移（export_gold_to_pg.py 的 docstring
+--     里写明这条纪律）。以下 DO 块在表已存在且缺列时幂等补列。
+-- ---------------------------------------------------------------------------
+
+-- ads_fr2052a_detail: 新增 is_intracompany 列（明细回溯核对用它排除抵销项）
+DO $$
+BEGIN
+    IF EXISTS (
+        -- 判存在走 pg_catalog 而不是 information_schema：后者只列出当前角色有权限的对象，
+        -- 「表在但读不到」会被当成「表不存在」，迁移就被静默跳过（B2 批次立下的口径）。
+        SELECT 1 FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'ads' AND c.relname = 'ads_fr2052a_detail'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'ads' AND c.relname = 'ads_fr2052a_detail'
+          AND a.attname = 'is_intracompany' AND a.attnum > 0 AND NOT a.attisdropped
+    ) THEN
+        ALTER TABLE ads.ads_fr2052a_detail
+            ADD COLUMN is_intracompany BOOLEAN;
+    END IF;
+END $$;
+
+-- ads_gl_reconciliation: 新增 entity_code 列（按视角对账需要区分实体/合并行）
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'ads' AND c.relname = 'ads_gl_reconciliation'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'ads' AND c.relname = 'ads_gl_reconciliation'
+          AND a.attname = 'entity_code' AND a.attnum > 0 AND NOT a.attisdropped
+    ) THEN
+        ALTER TABLE ads.ads_gl_reconciliation
+            ADD COLUMN entity_code TEXT;
+    END IF;
+END $$;

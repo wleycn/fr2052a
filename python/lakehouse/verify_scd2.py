@@ -45,7 +45,10 @@ def check_table(spark: SparkSession, table: str) -> list[str]:
     history_columns = spark.table(history).columns
     version_set = set(VERSION_COLUMNS)
     history_business = [name for name in history_columns if name not in version_set]
-    if history_business != live_columns:
+    # 按集合比较，不按列表顺序比较：列顺序对 SCD2 语义没有影响。
+    # 历史表新增列是 ALTER TABLE ADD COLUMN 追在末尾，与 OWD 模型里的位置不同，
+    # 用有序列表比较会把这种情况误判成「业务列不一致」，且差异清单是空的 —— 看的人无从下手。
+    if set(history_business) != set(live_columns):
         missing = [name for name in live_columns if name not in history_business]
         extra = [name for name in history_business if name not in live_columns]
         failures.append(f"业务列与 {odb} 不一致（缺 {missing}，多 {extra}）")

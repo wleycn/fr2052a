@@ -49,6 +49,7 @@ select
     s.maturity_date,
     datediff(s.maturity_date, s.report_date) as days_to_maturity,
     {{ maturity_bucket('datediff(s.maturity_date, s.report_date)') }} as maturity_bucket,
+    {{ is_affiliate_counterparty('c.counterparty_type') }} as is_intracompany,
     s.event_time,
     s.etl_batch_id
 

@@ -62,6 +62,7 @@ select
     datediff(r.end_date, r.report_date) as days_to_maturity,
     {{ maturity_bucket('datediff(r.end_date, r.report_date)') }} as maturity_bucket,
     case when r.end_date is null then true else false end as is_open_ended,
+    {{ is_affiliate_counterparty('c.counterparty_type') }} as is_intracompany,
     case when r.netting_agreement_id like 'GMRA%' then 'GMRA' else 'OTHER' end as master_agreement_type,
     r.netting_agreement_id,
     case when r.netting_agreement_id is null then false else true end as is_nettable,

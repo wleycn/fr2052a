@@ -10,7 +10,7 @@ Gold（Iceberg）与 ADS（PostgreSQL）同一份数据的两个落点
 
 ## 粒度
 
-一行 = 报告日 + 实体 + Section + 行项目 + 产品 + 对手方类型 + 币种 + 到期桶。
+一行 = 报告日 + 实体 + Section + 行项目 + 产品 + 对手方类型 + 币种 + 到期桶 + 集团内标记。
 
 ## 业务主键
 
@@ -30,6 +30,7 @@ dbt `table` 物化整表重建；导出 PostgreSQL 时先清后写。
 |---|
 | `report_date` |
 | `entity_code` |
+| `is_intracompany` |
 | `section_code` |
 | `line_item` |
 | `line_description` |

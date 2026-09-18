@@ -2,11 +2,11 @@
 
 dbt 跑通只说明 SQL 没报错，不说明数字对。这里逐项验算：
   1. 报表实体覆盖 = bronze 存款表的实体集合，且实体集合与 ref 层级表一致
-  2. 合并口径 = 各实体口径之和（逐 Section 验算）
-  3. 明细合计 = 报表 Section 合计（对应 VDQ-013）
+  2. 合并口径 = 各实体口径之和减去集团内往来（逐 Section 验算 + 抵销专项）
+  3. 明细合计 = 报表 Section 合计（对应 VDQ-013，排除 is_intracompany 行）
   4. 二级资产占比 ≤ HQLA 总额的 40%（对应 VDQ-017）
   5. 30 天流入 ≤ 流出的 75%（对应 VDQ-018，验证上限确实被应用）
-  6. GL 对账状态分布
+  6. GL 对账逐报告期核对，每个视角都有对账行且无 FAIL
 
 第 1–5 项**逐报告期**核对：多期数据共存时，把两期并到一起比集合或加金额，
 会把「本期缺一个实体、另一期多一个实体」看成一致，也会拿错期的明细去凑合并行。
@@ -26,7 +26,9 @@ REPORT = "gold.ads_fr2052a_report"
 DETAIL = "gold.ads_fr2052a_detail"
 RECONCILIATION = "gold.ads_gl_reconciliation"
 SOURCE_DEPOSITS = "bronze.ods_deposits"
+SOURCE_LOANS = "bronze.ods_loans"
 REF_ENTITY = "ref.ref_entity_hierarchy"
+REF_COUNTERPARTY = "ref.ref_counterparty"
 
 # Section 的报表合计列、明细金额列，以及明细需要附加的行项目过滤
 SECTION_AMOUNTS = {
@@ -73,12 +75,11 @@ def check_row_shape(spark: SparkSession) -> list[CheckResult]:
     """核对报表行形状：每个报告期的实体覆盖与 bronze 一致，且每期恰有一行合并行。
 
     报表行形状的期望来自两处独立来源，不是常量：
-      ref.ref_entity_hierarchy 声明哪些实体承接业务（层级 > 1 且有效）
+      ref.ref_entity_hierarchy 声明哪些实体承接业务（is_active 的实体）
       bronze.ods_deposits      声明该报告期实际有哪些实体记了账
     """
     expected_entities = {
-        row["entity_code"]
-        for row in spark.table(REF_ENTITY).filter("is_active and entity_level > 1").select("entity_code").collect()
+        row["entity_code"] for row in spark.table(REF_ENTITY).filter("is_active").select("entity_code").collect()
     }
 
     results: list[CheckResult] = []
@@ -136,11 +137,59 @@ def check_row_shape(spark: SparkSession) -> list[CheckResult]:
     return results
 
 
+@dataclass
+class IntracompanyAmounts:
+    """某报告期的集团内往来金额，从 silver 明细独立算出（不复用合并行的公式）。"""
+
+    deposit_leg: float
+    """存款腿：子公司在母公司的存款。合并口径要从 Section C 剔除。"""
+
+    loan_leg: float
+    """贷款腿：母公司对子公司的放款，不限期限。只用于确认前提存在。"""
+
+    loan_leg_within_30d: float
+    """30 天内到期的那部分贷款腿。合并口径要从 Section F 剔除。"""
+
+    def elimination_for(self, column: str) -> float:
+        """某个报表列在合并口径里应剔除的金额。
+
+        口径必须与报表定义一致：Section F 只含 **30 天内到期**的贷款本金，
+        所以 30 天以上到期的集团内放款本来就不在 Section F 里，不能去减它 ——
+        减了会凭空少一块（实测踩过）。k 的融资合计包含存款，存款腿同样要剔。
+        """
+        if column in ("sec_c_total", "sec_k_total_funding"):
+            return self.deposit_leg
+        if column == "sec_f_total_inflow":
+            return self.loan_leg_within_30d
+        return 0.0
+
+
+def intracompany_amounts(spark: SparkSession, period: str) -> IntracompanyAmounts:
+    """从 silver 明细独立算出该期的两条腿金额。"""
+    deposit_leg = spark.sql(
+        f"select round(sum(principal_amount_usd), 2) as total from silver.owd_deposits "
+        f"where is_intracompany and cast(report_date as string) = '{period}'"
+    ).collect()[0]["total"]
+    loan_rows = spark.sql(
+        f"select "
+        f"round(sum(outstanding_usd), 2) as total, "
+        f"round(sum(case when days_to_maturity <= 30 then outstanding_usd else 0 end), 2) as within_30d "
+        f"from silver.owd_loans "
+        f"where is_intracompany and cast(report_date as string) = '{period}'"
+    ).collect()[0]
+    return IntracompanyAmounts(
+        deposit_leg=float(deposit_leg or 0),
+        loan_leg=float(loan_rows["total"] or 0),
+        loan_leg_within_30d=float(loan_rows["within_30d"] or 0),
+    )
+
+
 def check_consolidation(spark: SparkSession) -> list[CheckResult]:
-    """合并口径必须等于同报告期各实体口径之和（同一列逐列验算）。
+    """合并口径必须等于同报告期各实体口径之和**减去集团内往来**（同一列逐列验算）。
 
     逐期验算：跨期把实体行加到一起，既拿错期的明细去凑合并行，
     也让「两期都是对的」与「两期互相抵消着错」无法区分。
+    抵销金额来自 silver 明细，不引用合并行自己的公式。
     """
     sums = ", ".join(f"round(sum({column}), 2) as {column}" for column in CONSOLIDATION_COLUMNS)
     results: list[CheckResult] = []
@@ -154,6 +203,7 @@ def check_consolidation(spark: SparkSession) -> list[CheckResult]:
             .select(*CONSOLIDATION_COLUMNS)
             .collect()[0]
         )
+        ic = intracompany_amounts(spark, period)
 
         mismatched = []
         for column in CONSOLIDATION_COLUMNS:
@@ -161,21 +211,66 @@ def check_consolidation(spark: SparkSession) -> list[CheckResult]:
             consolidated_value = consolidated[column]
             if entity_value is None or consolidated_value is None:
                 continue
-            if abs(float(entity_value) - float(consolidated_value)) > 0.05:
-                mismatched.append(f"{column}: 实体合计 {entity_value} vs 合并 {consolidated_value}")
+            elimination = ic.elimination_for(column)
+            expected = round(float(entity_value) - elimination, 2)
+            if abs(expected - float(consolidated_value)) > 0.05:
+                mismatched.append(
+                    f"{column}: Σ实体 {entity_value} − 抵销 {elimination:,.2f} = {expected:,.2f}，"
+                    f"合并行 {consolidated_value}"
+                )
 
         results.append(
             CheckResult(
                 name=f"合并口径加总 {period}",
                 passed=not mismatched,
-                detail=f"{len(CONSOLIDATION_COLUMNS)} 列逐列验算一致" if not mismatched else f"不一致 {mismatched[:2]}",
+                detail=(
+                    f"{len(CONSOLIDATION_COLUMNS)} 列逐列验算一致"
+                    f"（抵销：存款腿 {ic.deposit_leg:,.2f}、30 天内到期的贷款腿 {ic.loan_leg_within_30d:,.2f}）"
+                    if not mismatched
+                    else f"不一致 {mismatched[:2]}"
+                ),
+            )
+        )
+    return results
+
+
+def check_intracompany_present(spark: SparkSession) -> list[CheckResult]:
+    """抵销前提核对：数据里**确实存在**集团内往来，否则「抵销」这条规则在空转。
+
+    判据存在而场景不存在，等于没有判据。这条检查守住前提：该期两条腿都不为零，
+    且实体口径里确实含得下它们（实体 C 合计 ≥ 存款腿）。
+    """
+    results: list[CheckResult] = []
+    for period in report_periods(spark):
+        ic = intracompany_amounts(spark, period)
+        entity_deposits = float(
+            spark.sql(
+                f"select round(sum(sec_c_total), 2) as total from {REPORT} "
+                f"where not is_consolidated and cast(report_date as string) = '{period}'"
+            ).collect()[0]["total"]
+            or 0
+        )
+        passed = ic.deposit_leg > 0 and ic.loan_leg > 0 and entity_deposits >= ic.deposit_leg
+        results.append(
+            CheckResult(
+                name=f"抵销前提（集团内往来存在）{period}",
+                passed=passed,
+                detail=(
+                    f"存款腿 {ic.deposit_leg:,.2f}、贷款腿 {ic.loan_leg:,.2f}"
+                    f"（其中 30 天内到期 {ic.loan_leg_within_30d:,.2f}）；"
+                    f"实体口径 Section C 合计 {entity_deposits:,.2f}"
+                ),
             )
         )
     return results
 
 
 def check_detail_rollup(spark: SparkSession) -> list[CheckResult]:
-    """明细合计 = 报表 Section 合计（VDQ-013），逐报告期核对。"""
+    """明细合计 = 报表 Section 合计（VDQ-013），逐报告期核对。
+
+    合并口径的明细回溯只汇总 is_intracompany = false 的行。
+    is_intracompany = true 的行是集团内往来，不该出现在合并口径里。
+    """
     results: list[CheckResult] = []
     for period in report_periods(spark):
         consolidated = (
@@ -191,12 +286,16 @@ def _check_detail_rollup_for_period(
     consolidated: Row,
     period: str,
 ) -> None:
-    """核对单个报告期的明细回溯，结论追加进 results。"""
+    """核对单个报告期的明细回溯，结论追加进 results。
+
+    合并口径只看 is_intracompany = false 的明细行。
+    """
     for section, (report_column, detail_column, line_item) in SECTION_AMOUNTS.items():
         line_filter = f" and line_item = '{line_item}'" if line_item else ""
         row = spark.sql(
             f"select count(*) as rows, round(sum({detail_column}), 2) as total "
             f"from {DETAIL} where section_code = '{section}'{line_filter} "
+            f"and not is_intracompany "
             f"and cast(report_date as string) = '{period}'"
         ).collect()[0]
         detail_rows = row["rows"]
@@ -311,16 +410,30 @@ def check_inflow_cap(spark: SparkSession) -> list[CheckResult]:
     return results
 
 
-def check_gl_reconciliation(spark: SparkSession) -> CheckResult:
-    """GL 对账结果分布：本演示数据应当全部 PASS。"""
-    rows = spark.table(RECONCILIATION).groupBy("status").count().collect()
-    counts = {row["status"]: row["count"] for row in rows}
-    passed = counts.get("FAIL", 0) == 0 and counts.get("PASS", 0) > 0
-    return CheckResult(
-        name="GL 对账",
-        passed=passed,
-        detail=f"PASS {counts.get('PASS', 0)} 项，FAIL {counts.get('FAIL', 0)} 项",
-    )
+def check_gl_reconciliation(spark: SparkSession) -> list[CheckResult]:
+    """GL 对账逐报告期核对：每个视角都有对账行且无 FAIL。
+
+    一个对象都没核对到不能再算通过。
+    """
+    results: list[CheckResult] = []
+    for period in report_periods(spark):
+        rows = spark.sql(
+            f"select status, count(*) as n from {RECONCILIATION} "
+            f"where cast(report_date as string) = '{period}' group by status"
+        ).collect()
+        counts = {row["status"]: row["n"] for row in rows}
+        fail_count = counts.get("FAIL", 0)
+        pass_count = counts.get("PASS", 0)
+        total = sum(counts.values())
+        passed = fail_count == 0 and total > 0
+        results.append(
+            CheckResult(
+                name=f"GL 对账 {period}",
+                passed=passed,
+                detail=f"PASS {pass_count} 项，FAIL {fail_count} 项，合计 {total} 行",
+            )
+        )
+    return results
 
 
 def main() -> int:
@@ -331,10 +444,11 @@ def main() -> int:
     results: list[CheckResult] = []
     results.extend(check_row_shape(spark))
     results.extend(check_consolidation(spark))
+    results.extend(check_intracompany_present(spark))
     results.extend(check_detail_rollup(spark))
     results.extend(check_l2_cap(spark))
     results.extend(check_inflow_cap(spark))
-    results.append(check_gl_reconciliation(spark))
+    results.extend(check_gl_reconciliation(spark))
 
     for result in results:
         print(f"  [{'PASS' if result.passed else 'FAIL'}] {result.name:<26} {result.detail}")

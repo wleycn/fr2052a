@@ -7,6 +7,12 @@ with deposits as (
 
 ),
 
+ref_cp as (
+
+    select counterparty_id, counterparty_type from {{ source('ref', 'ref_counterparty') }}
+
+),
+
 fx as (
 
     select * from {{ ref('stg_fx_rates') }}
@@ -42,10 +48,13 @@ select
         2
     ) as insured_amount_usd,
     d.branch_code,
+    {{ is_affiliate_counterparty('rc.counterparty_type') }} as is_intracompany,
     d.event_time,
     d.etl_batch_id
 
 from deposits d
+left join ref_cp rc
+    on rc.counterparty_id = d.customer_id
 left join fx f
     on f.currency_code = d.currency
    and f.rate_date = d.report_date

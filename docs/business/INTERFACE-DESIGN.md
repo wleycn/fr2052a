@@ -20,6 +20,7 @@
 | 3 | `maturity_bucket` | `days_expr` | `VARCHAR` | 到期分桶计算 | ✅ 已实现 |
 | 4 | `customer_segment` | `customer_type_expr` | `VARCHAR` | 客户细分归一 | ✅ 已实现 |
 | 5 | `deposit_product_category` | `deposit_type_expr` | `VARCHAR` | 存款产品归类 | ✅ 已实现 |
+| 6 | `is_affiliate_counterparty` | `counterparty_type_expr` | `BOOLEAN` | 集团内往来标记 | ✅ 已实现 |
 
 > 注：宏名不带 `fr2052a_` 前缀。脱敏已实现为 `mask_pii`（加盐 SHA-256，见 `dbt/macros/pii.sql`）；汇率折算没有对应宏，由 OWD 模型 join `stg_fx_rates` 完成。
 
@@ -42,8 +43,8 @@
 
 ### 2.4 `customer_segment`
 
-- **输入**：客户类型原始值（IND/CORP/FI/GOV/OTHER）
-- **输出**：`RETAIL` / `CORPORATE` / `FINANCIAL` / `SOVEREIGN` / `OTHER`
+- **输入**：客户类型原始值（IND/CORP/FI/GOV/AFFIL/OTHER）
+- **输出**：`RETAIL` / `CORPORATE` / `FINANCIAL` / `SOVEREIGN` / `AFFILIATE` / `OTHER`
 
 ### 2.5 `deposit_product_category`
 

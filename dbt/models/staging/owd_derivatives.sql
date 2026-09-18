@@ -44,6 +44,7 @@ select
     d.maturity_date,
     datediff(d.maturity_date, d.report_date) as days_to_maturity,
     {{ maturity_bucket('datediff(d.maturity_date, d.report_date)') }} as maturity_bucket,
+    {{ is_affiliate_counterparty('c.counterparty_type') }} as is_intracompany,
     round(d.mark_to_market * f.spot_rate, 2) as mtm_value_usd,
     d.is_central_cleared = 'Y' as is_central_cleared,
     d.csa_agreement_id,
