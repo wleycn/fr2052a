@@ -8,6 +8,9 @@ dbt 跑通只说明 SQL 没报错，不说明数字对。这里逐项验算：
   5. 30 天流入 ≤ 流出的 75%（对应 VDQ-018，验证上限确实被应用）
   6. GL 对账状态分布
 
+第 1–5 项**逐报告期**核对：多期数据共存时，把两期并到一起比集合或加金额，
+会把「本期缺一个实体、另一期多一个实体」看成一致，也会拿错期的明细去凑合并行。
+
 用法（Server 2，经 spark-submit 包装脚本执行）：
     bash spark-submit-fr2052a.sh /opt/fr2052a-app/python/lakehouse/verify_gold.py
 """
@@ -17,7 +20,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 
-from pyspark.sql import SparkSession
+from pyspark.sql import Row, SparkSession
 
 REPORT = "gold.ads_fr2052a_report"
 DETAIL = "gold.ads_fr2052a_detail"
@@ -56,93 +59,145 @@ class CheckResult:
     detail: str
 
 
+def report_periods(spark: SparkSession) -> list[str]:
+    """报表里出现的报告期，升序排列。
+
+    多报告期数据下的核对基准：实体覆盖、合并口径、明细回溯都要**逐期**成立。
+    把两期并成一个集合去比，会把「本期少一个实体、另一期多一个实体」看成一致。
+    """
+    rows = spark.sql(f"select distinct cast(report_date as string) as period from {REPORT} order by period").collect()
+    return [str(row["period"]) for row in rows]
+
+
 def check_row_shape(spark: SparkSession) -> list[CheckResult]:
-    """核对报表行形状：报表实体覆盖与 ref 一致，合并行只有一行。
+    """核对报表行形状：每个报告期的实体覆盖与 bronze 一致，且每期恰有一行合并行。
 
     报表行形状的期望来自两处独立来源，不是常量：
       ref.ref_entity_hierarchy 声明哪些实体承接业务（层级 > 1 且有效）
-      bronze.ods_deposits      声明本轮实际有哪些实体记了账
+      bronze.ods_deposits      声明该报告期实际有哪些实体记了账
     """
-    # 报表实体覆盖：报表里的非合并行实体集合必须与 bronze 存款表一致
-    report_entities = {
-        row["entity_code"] for row in spark.table(REPORT).filter("not is_consolidated").select("entity_code").collect()
-    }
-    source_entities = {
-        row["entity_code"] for row in spark.table(SOURCE_DEPOSITS).select("entity_code").distinct().collect()
-    }
     expected_entities = {
         row["entity_code"]
         for row in spark.table(REF_ENTITY).filter("is_active and entity_level > 1").select("entity_code").collect()
     }
-    consolidated_rows = spark.table(REPORT).filter("is_consolidated").count()
 
-    missing_in_report = source_entities - report_entities
-    extra_in_report = report_entities - source_entities
+    results: list[CheckResult] = []
+    for period in report_periods(spark):
+        report_entities = {
+            row["entity_code"]
+            for row in spark.sql(
+                f"select distinct entity_code from {REPORT} "
+                f"where not is_consolidated and cast(report_date as string) = '{period}'"
+            ).collect()
+        }
+        source_entities = {
+            row["entity_code"]
+            for row in spark.sql(
+                f"select distinct entity_code from {SOURCE_DEPOSITS} where cast(report_date as string) = '{period}'"
+            ).collect()
+        }
+        consolidated_rows = spark.sql(
+            f"select count(*) as n from {REPORT} where is_consolidated and cast(report_date as string) = '{period}'"
+        ).collect()[0]["n"]
+        missing_in_report = source_entities - report_entities
+        extra_in_report = report_entities - source_entities
 
-    return [
-        CheckResult(
-            name="报表实体覆盖",
-            passed=report_entities == source_entities and consolidated_rows == 1,
-            detail=(
-                f"报表 {len(report_entities)} 实体，bronze {len(source_entities)} 实体，"
-                f"合并 {consolidated_rows} 行"
-                + (f"，报表缺 {sorted(missing_in_report)}" if missing_in_report else "")
-                + (f"，报表多 {sorted(extra_in_report)}" if extra_in_report else "")
-            ),
-        ),
-        CheckResult(
-            name="实体集合与 ref 一致",
-            passed=source_entities == expected_entities,
-            detail=(
-                f"bronze {len(source_entities)} 实体，ref {len(expected_entities)} 实体"
-                + (
-                    f"，差异 bronze 多 {sorted(source_entities - expected_entities)}"
-                    if source_entities - expected_entities
-                    else ""
-                )
-                + (
-                    f"，ref 多 {sorted(expected_entities - source_entities)}"
-                    if expected_entities - source_entities
-                    else ""
-                )
-            ),
-        ),
-    ]
+        results.append(
+            CheckResult(
+                name=f"报表实体覆盖 {period}",
+                passed=report_entities == source_entities and consolidated_rows == 1,
+                detail=(
+                    f"报表 {len(report_entities)} 实体，bronze {len(source_entities)} 实体，"
+                    f"合并 {consolidated_rows} 行"
+                    + (f"，报表缺 {sorted(missing_in_report)}" if missing_in_report else "")
+                    + (f"，报表多 {sorted(extra_in_report)}" if extra_in_report else "")
+                ),
+            )
+        )
+        results.append(
+            CheckResult(
+                name=f"实体集合与 ref 一致 {period}",
+                passed=source_entities == expected_entities,
+                detail=(
+                    f"bronze {len(source_entities)} 实体，ref {len(expected_entities)} 实体"
+                    + (
+                        f"，差异 bronze 多 {sorted(source_entities - expected_entities)}"
+                        if source_entities - expected_entities
+                        else ""
+                    )
+                    + (
+                        f"，ref 多 {sorted(expected_entities - source_entities)}"
+                        if expected_entities - source_entities
+                        else ""
+                    )
+                ),
+            )
+        )
+    return results
 
 
 def check_consolidation(spark: SparkSession) -> list[CheckResult]:
-    """合并口径必须等于各实体口径之和（同一列逐列验算）。"""
+    """合并口径必须等于同报告期各实体口径之和（同一列逐列验算）。
+
+    逐期验算：跨期把实体行加到一起，既拿错期的明细去凑合并行，
+    也让「两期都是对的」与「两期互相抵消着错」无法区分。
+    """
     sums = ", ".join(f"round(sum({column}), 2) as {column}" for column in CONSOLIDATION_COLUMNS)
-    entity_totals = spark.sql(f"select {sums} from {REPORT} where not is_consolidated").collect()[0]
-    consolidated = spark.table(REPORT).filter("is_consolidated").select(*CONSOLIDATION_COLUMNS).collect()[0]
-
-    mismatched = []
-    for column in CONSOLIDATION_COLUMNS:
-        entity_value = entity_totals[column]
-        consolidated_value = consolidated[column]
-        if entity_value is None or consolidated_value is None:
-            continue
-        if abs(float(entity_value) - float(consolidated_value)) > 0.05:
-            mismatched.append(f"{column}: 实体合计 {entity_value} vs 合并 {consolidated_value}")
-
-    return [
-        CheckResult(
-            name="合并口径加总",
-            passed=not mismatched,
-            detail=f"{len(CONSOLIDATION_COLUMNS)} 列逐列验算一致" if not mismatched else f"不一致 {mismatched[:2]}",
+    results: list[CheckResult] = []
+    for period in report_periods(spark):
+        entity_totals = spark.sql(
+            f"select {sums} from {REPORT} where not is_consolidated and cast(report_date as string) = '{period}'"
+        ).collect()[0]
+        consolidated = (
+            spark.table(REPORT)
+            .filter(f"is_consolidated and cast(report_date as string) = '{period}'")
+            .select(*CONSOLIDATION_COLUMNS)
+            .collect()[0]
         )
-    ]
+
+        mismatched = []
+        for column in CONSOLIDATION_COLUMNS:
+            entity_value = entity_totals[column]
+            consolidated_value = consolidated[column]
+            if entity_value is None or consolidated_value is None:
+                continue
+            if abs(float(entity_value) - float(consolidated_value)) > 0.05:
+                mismatched.append(f"{column}: 实体合计 {entity_value} vs 合并 {consolidated_value}")
+
+        results.append(
+            CheckResult(
+                name=f"合并口径加总 {period}",
+                passed=not mismatched,
+                detail=f"{len(CONSOLIDATION_COLUMNS)} 列逐列验算一致" if not mismatched else f"不一致 {mismatched[:2]}",
+            )
+        )
+    return results
 
 
 def check_detail_rollup(spark: SparkSession) -> list[CheckResult]:
-    """明细合计 = 报表 Section 合计（VDQ-013）。"""
-    results = []
-    consolidated = spark.table(REPORT).filter("is_consolidated").collect()[0]
+    """明细合计 = 报表 Section 合计（VDQ-013），逐报告期核对。"""
+    results: list[CheckResult] = []
+    for period in report_periods(spark):
+        consolidated = (
+            spark.table(REPORT).filter(f"is_consolidated and cast(report_date as string) = '{period}'").collect()[0]
+        )
+        _check_detail_rollup_for_period(spark, results, consolidated, period)
+    return results
+
+
+def _check_detail_rollup_for_period(
+    spark: SparkSession,
+    results: list[CheckResult],
+    consolidated: Row,
+    period: str,
+) -> None:
+    """核对单个报告期的明细回溯，结论追加进 results。"""
     for section, (report_column, detail_column, line_item) in SECTION_AMOUNTS.items():
         line_filter = f" and line_item = '{line_item}'" if line_item else ""
         row = spark.sql(
             f"select count(*) as rows, round(sum({detail_column}), 2) as total "
-            f"from {DETAIL} where section_code = '{section}'{line_filter}"
+            f"from {DETAIL} where section_code = '{section}'{line_filter} "
+            f"and cast(report_date as string) = '{period}'"
         ).collect()[0]
         detail_rows = row["rows"]
         detail_total = row["total"]
@@ -150,7 +205,7 @@ def check_detail_rollup(spark: SparkSession) -> list[CheckResult]:
         if detail_rows == 0:
             results.append(
                 CheckResult(
-                    name=f"明细汇总 Section {section}",
+                    name=f"明细汇总 Section {section} {period}",
                     passed=False,
                     detail=f"过滤条件未命中明细表（section={section}、line_item={line_item}）",
                 )
@@ -160,7 +215,7 @@ def check_detail_rollup(spark: SparkSession) -> list[CheckResult]:
         if detail_total is None:
             results.append(
                 CheckResult(
-                    name=f"明细汇总 Section {section}",
+                    name=f"明细汇总 Section {section} {period}",
                     passed=False,
                     detail="明细合计为 NULL",
                 )
@@ -171,7 +226,7 @@ def check_detail_rollup(spark: SparkSession) -> list[CheckResult]:
         if report_total is None:
             results.append(
                 CheckResult(
-                    name=f"明细汇总 Section {section}",
+                    name=f"明细汇总 Section {section} {period}",
                     passed=False,
                     detail="报表侧该列为 NULL",
                 )
@@ -181,70 +236,79 @@ def check_detail_rollup(spark: SparkSession) -> list[CheckResult]:
         variance = round(float(detail_total) - float(report_total), 2)
         results.append(
             CheckResult(
-                name=f"明细汇总 Section {section}",
+                name=f"明细汇总 Section {section} {period}",
                 passed=abs(variance) <= 0.05,
                 detail=f"明细 {detail_total} vs 报表 {report_total}，差异 {variance}",
+            )
+        )
+
+
+def check_l2_cap(spark: SparkSession) -> list[CheckResult]:
+    """二级资产上限（VDQ-017）：逐报告期验算 HQLA 认列总额是否按 40% 截断。
+
+    这条规则在需求文档里是 WARNING 级 —— 二级资产占比高本身不构成错误，
+    真正的错误是认列总额没有按上限截断。因此这里验算计算是否正确，而不是占比是否达标。
+    """
+    results: list[CheckResult] = []
+    for period in report_periods(spark):
+        row = spark.sql(
+            f"""
+            select sec_g_hqla_l1_mv as l1, sec_g_hqla_l2a_mv as l2a, sec_g_hqla_l2b_mv as l2b,
+                   sec_g_hqla_capped_total_usd as capped
+            from {REPORT} where is_consolidated and cast(report_date as string) = '{period}'
+            """
+        ).collect()[0]
+        level_1 = float(row["l1"] or 0)
+        level_2 = float(row["l2a"] or 0) + float(row["l2b"] or 0)
+        capped = float(row["capped"] or 0)
+
+        hqla_before_cap = level_1 + level_2
+        expected = round(level_1 + min(level_2, 0.40 * hqla_before_cap), 2)
+        ratio = level_2 / hqla_before_cap if hqla_before_cap else 0.0
+        cap_triggered = level_2 > 0.40 * hqla_before_cap
+
+        results.append(
+            CheckResult(
+                name=f"二级资产上限 {period}",
+                passed=abs(capped - expected) <= 0.05,
+                detail=(
+                    f"认列总额 {capped:,.2f}，按 40% 上限应为 {expected:,.2f}；"
+                    f"二级资产原始占比 {ratio:.2%}" + ("（上限已截断）" if cap_triggered else "（未触发上限）")
+                ),
             )
         )
     return results
 
 
-def check_l2_cap(spark: SparkSession) -> CheckResult:
-    """二级资产上限（VDQ-017）：验算 HQLA 认列总额是否按 40% 上限正确截断。
-
-    这条规则在需求文档里是 WARNING 级 —— 二级资产占比高本身不构成错误，
-    真正的错误是认列总额没有按上限截断。因此这里验算计算是否正确，而不是占比是否达标。
-    """
-    row = spark.sql(
-        f"""
-        select sec_g_hqla_l1_mv as l1, sec_g_hqla_l2a_mv as l2a, sec_g_hqla_l2b_mv as l2b,
-               sec_g_hqla_capped_total_usd as capped
-        from {REPORT} where is_consolidated
-        """
-    ).collect()[0]
-    level_1 = float(row["l1"] or 0)
-    level_2 = float(row["l2a"] or 0) + float(row["l2b"] or 0)
-    capped = float(row["capped"] or 0)
-
-    hqla_before_cap = level_1 + level_2
-    expected = round(level_1 + min(level_2, 0.40 * hqla_before_cap), 2)
-    ratio = level_2 / hqla_before_cap if hqla_before_cap else 0.0
-    cap_triggered = level_2 > 0.40 * hqla_before_cap
-
-    return CheckResult(
-        name="二级资产上限",
-        passed=abs(capped - expected) <= 0.05,
-        detail=(
-            f"认列总额 {capped:,.2f}，按 40% 上限应为 {expected:,.2f}；"
-            f"二级资产原始占比 {ratio:.2%}" + ("（上限已截断）" if cap_triggered else "（未触发上限）")
-        ),
-    )
-
-
-def check_inflow_cap(spark: SparkSession) -> CheckResult:
-    """30 天流入不得超过流出的 75%（VDQ-018）。"""
-    row = spark.sql(
-        f"""
-        select sec_k_total_inflows as inflows, sec_k_total_outflows as outflows,
-               sec_h_expected_inflow_30d as raw_inflows
-        from {REPORT} where is_consolidated
-        """
-    ).collect()[0]
-    inflows = float(row["inflows"] or 0)
-    outflows = float(row["outflows"] or 0)
-    raw_inflows = float(row["raw_inflows"] or 0)
-    cap = 0.75 * outflows
-    within_cap = inflows <= cap + 0.01
-    # 上限是否真的起了作用：未加限制的流入高于上限时，认列值应被压到上限
-    cap_effective = raw_inflows <= cap + 0.01 or abs(inflows - cap) <= 0.02
-    return CheckResult(
-        name="流入上限 75%",
-        passed=within_cap and cap_effective,
-        detail=(
-            f"流入 {inflows:,.2f}，上限 {cap:,.2f}，未限制前 {raw_inflows:,.2f}"
-            + ("（上限已生效）" if raw_inflows > cap else "（未触发上限）")
-        ),
-    )
+def check_inflow_cap(spark: SparkSession) -> list[CheckResult]:
+    """30 天流入不得超过流出的 75%（VDQ-018），逐报告期核对。"""
+    results: list[CheckResult] = []
+    for period in report_periods(spark):
+        row = spark.sql(
+            f"""
+            select sec_k_total_inflows as inflows, sec_k_total_outflows as outflows,
+                   sec_h_expected_inflow_30d as raw_inflows
+            from {REPORT} where is_consolidated and cast(report_date as string) = '{period}'
+            """
+        ).collect()[0]
+        inflows = float(row["inflows"] or 0)
+        outflows = float(row["outflows"] or 0)
+        raw_inflows = float(row["raw_inflows"] or 0)
+        cap = 0.75 * outflows
+        within_cap = inflows <= cap + 0.01
+        # 上限是否真的起了作用：未加限制的流入高于上限时，认列值应被压到上限
+        cap_effective = raw_inflows <= cap + 0.01 or abs(inflows - cap) <= 0.02
+        results.append(
+            CheckResult(
+                name=f"流入上限 75% {period}",
+                passed=within_cap and cap_effective,
+                detail=(
+                    f"流入 {inflows:,.2f}，上限 {cap:,.2f}，未限制前 {raw_inflows:,.2f}"
+                    + ("（上限已生效）" if raw_inflows > cap else "（未触发上限）")
+                ),
+            )
+        )
+    return results
 
 
 def check_gl_reconciliation(spark: SparkSession) -> CheckResult:
@@ -268,8 +332,8 @@ def main() -> int:
     results.extend(check_row_shape(spark))
     results.extend(check_consolidation(spark))
     results.extend(check_detail_rollup(spark))
-    results.append(check_l2_cap(spark))
-    results.append(check_inflow_cap(spark))
+    results.extend(check_l2_cap(spark))
+    results.extend(check_inflow_cap(spark))
     results.append(check_gl_reconciliation(spark))
 
     for result in results:
