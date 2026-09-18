@@ -33,3 +33,10 @@
 - 变更：`AGENTS.md` 要求功能与契约变更在 `docs/changes/{module}.md` 追加条目，该目录却一直是空的，E6 与 E7 的变更散落在 `docs/build-log.md`。本次按格式补上条目，本文件即首个条目文件，同时成为后续条目的格式样例。`AGENTS.md`、`PROJECT-STRUCTURE.md`、`KNOWN-ISSUE.md` 里「目录为空」「模板待补」的口径同步更正。条目 slug 不再要求与分支同名，本项目直接在主分支推进，没有 feature 分支。
 - 验证：目录内只有 `engineering.md` 一个条目文件，无 README 与附件。四段结构逐条自检：范围写清文件、变更写清动机与做法、验证给可复现的证据、回滚给具体动作。
 - 回滚：删除本文件并恢复三处文档措辞。回滚后变更史重新退回只存在于 `docs/build-log.md` 的状态。
+
+## table-contracts
+
+- 范围：新增 `docs/tables/`（51 份契约）、`docs/rules/PROJECT-STRUCTURE.md`、`AGENTS.md` §9、`README.md`、`docs/business/PROJECT.md`、`docs/business/DATA-DESIGN.md` §2.1
+- 变更：数据类项目的上游规范要求「每表一份 `docs/tables/{table}.md`」，本项目此前没有这个目录。本次补齐 51 份：ref 9 张、bronze 7 张、silver 明细 8 张、silver 汇总 5 张、版本历史 7 张、gold 与 ADS 报表 3 张、PostgreSQL 控制与审计 12 张。每份 13 节：层级 / 主题 / 粒度 / 业务主键 / 去重方式 / 分区 / 字段清单 / 金额单位约定 / PII 与脱敏 / 生命周期 / 新鲜度 SLA 与 owner / 上下游依赖 / 质量规则清单。字段清单不是手抄的：ref 与 bronze 从 `sql/iceberg/*.sql` 的 DDL 抽取，PostgreSQL 表从 `sql/postgres/*.sql` 抽取，silver 与 gold 从 dbt 模型 SQL 的最终投影抽取，版本历史表从 `owd_scd2.py` 的结构加 6 个版本列。文档地图、结构规范与 README 的目录清单同步登记该目录。
+- 验证：51 份文件与 51 张表一一对应，逐份核对三件事：13 节齐备且每节非空、字段名与抽取结果逐项一致、无占位词。DDL 侧另做了抽取数与 DDL 声明数的逐表比对，28 张全部一致（例：`ads_fr2052a_report` 的 55 列覆盖 Section A–K 全部行项目）。不入契约的两类在 `DATA-DESIGN.md` §2.1 写明：连通性自检的探针表、只有主题声明的三个 Kafka 主题。
+- 回滚：删除 `docs/tables/` 目录，恢复四处文档的目录清单。契约是纯文档，回滚不影响任何运行链路。

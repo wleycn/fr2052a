@@ -92,6 +92,7 @@ demo-fr2052a/
 ├── requirements/              # 原始需求文档（保留参考）
 ├── docs/
 │   ├── business/              # 工程文档（业务文档七份）
+│   ├── tables/                # 表契约（一表一份）
 │   ├── rules/                 # 规范文件（结构 / 编码 / 流程 / 验收）
 │   └── build-log.md           # 构建日志（E0 起逐阶段记录）
 ├── deploy/
@@ -138,6 +139,7 @@ demo-fr2052a/
 |------|------|--------|
 | 架构 / 技术栈 / 目录分层 | [docs/business/PROJECT.md](docs/business/PROJECT.md) | 要改代码、加模块、排部署问题时 |
 | 数据流 / 表结构 | [docs/business/DATA-DESIGN.md](docs/business/DATA-DESIGN.md) | 看数据从哪来到哪去、字段含义时 |
+| 单表明细（一表一份） | [docs/tables/](docs/tables/) | 查某张表的粒度、主键、分区、脱敏与质量规则时 |
 | 模块边界 / 接口契约 | [docs/business/MODULE-DESIGN.md](docs/business/MODULE-DESIGN.md) | 对接某模块、改接口时 |
 | 术语定义 | [docs/business/DOMAIN-LANGUAGE.md](docs/business/DOMAIN-LANGUAGE.md) | 对齐业务与技术语言时 |
 | 踩过的坑 / 决策 | [docs/business/KNOWN-ISSUE.md](docs/business/KNOWN-ISSUE.md) | 遇到诡异报错、想少走弯路时 |

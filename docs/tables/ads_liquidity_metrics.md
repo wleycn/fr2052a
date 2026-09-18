@@ -1,0 +1,73 @@
+# 表契约：ads.ads_liquidity_metrics
+
+## 层级
+
+控制与审计（PostgreSQL）
+
+## 主题
+
+流动性指标：熔断判定的输入事实，一次跑批每个报告日一张快照。
+
+## 粒度
+
+一行 = 一个实体在一个报告日的一张指标快照。
+
+## 业务主键
+
+`report_date` + `entity_code`（由 `python/alerts/liquidity_monitor.py` 按此 upsert）。
+
+## 去重方式
+
+按业务键 upsert；按批次累积的表先清本批次再追加，重跑不翻倍。
+
+## 分区
+
+无。PostgreSQL 表，按环节写入或覆盖；不涉及分区裁剪。
+
+## 字段清单
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `report_date` | DATE NOT NULL | 报告日 |
+| `entity_code` | TEXT NOT NULL | 法人实体编码，ENT001 为集团合并口径 |
+| `is_consolidated` | BOOLEAN NOT NULL DEFAULT FALSE | 是否合并口径 |
+| `hqla_l1_unencumbered_usd` | NUMERIC(20, 2) | 未质押一级资产市值 |
+| `hqla_l2a_unencumbered_usd` | NUMERIC(20, 2) | 未质押二级 A 类资产市值 |
+| `hqla_l2b_unencumbered_usd` | NUMERIC(20, 2) | 未质押二级 B 类资产市值 |
+| `hqla_unencumbered_capped_usd` | NUMERIC(20, 2) | 未质押 HQLA 认列额，二级资产按 40% 截断后计入 |
+| `hqla_encumbered_usd` | NUMERIC(20, 2) | 已质押资产市值，不计入 LCR 分子 |
+| `expected_inflow_30d_usd` | NUMERIC(20, 2) | 30 天预期流入（未加限制） |
+| `expected_inflow_capped_usd` | NUMERIC(20, 2) | 30 天认列流入，上限为流出的 75% |
+| `expected_outflow_30d_usd` | NUMERIC(20, 2) | 30 天预期流出 |
+| `net_cash_outflow_30d_usd` | NUMERIC(20, 2) | 净现金流出 = 流出 - 认列流入 |
+| `lcr_ratio` | NUMERIC(12, 4) | 流动性覆盖率 = 认列 HQLA / 净现金流出 |
+| `l2_cap_ratio` | NUMERIC(12, 4) | 二级资产占 HQLA 比例，监管上限 40% |
+| `inflow_cap_ratio` | NUMERIC(12, 4) | 流入占流出比例，超过 75% 说明认列被上限截断 |
+| `regulatory_min_ratio` | NUMERIC(12, 4) | 判定时采用的监管下限，留痕以便回溯口径 |
+| `headroom_usd` | NUMERIC(20, 2) | 距红线余量 = 认列 HQLA - 下限 × 净现金流出 |
+| `computed_at` | TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP |  |
+
+## 金额单位约定
+
+USD，`NUMERIC(20,2)`；比率列 `NUMERIC(12,4)`。
+
+## PII 字段与脱敏方式
+
+无。本表不含个人标识或直接标识。
+
+## 生命周期
+
+PostgreSQL 常驻表，按环节写入或覆盖；无快照与压缩策略。
+
+## 新鲜度 SLA 与 owner
+
+日批 `liquidity-monitor` 环节写入，判定所需的报送口径数据此前已就绪。owner：仓库维护者。
+
+## 上下游依赖
+
+- **上游**：报表 Section G / I / F 与 `silver.ows_*` 汇总。
+- **下游**：熔断表 `ads.ads_circuit_breaker`、预警表 `ads.ads_fr2052a_alerts`、巡检 `python/governance/pipeline_health.py`。
+
+## 质量规则清单
+
+`VDQ-017`（二级资产不超 HQLA 的 40%）与 `VDQ-018`（流入认列不超流出的 75%）在此判定；判据同时落 `ads.ads_fr2052a_validation_log`。

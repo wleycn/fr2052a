@@ -9,6 +9,7 @@
 | `requirements/` | 原始需求文档（参考） | 架构师 | 修改（应走变更流程）|
 | `docs/business/` | 业务文档七份（真源） | 全员 | 删除、重命名 |
 | `docs/rules/` | 跨项目复用规范 | 架构师 | 未经评审修改 |
+| `docs/tables/` | 表契约（一表一份，追加式） | 全员 | 修改历史契约（应追加新表） |
 | `docs/changes/` | 变更留痕（追加式，每模块一份） | 全员 | 修改历史条目 |
 | `deploy/` | 部署清单（不含凭据） | DevOps | 硬编码密码 |
 | `sql/` | DDL（真源） | DBA/架构师 | 直接改线上库 |
@@ -33,7 +34,7 @@
 ## 分层纪律
 
 1. **根目录**：`README.md` + `AGENTS.md` + `.gitignore` + `.gitattributes` + `Makefile` + `pyproject.toml`（教学文档只在本机，不入库）
-2. **docs/**：工程文档（rules + business + changes）
+2. **docs/**：工程文档（rules + business + tables + changes）
 3. **deploy/**：部署清单（YAML + shell 脚本）
 4. **sql/**：DDL（按层分目录）
 5. **dbt/**：dbt 项目（models + macros + config）

@@ -100,9 +100,10 @@
 | 人类入口 | `README.md` | 这是什么 / 怎么上手（5 秒测试） |
 | AI 约束 | `AGENTS.md`（本文） | 红线与行为准则，优先级最高 |
 | 规范 | `docs/rules/` | 四件套：结构 / 编码 / 流程 / 验收 |
+| 表契约 | `docs/tables/` | 一表一份：层级 / 主题 / 粒度 / 主键 / 去重 / 分区 / 金额口径 / PII 与脱敏 / 生命周期 / 新鲜度与 owner / 依赖 / 质量规则 |
 | 业务文档 | `docs/business/` | 项目说明 / 模块 / 数据 / 接口 / 术语 / 变更 / 已知问题 |
 | 偏离登记处 | `docs/business/KNOWN-ISSUE.md` | 已知坑 / 设计决策 / 与上游规范不一致处的逐条登记（禁止无登记降标准） |
-| 变更留痕 | `docs/build-log.md` | E0-E7 构建日志（原始路径，用户要求保留）；新增模块变更追加到 `docs/changes/{module}.md` |
+| 变更留痕 | `docs/changes/{module}.md` | 功能与契约变更的按模块条目（范围 / 变更 / 验证 / 回滚）；E0–E7 的构建过程另见 `docs/build-log.md` |
 | 部署清单 | `deploy/` | Server 1/2 部署脚本与配置 |
 | SQL DDL | `sql/iceberg/` | Iceberg 表定义（真源） |
 | dbt 项目 | `dbt/` | 模型 / 宏 / 配置 |

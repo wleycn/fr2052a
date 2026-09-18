@@ -35,6 +35,7 @@ demo-fr2052a/
 │   │   ├── DOMAIN-LANGUAGE.md # 术语表
 │   │   ├── CHANGELOG.md       # 变更记录
 │   │   └── KNOWN-ISSUE.md     # 已知坑 + 决策记录
+│   ├── tables/                # 表契约（一表一份：51 张）
 │   ├── rules/                 # 规范文件（四件套）
 │   │   ├── PROJECT-STRUCTURE.md
 │   │   ├── CODING-STANDARD.md
@@ -77,6 +78,7 @@ demo-fr2052a/
 |------|------|------|
 | `requirements/` | 原始需求（参考，不落九文档） | 项目启动时产生 |
 | `docs/business/` | 九项核心文档（真源） | 编码前/后同步更新 |
+| `docs/tables/` | 表契约（一表一份：层级 / 粒度 / 主键 / 去重 / 分区 / 金额口径 / PII / 生命周期 / SLA / 依赖 / 质量规则） | 新增或变更表时同步 |
 | `docs/rules/` | 跨项目复用规范 | 架构师制定，全员遵守 |
 | `docs/build-log.md` | 构建日志（逐阶段追加） | 每阶段完成时追加 |
 | `deploy/` | 部署清单（不含凭据） | 运维/DevOps |
