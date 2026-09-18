@@ -64,6 +64,9 @@ python -m generators.generate_sample_data --out <dir> [--gl-break-amount <N>]
 |------|------|------|------|------|
 | `--out` | path | 否 | `../sample_data` | 输出目录 |
 | `--gl-break-amount` | int | 否 | `0` | GL 对账缺口（用于演示对账失败场景）|
+| `--inject-missing-fx` | string | 否 | 空 | 故意不写这些币种的汇率行（逗号分隔），用于演示「缺汇率必须失败」|
+
+`--inject-missing-fx` 造的是**刻意的缺陷数据**：汇率表少这些行，但业务数据仍会照常抽到这些币种，于是 dbt 的汇率覆盖断言报红、日批在这一环停住。它不是一个「宽容模式」，用完必须重新生成正常数据。
 
 **退出码**：`0` = 成功，`1` = 失败
 
@@ -221,7 +224,7 @@ run_context_open             运行上下文开口：登记本次跑批的报告
   → load_ref                REF 字典表入 Iceberg
   → replay_ods              样本明细按主题重放进 Kafka
   → load_bronze             消费 Kafka 入 bronze，按主键 MERGE 去重
-  → dbt_run                 OWD → OWS → ADS 三层建模
+  → dbt_run                 OWD → OWS → ADS 三层建模，再跑 singular test 守汇率覆盖
   → pii_vault               建脱敏对照表
   → lineage                 渲染血缘与监管映射
   → owd_scd2                OWD 版本历史归并（SCD2）

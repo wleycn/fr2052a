@@ -82,3 +82,12 @@
 - 备注（探针的一次失败也有价值）：第一次把探针脚本放在 `python/lakehouse/` 下用 `../validators/` 相对路径调 `spark-submit` 包装脚本，被拒（退出码 2）；探针脚本要与被探测的脚本同目录、用容器内绝对路径调用。
 - 备注（判存在用什么口径）：`information_schema.tables` 只列出当前角色有权限的对象，用无权限角色实测该视图 0 行、`pg_class` 1 行；因此判存在必须走 `pg_catalog`，否则「表在但读不到」会被当成「表不存在」，又退回静默跳过。
 - 回滚：`git checkout -- python/validators/run_dq_rules.py python/exporters/export_gold_to_pg.py python/exporters/generate_submission.py python/audit/time_travel.py docs/business/INTERFACE-DESIGN.md docs/business/MODULE-DESIGN.md`。回退后 `evaluate_rule` 的四元组返回值仍在，但调用点恢复三元组解包（会 ValueError，需同时改回 `evaluate_rule` 签名）；`target_columns` 恢复宽 `except`；报送脚本恢复退 0；审计脚本恢复无校验直接进 Spark。
+
+## c1-fx-consistency
+
+- 范围：`python/generators/ref_data.py`、`python/generators/generate_sample_data.py`、`dbt/models/staging/stg_fx_rates.sql`、新增 `dbt/tests/assert_fx_covered.sql`、`deploy/server2/run-daily-pipeline.sh`、`docs/business/{DATA-DESIGN,MODULE-DESIGN,INTERFACE-DESIGN}.md`
+- 变更：把「汇率与测试数据一致」从**构造关系**变成**可失败的断言**。① 汇率契约写进 `_generate_exchange_rates` 的 docstring：汇率表是正常状态下的全量币种来源，ODS 抽到的币种必须都在汇率表里；唯一例外是故意注入。② 新增 `--inject-missing-fx`（逗号分隔）：故意不写这些币种的汇率行，但 **ODS 的抽币种池不收缩** —— 否则数据里根本不会出现该币种，缺汇率的场景反而造不出来（这是实现时踩到并改掉的坑）。③ 生成器自检新增「汇率覆盖」项，比对基准是**写出的汇率 CSV**（不是内存池），按 `(报告日, 币种)` 精确比对，注入币种放行并明示。④ `ref_exchange_rates` 的期望行数由 `len(FX_RATES) + 1` 派生，不再硬编码 10。⑤ `stg_fx_rates` 限定 `to_currency = 'USD'`（多目标币种会行放大）。⑥ 新增 singular test `dbt/tests/assert_fx_covered.sql`：ODS 六张明细表出现的 `(report_date, currency)` 组合在汇率表里缺 MID 汇率即失败。⑦ `dbt-run` 环节在 `dbt run` 之后追加 `dbt test`，断言不过即环节失败、日批红。
+- 验证：静态——生成器本机跑通（正常 10 行汇率、全部自检通过；注入 JPY 时汇率 9 行、数据里仍有 249 行 JPY、自检打印 `[INJECT]` 放行）；`make lint` 三子命令全绿。上线实测（Server 2，Iceberg + dbt 真跑）：① 正常数据 → `ref-load + dbt-run` 退 0，`dbt test` 单独选中 `assert_fx_covered` 为 PASS=1 ② 注入 JPY 重建数据 → 探针确认「汇率表 9 个币种（无 JPY）、bronze 存款有 82 行 JPY」的缺陷状态真实存在 ③ 同一状态下跑日批 `dbt-run` → 断言 `ERROR=1`（「Got 1 result, configured to fail if != 0」）、环节 `[FAIL] 退出码 1`、整条日批 RC=1 ④ 恢复正常数据后 `ref-load + dbt-run` 退 0。
+- 备注（同步边界，第二次踩）：第一次负向实测「环节没报红」，原因是只跑了 `deploy/server2/sync-app.sh`（app 树），没跑 `deploy/sync-deploy.sh`（deploy 树）——服务器上的跑批脚本还是旧的，`dbt test` 那一行根本不存在。这与 A3 批次踩的是同一个坑，已在技能里记为铁律：**验收前两个同步边界都要走，或先跑 `sync-deploy.sh --check`**。
+- 备注（教训）：`dbt run` 与 `dbt test` 的汇总行都形如 `Done. PASS=N`，只看汇总行会把 `run` 的 PASS=16 误读成「16 条断言都过了」。判断断言有没有跑，要按测试名 grep 或先 `dbt ls --resource-type test` 数一遍。
+- 回滚：`git checkout -- python/generators/ref_data.py python/generators/generate_sample_data.py dbt/models/staging/stg_fx_rates.sql deploy/server2/run-daily-pipeline.sh docs/`，删除 `dbt/tests/assert_fx_covered.sql`。回退后汇率覆盖只剩构造关系、没有断言，日批也不再跑 `dbt test`。

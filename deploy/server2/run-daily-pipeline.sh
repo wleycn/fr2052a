@@ -68,7 +68,7 @@ declare -A STEP_DESC=(
   [ref-load]="REF 批加载：字典表入 ref 命名空间"
   [ods-replay]="ODS 重放：样本明细按主题打进 Kafka"
   [bronze-load]="入湖 bronze：消费 Kafka，按主键 MERGE 去重"
-  [dbt-run]="dbt 三层建模：OWD → OWS → ADS"
+  [dbt-run]="dbt 三层建模 + 断言：OWD → OWS → ADS，再跑 singular test 守汇率覆盖"
   [pii-vault]="PII 对照表：从落地数据建 token ↔ 明文映射（明文唯一落点）"
   [lineage]="血缘与监管映射：渲染报告并写审计血缘表"
   [owd-scd2]="OWD 版本历史：SCD2 归并，记录新增/变更/删除"
@@ -127,6 +127,7 @@ execute_step() {
       ;;
     dbt-run)
       bash run-dbt.sh run --target spark --exclude tag:smoke
+      bash run-dbt.sh test --target spark
       ;;
     dq-rules)
       # 先清掉本批次的旧结果再追加。结果表按批次追加、跨批次留历史，

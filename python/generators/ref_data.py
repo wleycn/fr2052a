@@ -2,6 +2,10 @@
 
 REF 是本批数据的字典：ODS 中出现的法人实体、交易对手、币种、日期都必须取自这里，
 生成结束后的完整性自检会逐条核对，杜绝悬空引用。
+
+汇率契约：ref_exchange_rates 是全量币种来源，ref.currencies 由它派生。
+ODS 各表的币种只能取汇率表里有的；两者不一致即数据缺陷，
+由 generate_sample_data.py 自检与 dbt/tests/assert_fx_covered.sql 共同守住。
 """
 
 from __future__ import annotations
@@ -11,7 +15,6 @@ import string
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
-from typing import cast
 
 from .config import (
     CALENDAR_END,
@@ -429,7 +432,11 @@ VALIDATION_RULE_ROWS = [
 
 @dataclass
 class ReferenceData:
-    """本批 REF 的外键集合，供 ODS 生成与完整性自检复用。"""
+    """本批 REF 的外键集合，供 ODS 生成与完整性自检复用。
+
+    currencies 与 spot_rates 由 _generate_exchange_rates 派生，
+    是 ODS 币种的唯一合法来源：ODS 只能取这里有的币种。
+    """
 
     entity_codes: list[str] = field(default_factory=list)
     trading_entities: list[str] = field(default_factory=list)
@@ -526,16 +533,53 @@ def _generate_line_items(ref_dir: Path, ref: ReferenceData) -> None:
     ref.row_counts["ref_fr2052a_line_items"] = write_csv(ref_dir / "ref_fr2052a_line_items.csv", header, rows)
 
 
-def _generate_exchange_rates(ref_dir: Path, ref: ReferenceData) -> None:
+def _generate_exchange_rates(
+    ref_dir: Path,
+    ref: ReferenceData,
+    inject_missing_fx: set[str] | None = None,
+) -> None:
+    """生成汇率表，并把「全量币种集合」交给 ODS 抽取使用。
+
+    契约：
+        - 汇率表是**正常状态下**的全量币种来源：ODS 各表抽到的币种必须都在汇率表里。
+        - 唯一例外是**故意注入**：ODS 仍会照常抽到该币种，只是汇率表里没有这一行 ——
+          这正是「缺汇率」这类缺陷数据的样子，由 dbt 断言把它变成显式失败。
+        - 唯一键 (rate_date, from_currency, to_currency, rate_type) 不得重复。
+
+    Args:
+        ref_dir: REF 输出目录
+        ref: 引用数据容器，本函数写入 currencies 与 spot_rates
+        inject_missing_fx: 故意不写汇率行的币种集合，用于验证「缺汇率必须失败」。
+            正常生产时不传。传入后：汇率表少这些行，但 ODS 的抽币种池不收缩
+            （否则 ODS 会退化成不抽该币种，缺汇率的场景反而造不出来）。
+    """
+    inject_missing_fx = inject_missing_fx or set()
+    if inject_missing_fx:
+        print(f"  [INJECT] 本次故意注入缺汇率：{', '.join(sorted(inject_missing_fx))}")
+        print("  [INJECT] 这些币种不会出现在 ref_exchange_rates，但数据里仍可能抽到它们")
+        print("  [INJECT] 预期效果：dbt 的汇率覆盖断言报红（这才是缺陷数据该有的样子）")
+
     header = ["rate_date", "from_currency", "to_currency", "spot_rate", "rate_type", "rate_source"]
     rows = [
-        [REPORT_DATE.isoformat(), currency, "USD", rate, "MID", USD_RATE_SOURCE] for currency, rate in FX_RATES.items()
+        [REPORT_DATE.isoformat(), currency, "USD", rate, "MID", USD_RATE_SOURCE]
+        for currency, rate in FX_RATES.items()
+        if currency not in inject_missing_fx
     ]
-    rows.append([REPORT_DATE.isoformat(), "USD", "USD", 1.0, "MID", "INTERNAL"])
+    if "USD" not in inject_missing_fx:
+        rows.append([REPORT_DATE.isoformat(), "USD", "USD", 1.0, "MID", "INTERNAL"])
     ref.row_counts["ref_exchange_rates"] = write_csv(ref_dir / "ref_exchange_rates.csv", header, rows)
-    ref.currencies = [str(row[1]) for row in rows]
-    # 第 4 列由上面构造，必然是汇率；显式声明类型，避免对象元素的类型推断干扰。
-    ref.spot_rates = {str(row[1]): cast(float, row[3]) for row in rows}
+
+    # 唯一键断言：(rate_date, from_currency, to_currency, rate_type) 不得重复
+    seen: set[tuple[str, str, str, str]] = set()
+    for row in rows:
+        key = (str(row[0]), str(row[1]), str(row[2]), str(row[4]))
+        assert key not in seen, f"汇率表唯一键重复：{key}"
+        seen.add(key)
+
+    # 抽币种池取**全量**（FX_RATES + USD），不随注入收缩 —— 注入要让「数据里抽到该币种、
+    # 汇率表里没有」这种缺陷数据可复现，池子一起收缩就复现不出来了。
+    ref.currencies = [*FX_RATES.keys(), "USD"]
+    ref.spot_rates = {**{str(code): float(rate) for code, rate in FX_RATES.items()}, "USD": 1.0}
 
 
 def _generate_regulatory_mapping(ref_dir: Path, ref: ReferenceData) -> None:
@@ -603,14 +647,19 @@ def _generate_validation_rules(ref_dir: Path, ref: ReferenceData) -> None:
     ref.row_counts["ref_validation_rules"] = write_csv(ref_dir / "ref_validation_rules.csv", header, rows)
 
 
-def generate_all(ref_dir: Path) -> ReferenceData:
-    """生成全部 9 张 REF 表，返回可复用的外键集合。"""
+def generate_all(ref_dir: Path, inject_missing_fx: set[str] | None = None) -> ReferenceData:
+    """生成全部 9 张 REF 表，返回可复用的外键集合。
+
+    Args:
+        ref_dir: REF 输出目录
+        inject_missing_fx: 故意不写汇率行的币种集合，传给 _generate_exchange_rates。
+    """
     ref = ReferenceData()
     _generate_entity_hierarchy(ref_dir, ref)
     _generate_counterparty(ref_dir, ref)
     _generate_maturity_bucket(ref_dir, ref)
     _generate_line_items(ref_dir, ref)
-    _generate_exchange_rates(ref_dir, ref)
+    _generate_exchange_rates(ref_dir, ref, inject_missing_fx)
     _generate_regulatory_mapping(ref_dir, ref)
     _generate_behavior_assumptions(ref_dir, ref)
     _generate_calendar(ref_dir, ref)

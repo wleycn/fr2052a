@@ -58,7 +58,7 @@ Gold / ADS
 | `ref.ref_counterparty` | 交易对手主数据 |
 | `ref.ref_maturity_bucket` | 到期分桶定义 |
 | `ref.ref_fr2052a_line_items` | FR 2052a 行项目映射 |
-| `ref.ref_exchange_rates` | 汇率（报告日即期） |
+| `ref.ref_exchange_rates` | 汇率（报告日即期，折算目标恒为 USD） |
 | `ref.ref_regulatory_mapping` | 监管映射（字段 → Section / Line Item） |
 | `ref.ref_behavior_assumptions` | 行为假设（流出率、HQLA 分类） |
 | `ref.ref_calendar` | 银行营业日 |
@@ -228,7 +228,7 @@ CREATE TABLE ads.ads_fr2052a_alerts (
 | 现金流 Cap | 预期流入 ≤ 总流出 × 75%，超出按 75% 截断并记录 WARNING |
 | HQLA 二级资产上限 | Level 2A + Level 2B ≤ 总 HQLA × 40% |
 | Operational 存款 | 流出率低于 Non-Operational |
-| 币种转换 | 报告日即期汇率转 USD |
+| 币种转换 | 报告日即期汇率转 USD；汇率表必须覆盖业务数据里出现的全部（报告日, 币种）组合，缺行由 `dbt/tests/assert_fx_covered.sql` 断言失败拦住（折算失败必须出声，不允许静默变 NULL） |
 | 净额结算 | 仅有有效净额协议时允许 |
 
 ### 3.4 数据质量规则（VDQ）
