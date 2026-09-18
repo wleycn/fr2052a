@@ -37,6 +37,7 @@ TRUNCATE TABLE ads.ads_fr2052a_submission_audit;
 TRUNCATE TABLE ads.ads_restatement_log;
 TRUNCATE TABLE ads.ads_fr2052a_report_history;
 TRUNCATE TABLE ads.ads_fr2052a_validation_log;
+TRUNCATE TABLE ads.ads_pipeline_run_context;
 
 -- 熔断闸不是清空而是复位：这张表任何时刻都该有且只有一行全局状态。
 UPDATE ads.ads_circuit_breaker

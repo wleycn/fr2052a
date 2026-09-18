@@ -2,10 +2,10 @@
 
 链条（与 requirements/[99] §2.4 的设计一致，按当前已落地的环节展开）：
 
-    check_source_arrival → load_ref → replay_ods → load_bronze → dbt_run
+    run_context_open → check_source_arrival → load_ref → replay_ods → load_bronze → dbt_run
       → pii_vault → lineage → owd_scd2 → dq_validate → publish_access → export_pg
       → liquidity_monitor → verify_bronze → verify_silver → verify_scd2 → verify_ads → verify_rbac
-      → pipeline_health
+      → pipeline_health → run_context_close
 
 设计要点：
   1. 每个 Task 都是"SSH 到 Server 2 执行 run-daily-pipeline.sh 的某一个环节"，
@@ -69,6 +69,11 @@ with DAG(
     },
     tags=["fr2052a", "daily", "submission"],
 ) as dag:
+    run_context_open = ssh_task(
+        "run_context_open",
+        f"cd {REMOTE_DIR} && RUN_TYPE=DAILY bash run-daily-pipeline.sh run-context-open",
+        "运行上下文开口：把本次跑批的报告日、处理日、生效日写进库，所有环节与闸读它",
+    )
     check_source_arrival = ssh_task(
         "check_source_arrival",
         pipeline_command("check-source"),
@@ -154,6 +159,11 @@ with DAG(
         pipeline_command("health"),
         "健康巡检：熔断状态、质量失败数、Kafka 滞后、连接与磁盘。恒成功，只报不改判定",
     )
+    run_context_close = ssh_task(
+        "run_context_close",
+        pipeline_command("run-context-close"),
+        "运行上下文收口：把本次跑批标为成功",
+    )
     verify_rbac = ssh_task(
         "verify_rbac",
         pipeline_command("verify-rbac"),
@@ -161,7 +171,8 @@ with DAG(
     )
 
     (
-        check_source_arrival
+        run_context_open
+        >> check_source_arrival
         >> load_ref
         >> replay_ods
         >> load_bronze
@@ -179,4 +190,5 @@ with DAG(
         >> verify_ads
         >> verify_rbac
         >> pipeline_health
+        >> run_context_close
     )

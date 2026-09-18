@@ -6,6 +6,16 @@
     monitor 挂掉或漏判时不会静默放行（闸读不到状态就报错退出，而不是当成通过），
     且闸可以被任何下游环节复用，不依赖 Spark 是否在跑。
 
+判据（按检查顺序，先不通过即短路返回）：
+    1. 本报告日最近一次日批必须跑成功（读 ads.ads_pipeline_run_context，取最近一行）。
+       没有行 = 从未跑过日批；最新状态不是 SUCCEEDED = 当前批次没跑成。两者都判 UNKNOWN。
+       必须取「最近一次」而不是「存在过某次成功」：后者会被更早的成功掩盖掉当前失败的批次，
+       那就是本条判据要修的缺陷本身的翻版。
+    2. 本报告日必须有流动性判定痕迹（读 ads.ads_liquidity_metrics，count > 0）。
+       为 0 = 判定没跑过，等于没判，判 UNKNOWN。
+    3. 熔断闸行存在（读 ads.ads_circuit_breaker）。行不存在判 UNKNOWN。
+    4. 本报告日无阻断级预警（读 ads.ads_fr2052a_alerts）。
+
 退出码约定（上游 Airflow DAG 依赖它做阻断）：
     0  放行
     2  熔断中，禁止报送
@@ -49,11 +59,53 @@ def pg_connection() -> psycopg2.extensions.connection:
 
 
 def main() -> int:
-    """报送放行闸：熔断或对账未平即不放行。退出码 0 放行、2 阻断、3 取不到状态。"""
+    """报送放行闸：按四条判据依次检查，任一不通过即短路返回。退出码 0 放行、2 阻断、3 取不到状态。"""
     args = parse_args()
     connection = pg_connection()
     try:
         with connection.cursor() as cursor:
+            # 判据 1：本报告日最近一次日批必须跑成功。
+            # 必须取最近一行而不是「存在过某次成功」：
+            # 只看存在过会被更早的成功掩盖当前失败的批次，那就是本条判据要修的缺陷的翻版。
+            cursor.execute(
+                """
+                SELECT status FROM ads.ads_pipeline_run_context
+                WHERE report_date = %s
+                ORDER BY started_at DESC LIMIT 1
+                """,
+                (args.report_date,),
+            )
+            run_ctx = cursor.fetchone()
+            if run_ctx is None:
+                print(
+                    f"[UNKNOWN] 报告日 {args.report_date} 在运行上下文表里没有行，"
+                    "说明日批从未跑过，无法判定是否放行，按不放行处理。"
+                )
+                return EXIT_UNKNOWN
+            run_status = run_ctx[0]
+            if run_status != "SUCCEEDED":
+                print(
+                    f"[UNKNOWN] 报告日 {args.report_date} 最近一次日批状态为 {run_status}，"
+                    "不是 SUCCEEDED，无法判定是否放行，按不放行处理。"
+                )
+                return EXIT_UNKNOWN
+
+            # 判据 2：本报告日必须有流动性判定痕迹。
+            # 没有指标行 = 判定环节没跑过，等于没判，与「判了但没有预警」不同。
+            cursor.execute(
+                "SELECT count(*) FROM ads.ads_liquidity_metrics WHERE report_date = %s",
+                (args.report_date,),
+            )
+            metrics_row = cursor.fetchone()
+            metrics_count = metrics_row[0] if metrics_row is not None else 0
+            if metrics_count == 0:
+                print(
+                    f"[UNKNOWN] 报告日 {args.report_date} 在流动性指标表里没有行，"
+                    "说明判定环节没跑过，无法判定是否放行，按不放行处理。"
+                )
+                return EXIT_UNKNOWN
+
+            # 判据 3：熔断闸行存在。
             cursor.execute(
                 "SELECT state, reason, trip_count, updated_at FROM ads.ads_circuit_breaker WHERE scope = %s",
                 (args.scope,),
@@ -65,6 +117,7 @@ def main() -> int:
 
             state, reason, trip_count, updated_at = breaker
 
+            # 判据 4：本报告日无阻断级预警。
             cursor.execute(
                 """
                 SELECT alert_code, entity_code, severity, message, occurrence_count

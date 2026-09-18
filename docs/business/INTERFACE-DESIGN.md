@@ -208,20 +208,22 @@ python producers/replay_ods_to_kafka.py --data-dir <dir> --config <json>
 DAG 只做编排：每个任务 ssh 到 Server 2 调用跑批脚本的同一个环节，编排逻辑只有一份。
 
 ```text
-check_source_arrival          确认 7 张 ODS 源文件到位，避免空跑一整轮
-  → load_ref                  REF 字典表入 Iceberg
-  → replay_ods                样本明细按主题重放进 Kafka
-  → load_bronze               消费 Kafka 入 bronze，按主键 MERGE 去重
-  → dbt_run                   OWD → OWS → ADS 三层建模
-  → pii_vault                 建脱敏对照表
-  → lineage                   渲染血缘与监管映射
-  → owd_scd2                  OWD 版本历史归并（SCD2）
-  → dq_validate               执行 ref 层声明的质量规则
-  → publish_access            施加库侧迁移与授权（必须在 export_pg 之前）
-  → export_pg                 导出到报送服务层
-  → liquidity_monitor         算 LCR、产预警、翻转熔断闸
-  → verify_bronze → verify_silver → verify_ads → verify_rbac
-  → pipeline_health           巡检收口
+run_context_open             运行上下文开口：登记本次跑批的报告日/处理日/生效日
+  → check_source_arrival    确认 7 张 ODS 源文件到位，避免空跑一整轮
+  → load_ref                REF 字典表入 Iceberg
+  → replay_ods              样本明细按主题重放进 Kafka
+  → load_bronze             消费 Kafka 入 bronze，按主键 MERGE 去重
+  → dbt_run                 OWD → OWS → ADS 三层建模
+  → pii_vault               建脱敏对照表
+  → lineage                 渲染血缘与监管映射
+  → owd_scd2                OWD 版本历史归并（SCD2）
+  → dq_validate             执行 ref 层声明的质量规则
+  → publish_access          施加库侧迁移与授权（必须在 export_pg 之前）
+  → export_pg               导出到报送服务层
+  → liquidity_monitor       算 LCR、产预警、翻转熔断闸
+  → verify_bronze → verify_silver → verify_scd2 → verify_ads → verify_rbac
+  → pipeline_health         巡检收口
+  → run_context_close       运行上下文收口：把本次跑批标为成功
 ```
 
 **调度**：每日 06:00 触发，为 T+1 08:00 截止留余量；SLA 2 小时。
@@ -251,6 +253,7 @@ check_source_arrival          确认 7 张 ODS 源文件到位，避免空跑一
 - **触发**：每日 07:30，`retries=0`（熔断中重试没有意义）
 - **任务流**：`check_gate → generate_and_submit → verify_submission`
 - **放行约定**：`check_gate` 退出码 0 才继续；2（熔断）与 3（判不了）都视为不放行
+- **判据（按检查顺序）**：① 本报告日最近一次日批状态为 SUCCEEDED（读 `ads.ads_pipeline_run_context`，取最近一行）② 本报告日有流动性判定痕迹（`ads.ads_liquidity_metrics` 行数 > 0）③ 熔断闸行存在 ④ 本报告日无阻断级预警。前两条缺失即判 UNKNOWN（退出码 3），区分「今天没有预警」与「今天根本没判」
 - **产物**：每个实体各一份 XBRL / XML / CSV，落 `ads.ads_fr2052a_submission` 台账（按 report_id + file_format 唯一，一个文件一行）
 
 ## 6. 血缘与监管映射接口

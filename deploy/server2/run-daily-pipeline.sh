@@ -43,6 +43,7 @@ fi
 #               不在日批里跑 —— 否则日批会因熔断而整体红，看不出是哪一环的问题
 #   submission  报送文件生成，同理
 STEPS=(
+  run-context-open
   ref-load
   ods-replay
   bronze-load
@@ -59,6 +60,7 @@ STEPS=(
   verify-scd2
   verify-ads
   verify-rbac
+  run-context-close
 )
 
 declare -A STEP_DESC=(
@@ -82,6 +84,8 @@ declare -A STEP_DESC=(
   [realtime-summary]="实时敞口汇总：从事件表读本轮预警"
   [verify-submission]="核对报送：从磁盘重算哈希与台账比对"
   [verify-rbac]="权限自测：逐角色实读，与权限声明比对"
+  [run-context-open]="运行上下文开口：登记本次跑批处理的报告日/处理日/生效日"
+  [run-context-close]="运行上下文收口：把本次跑批标为成功"
   [health]="跑批健康巡检：熔断/质量/报送/Kafka 滞后/连接/磁盘"
   [time-travel]="时间旅行：列出 Iceberg 快照（审计用）"
   [maintain-tables]="表维护：快照保留与文件合并（默认演练）"
@@ -94,6 +98,12 @@ declare -A STEP_DESC=(
 
 execute_step() {
   case "$1" in
+    run-context-open)
+      ./venv/bin/python "$HOST_APP_DIR/python/governance/run_context.py" \
+        --open --batch-id "$BATCH_ID" --report-date "$REPORT_DATE" \
+        --processing-date "$PROCESSING_DATE" --effective-date "${EFFECTIVE_DATE:-$PROCESSING_DATE}" \
+        --run-type "${RUN_TYPE:-MANUAL}"
+      ;;
     check-source)
       # 必须用宿主路径：SSH 进来执行时看不到容器内的 /opt/fr2052a-app。
       # 也不能直接用 `ls | wc -l` —— wc 恒退出 0，缺文件时这一步照样"成功"。
@@ -210,6 +220,10 @@ execute_step() {
       ;;
     verify-rbac)
       ./venv/bin/python "$HOST_APP_DIR/python/governance/verify_rbac.py"
+      ;;
+    run-context-close)
+      ./venv/bin/python "$HOST_APP_DIR/python/governance/run_context.py" \
+        --close --batch-id "$BATCH_ID" --status SUCCEEDED
       ;;
     health)
       # 巡检恒返回 0：监控是观测手段，不是闸门。当闸用会让「监控挂了」与「系统有问题」无法区分。

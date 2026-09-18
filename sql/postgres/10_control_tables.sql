@@ -246,6 +246,32 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
+-- 5c. 运行上下文：一次跑批一行，把报告日 / 处理日 / 生效日从脚本默认值
+--     变成库里的状态行。所有环节与放行闸都读它，不再各自拿一个日期。
+--     日期链 CHECK 把当前口径编码进 schema：处理日 = 报告日 + 1，生效日 = 处理日。
+--     口径变了就必须改约束，是一次看得见的动作而不是口头约定。
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ads.ads_pipeline_run_context (
+    batch_id TEXT PRIMARY KEY,                         -- 批次号，一次跑批的唯一标识
+    report_date DATE NOT NULL,                         -- 报告日（= 业务日期），本次跑批处理哪一天的数据
+    processing_date DATE NOT NULL,                     -- 处理日，跑批实际执行的日期
+    effective_date DATE NOT NULL,                      -- 生效日，数据版本从哪天开始生效
+    run_type TEXT NOT NULL,                            -- DAILY = 日批 DAG 拉起；MANUAL = 人工整链跑
+    status TEXT NOT NULL,                              -- RUNNING 未收口 / SUCCEEDED / FAILED
+    started_at TIMESTAMP NOT NULL,                     -- 开口时刻
+    finished_at TIMESTAMP,                             -- 收口时刻，未收口为 NULL
+    CONSTRAINT ads_pipeline_run_context_date_ck
+        CHECK (processing_date = report_date + 1 AND effective_date = processing_date),
+    CONSTRAINT ads_pipeline_run_context_type_ck CHECK (run_type IN ('DAILY', 'MANUAL')),
+    CONSTRAINT ads_pipeline_run_context_status_ck CHECK (status IN ('RUNNING', 'SUCCEEDED', 'FAILED'))
+);
+
+COMMENT ON TABLE ads.ads_pipeline_run_context IS '运行上下文：一次跑批的日期与状态，所有环节与放行闸的单源';
+
+CREATE INDEX IF NOT EXISTS idx_run_context_report_date
+    ON ads.ads_pipeline_run_context (report_date, started_at DESC);
+
+-- ---------------------------------------------------------------------------
 -- 6. 重述登记：原报表与新报表成对留痕。
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ads.ads_restatement_log (
