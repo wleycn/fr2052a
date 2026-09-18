@@ -588,3 +588,9 @@ DAG 只写 `pipeline_command("check-source")`。正负两向都实跑过：正�
 </details>
 
 **子代理声明未验证的点**：所有依赖运行态的结论均未验证：服务器 192.168.17.22/24 上的容器、Kafka 主题、Iceberg 表、PG 表内容与行数（禁 docker/ssh），因此「16 个环节全绿」「3 分 11 秒 / 4 分 04 秒」「单批次固定 20 行」「基线 8/8 PAS；ACCEPTANCE-CHECKLIST.md:38 的 CI 证据（运行 35237994950，head_sha 37a5d26，success；反向验证 35238108100 failure）未在 GitHub 侧复核；本地 git log 确有 37a5d26 提交，但；ACCEPTANCE-CHECKLIST.md:34 「两台服务器均无漂移」需在 dev 机跑 `bash deploy/sync-deploy.sh --check`（涉及 ssh 到两台服务器），未执行。；ACCEPTANCE-CHECKLIST.md:44 「16/16 表结构匹配」需在 Server 2 跑 verify_ods_schema.py；静态核对显示 LAYOUT=((ref, ref),(bronze, ods)) 对应 9 张 ref + 7 张 ODS = 1；requirements/ 只做了技术选型关键词检索（DataHub / Great Expectations / Grafana / Prometheus / Superset / BIGSERIAL / 80% / Flink / Hive 等），未逐篇通读 6934 行需求；docs/build-log.md 仅核对了标题层级与 E0–E7 存在，未逐段核对日志内的数字与命令。；make lint 已实跑通过（ruff check + ruff format --check + mypy，`39 files already formatted`、`Success: no issues found in 39 source files`），未加 --fix；INTERFACE-DESIGN §5.3 报送 DAG 参数（report_date/entity_code/reason/requested_by/approved_by/effective_date）与 fr2052a_backfill_and_restate.py 的 p
+
+---
+
+## 后续处置（2026-09-18）
+
+本报告第 2 条发现曾经以「补机器闸」的方式部分收口：新增 `.githooks/commit-msg`，要求 agent 会话的提交信息带 `[AI]` 前缀。用户随后裁决撤销该机制，理由是不该在提交信息里体现执行者是谁，agent 提交即用户提交。钩子已删除，`AGENTS.md` §5 与 `docs/rules/CODING-STANDARD.md` 的措辞同步更正，代码文件头的 `[AI-GENERATED]` 与 `reviewed_by` 保留。本报告其余处置结论不变，撤销过程见 `docs/changes/engineering.md` 的 `commit-message-policy` 条目。

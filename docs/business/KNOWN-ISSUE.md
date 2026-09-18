@@ -55,9 +55,10 @@
 | 覆盖写显式开 `truncate=true` | Spark JDBC 写库默认 `truncate=false`，即 DROP + CREATE | 导出作业显式 `truncate=true`，写前比对模型列与目标表列 | ✅ 决策：默认行为会静默清掉授权、触发器与库侧列 |
 | 数据质量用自研规则引擎 | `[99]详细材料.md` 指定 Great Expectations | 规则定义已在 `ref.ref_validation_rules`，由 `run_dq_rules.py` 执行 | ✅ 决策：转成 GX suite 等于规则定义存两份，必然漂移 |
 | 血缘用 dbt meta 自渲染 | `[99]详细材料.md` 指定 DataHub | `dbt/models/**/schema.yml` 的 meta 声明 + `render_lineage.py` 渲染 | ✅ 决策：DataHub 部署成本高，演示价值等价 |
-| 机器门禁只落地一半 | 红线要求「能写成 lint、检查脚本或 CI check，就不指望模型读到」 | `[AI]` 提交标记已由 `.githooks/commit-msg` 拦下；**头注缺失告警**与**被引用文件存在性检查**尚未实现 | ⏳ 待决策：补两个检查脚本，或在 AGENTS 里保持「未实现」的明说（当前已改为明说）|
+| 机器门禁只落地一半 | 红线要求「能写成 lint、检查脚本或 CI check，就不指望模型读到」 | 代码侧闸已齐（`make lint` + 本地钩子 + CI）；**头注缺失告警**与**被引用文件存在性检查**尚未实现。曾是机器闸的 `[AI]` 提交标记已按用户决定撤销 | ⏳ 待决策：补两个检查脚本，或在 AGENTS 里保持「未实现」的明说（当前已改为明说）|
 | 监控与 BI 栈未落地 | 需求文档提到 Grafana / Prometheus / Superset | 三者都没有部署，巡检由 `pipeline_health.py`、血缘由 `render_lineage.py` 直接输出 | ⏳ 待决策：接监控栈，或明确「演示项目不做面板」并保留现状 |
-| 变更留痕目录为空 | AGENTS 要求功能变更在 `docs/changes/{module}.md` 追加条目 | 目录存在但为空；E6/E7 的变更落在 `docs/build-log.md` 与 `KNOWN-ISSUE.md` | ⏳ 待决策：按格式补 E6/E7 条目，或调整规则 |
+| 变更留痕目录为空 | AGENTS 要求功能变更在 `docs/changes/{module}.md` 追加条目 | 已按格式补齐：`docs/changes/engineering.md` 收录 E6 质量闸、E7 审查修复与本次工程变更 | ✅ 已补：条目格式为四段（范围 / 变更 / 验证 / 回滚），见 `docs/changes/engineering.md` 的 `changes-trail-bootstrap` |
+| 直接在 main 提交 | `AGENTS.md` §4 要求走 feature 分支再提交 MR | 全部历史都在 main 上直接提交，仓库只有 main 一个分支 | ⏳ 待决策：单人加 agent 的项目没有第三方评审人，分支与 MR 只增加动作；若保留该红线，须同步改 §4 并写明谁 review |
 | DQ 结果日志按批次先清后写 | 上游未定义日志粒度 | 一行 = 一个批次的一条规则，重跑前由 `clear_dq_batch.py` 清该批次 | ✅ 决策：不清则重跑静默翻倍，「本批次几条 ERROR」随之翻倍 |
 | lint 口径排除 4 类规则 | 上游要求 `ruff check .`、`ruff format .`、`mypy .` 全过 | 配置收在项目根 `pyproject.toml`，排除 `D415`、`N812`、`RUF001`、`RUF002`、`RUF003` | ✅ 决策：前两类与中文写作冲突（`D415` 只认 ASCII 句末标点、`RUF001-003` 把全角标点当歧义字符），`N812` 与 PySpark 的 `functions as F` 写法冲突。逐条理由与命中数写在 `pyproject.toml` 注释里；无命中的 `D401`/`D202` 不排除，继续管事 |
 | 提交闸两道，本地在前 | 上游要求「等待 CI 通过」后合并 | 本地 `.githooks/pre-commit` 跑 `make lint`；推送后 GitHub Actions 跑同一条命令 | ✅ 决策：本地那道先拦住，省一次往返；CI 兜住没配钩子的克隆。gitee 只作镜像，没有 runner |
@@ -84,6 +85,7 @@
 - **lint 排除 4 类规则**（✅ 决策）——代价：这几类问题不再有机器兜底，只能靠评审看；回退：删掉 `pyproject.toml` 里对应的 `ignore` 项并批量整改
 - **提交闸本地优先**（✅ 决策）——代价：本地与 CI 都要维护可用环境，版本口径靠 `Makefile` 单源约束；回退：删掉 `.githooks/`，只留 CI
 - **不建单元测试套件**（✅ 决策）——代价：函数级回归只能靠核对脚本与端到端重跑，粒度偏粗；回退：补 pytest 套件并接进 `make lint`
-- **机器门禁减半**（⏳ 待决策）——代价：头注与文件引用仍靠人工核对；回退：把 AGENTS 里的两处声明删掉即可自洽
+- **机器门禁减半**（⏳ 待决策）——代价：头注与文件引用仍靠人工核对；回退：把 AGENTS 里的两处声明删掉即可自洽。`[AI]` 提交标记闸已按用户决定撤销，不在本项范围内
 - **监控栈缺席**（⏳ 待决策）——代价：没有历史趋势与告警推送，只有一次性的巡检输出；回退：接入 Prometheus + Grafana（约一张 compose 文件）
-- **变更留痕空转**（⏳ 待决策）——代价：按模块查变更史要翻 build-log；回退：按现有格式补条目
+- **变更留痕启用**（✅ 已补）——代价：每次功能与契约变更多写一条四段条目；回退：删除 `docs/changes/` 下的条目文件并恢复 AGENTS §6 的原始措辞
+- **直接提交主分支**（⏳ 待决策）——代价：没有分支隔离，出问题只能靠 revert 回退；回退：恢复 feature 分支加 MR 流程，并指定评审人

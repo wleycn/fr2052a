@@ -61,9 +61,9 @@
 ## 5. 输出要求
 
 - 只给代码或明确的 diff，不夹带无关说明
-- 在改动的**代码文件**头部加 `[AI-GENERATED] model=<m> date=<d> reviewed_by=<human>` 注释。两类文件豁免：装配工具生成的产物、以及文档。它们的来源由下面的 commit 标记与变更留痕承担。
+- 在改动的**代码文件**头部加 `[AI-GENERATED] model=<m> date=<d> reviewed_by=<human>` 注释。两类文件豁免：装配工具生成的产物、以及文档。它们的来源由下面的变更留痕承担。
 - `reviewed_by=pending` 表示还没有人 review 过；review 完成后由 review 者替换成自己的名字。
-- agent 提交的 commit message 必须含 `[AI]`，人工提交不带标记。缺 `[AI]` 的 agent 会话提交由 `.githooks/commit-msg` 拦下。头注缺失的告警检查尚未实现，已登记在 `KNOWN-ISSUE.md`。
+- commit message 写清「改了什么 + 为什么」，**不区分提交者**：agent 是代用户执行，它提交的即用户提交，不加 `[AI]` 一类标记。头注缺失的告警检查尚未实现，已登记在 `KNOWN-ISSUE.md`。
 - 单次变更不超过文件总量的 **40%**。阈值**只对改动前达到 200 行的文件**适用，不足 200 行不受限。超出就拆成多次，逐步验证。
 - 注释与 docstring 要和代码在同一个提交里改。不许留下与实现不符的注释。注释解释「**为什么**」，不复述「是什么」。细则见 `docs/rules/CODING-STANDARD.md` 的注释一节。
 - 写文档、写回报、写交付说明之前，先载入技能 `docs-writing-discipline`，按其检查表通读一遍再交
@@ -71,7 +71,7 @@
 
 ## 6. 变更留痕
 
-功能或契约变更，在 `docs/changes/{module}.md` **追加**一条目。条目 slug 与分支名同名，条目格式照 `docs/changes/` 下已有条目（该目录当前为空，模板待补，见 `KNOWN-ISSUE.md`）。`{module}` 取 `python/` 顶层模块目录名；非功能变更落 `engineering.md`。该目录**只放条目文件**，不放 README、说明或附件。模块清单见 §9 项目地图。
+功能或契约变更，在 `docs/changes/{module}.md` **追加**一条目。条目格式照 `docs/changes/` 下已有条目，四段为范围 / 变更 / 验证 / 回滚；首个条目见 `docs/changes/engineering.md`。`{module}` 取 `python/` 顶层模块目录名；非功能变更落 `engineering.md`。该目录**只放条目文件**，不放 README、说明或附件。模块清单见 §9 项目地图。
 
 - 上线后追加部署记录。
 

@@ -148,16 +148,13 @@ WHERE severity = 'CRITICAL' AND is_resolved = FALSE;
 
 ### Commit 消息
 
-- 格式：`[AI] type: subject`（agent 提交）或 `type: subject`（人工提交）
+- 格式：`type: subject`，不区分提交者（agent 代用户执行，它提交的即用户提交）
 - type: feat/fix/docs/chore
 - subject: ≤ 72 字符
 
 ### 示例
 
 ```bash
-# Agent 提交
-git commit -m "[AI] feat: add GL reconciliation logic"
-
-# 人工提交
+git commit -m "feat: add GL reconciliation logic"
 git commit -m "fix: apply HQLA 40% cap in ADS model"
 ```
