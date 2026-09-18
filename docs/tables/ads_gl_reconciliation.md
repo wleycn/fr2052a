@@ -14,7 +14,9 @@ Gold（Iceberg）与 ADS（PostgreSQL）同一份数据的两个落点
 
 ## 业务主键
 
-`report_date` + `entity_code` + `section_code` + `gl_account_id`。
+`report_date` + `entity_code` + `section_code`（库侧有同名唯一约束 `ads_gl_reconciliation_uk`）。
+
+`gl_account_id` 不是键的一部分：一个 Section 可能对应多个总账科目（`C` = `2001+2002`、`E` = `1001+1100`），该列存的是科目组合的展示串，不拆分行。
 
 ## 去重方式
 

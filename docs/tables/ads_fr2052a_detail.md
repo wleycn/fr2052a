@@ -14,7 +14,9 @@ Gold（Iceberg）与 ADS（PostgreSQL）同一份数据的两个落点
 
 ## 业务主键
 
-无单独主键列，业务键为上述维度组合。
+无单独主键列，业务键是九维组合：`report_date` + `entity_code` + `is_intracompany` + `section_code` + `line_item` + `product_category` + `counterparty_type` + `currency_code` + `maturity_bucket`（库侧有同名唯一约束 `ads_fr2052a_detail_dim_uk`）。
+
+九维就是模型里五个明细 CTE 的 `group by` 维度 —— 明细是这些维度下的下钻，同一组合出现两行即重复。
 
 ## 去重方式
 
