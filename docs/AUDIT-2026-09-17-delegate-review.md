@@ -197,8 +197,8 @@ DAG 只写 `pipeline_command("check-source")`。正负两向都实跑过：正�
 | 4 | 高 | 报表与对账模型都不按 report_date 限定：多报告期共存时金额跨期串加、合并行翻倍 | ⬜ 待你定（证据已核，未动） |
 | 5 | 高 | ENT001 同时是真实法人实体与集团合并行代码，主键 (report_date, entity_code) 不含口径，无法承载声明的粒度 | ⬜ 待你定（证据已核，未动） |
 | 6 | 高 | 三张报表表（report/detail/gl_reconciliation）全库无主键或唯一约束，且注释声称存在的『补键列 DO 块』在本仓 sql/ 中并不存在 | ⬜ 待你定（证据已核，未动） |
-| 7 | 高 | 汇率 LEFT JOIN 无缺行保护：折算失败时金额静默变 NULL，而 ref 汇率表只有报告日一行 | ⬜ 待你定（证据已核，未动） |
-| 8 | 中 | stg_fx_rates 未限定 to_currency='USD'，OWD 各表 join 只用 currency，多目标币种时会行放大 | ⬜ 待你定（证据已核，未动） |
+| 7 | 高 | 汇率 LEFT JOIN 无缺行保护：折算失败时金额静默变 NULL，而 ref 汇率表只有报告日一行 | ✅ 已修（批次 C1）：OWD 的 join 形态不动，改为**在批次级把缺汇率变成失败** —— 新增 singular test `dbt/tests/assert_fx_covered.sql`（ODS 六张明细表出现的（报告日, 币种）缺 MID 汇率即失败），并让 `dbt-run` 环节在建模后跑断言、不过即整条日批红。同时把「汇率与数据自洽」写成契约 + 生成器自检项（比对写出的汇率 CSV），新增 `--inject-missing-fx` 让缺汇率只能来自「故意制造的缺陷数据」。实测：注入 JPY 后探针确认缺陷状态（汇率表 9 币种无 JPY、bronze 有 82 行 JPY），同态跑日批断言 ERROR=1、环节退 1；恢复正常数据后退 0。留存问题（下一批处理）：汇率表仍只有报告日一天，多报告期需要 C2/C4 一起把日期维度补上 |
+| 8 | 中 | stg_fx_rates 未限定 to_currency='USD'，OWD 各表 join 只用 currency，多目标币种时会行放大 | ✅ 已修（批次 C1）：`stg_fx_rates` 加 `and to_currency = 'USD'`，注释写明多目标币种会行放大、本项目只折 USD；生成器侧汇率行的折算目标恒为 USD |
 | 9 | 中 | 行为假设 join 缺 customer_segment，且未命中时静默套用 10% 默认流失率 | ⬜ 待你定（证据已核，未动） |
 | 10 | 中 | is_encumbered 为 NULL 时三层三种处理方式，导致 Section I（非受限+受限）加不回 Section G | ⬜ 待你定（证据已核，未动） |
 | 11 | 中 | 受保存款限额在『原币』上截断 25 万美元，外币存款的受保金额量级错误 | ⬜ 待你定（证据已核，未动） |
