@@ -59,4 +59,4 @@ PostgreSQL 常驻表，按环节写入或覆盖；无快照与压缩策略。
 
 ## 质量规则清单
 
-列级映射来自 `ref.ref_regulatory_mapping`，表级边来自 dbt 模型依赖；当前落 48 条表级边与 20 条列级监管映射。
+列级映射来自 `ref.ref_regulatory_mapping`，表级边来自 dbt 模型依赖；当前落 52 条表级边与 36 条列级监管映射。

@@ -20,6 +20,8 @@
 | 监控 | Prometheus + Grafana（指标来自巡检脚本的 `--json` 输出，Server 2 采集、Server 1 出面板） | Prometheus 2.55.1 / Grafana 11.5.1 |
 | 代码质量闸 | ruff（检查 + 格式化）+ mypy，配置在项目根 `pyproject.toml` | ruff 0.14.4 / mypy 1.18.2 |
 
+版本口径：表里的版本是**实测值**。可核的 pin 在 `deploy/server1/.env.example`（Airflow 与 MinIO 镜像）与 `deploy/server2/setup-venv.sh`（dbt 三件套与 PySpark）；PostgreSQL 镜像只 pin 到主版本 `postgres:18-alpine`，补丁版本由镜像发布方决定。
+
 ## 目录分层
 
 ```
@@ -42,6 +44,8 @@ demo-fr2052a/
 │   │   ├── CODING-STANDARD.md
 │   │   ├── DEVELOP-FLOW.md
 │   │   └── ACCEPTANCE-CHECKLIST.md
+│   ├── CRON-DESIGN.md         # 定时任务说明（DAG 调度与服务器 cron 的单一落点）
+│   ├── changes/               # 变更留痕（逐笔，每模块一份）
 │   └── build-log.md           # 构建日志（逐阶段记录）
 ├── deploy/
 │   ├── server1/               # Server 1 部署清单（PG + MinIO + Airflow + 监控）与 Airflow DAG
@@ -70,6 +74,7 @@ demo-fr2052a/
 ├── config/
 │   ├── pipeline_topics.json   # 主题契约（唯一来源）
 │   └── liquidity_thresholds.json  # 阈值契约（唯一来源）
+├── todo/                      # 交接单（会话接力，状态写在文件名后缀）
 └── sample_data/               # 样本数据（可重建，不落 git）
 ```
 
@@ -78,10 +83,11 @@ demo-fr2052a/
 | 目录 | 职责 | 谁写 |
 |------|------|------|
 | `references/` | 原始需求归档（参考，不落九文档） | 项目启动时产生 |
-| `docs/business/` | 九项核心文档（真源） | 编码前/后同步更新 |
+| `docs/business/` | 业务文档七份（九文档体系的正文部分，真源） | 编码前/后同步更新 |
 | `docs/tables/` | 表契约（一表一份：层级 / 粒度 / 主键 / 去重 / 分区 / 金额口径 / PII / 生命周期 / SLA / 依赖 / 质量规则） | 新增或变更表时同步 |
 | `docs/rules/` | 跨项目复用规范 | 架构师制定，全员遵守 |
 | `docs/build-log.md` | 构建日志（逐阶段追加） | 每阶段完成时追加 |
+| `docs/CRON-DESIGN.md` | 全部定时任务的单一说明（DAG 调度与服务器 cron） | 调度变更时同步 |
 | `deploy/` | 部署清单（不含凭据） | 运维/DevOps |
 | `sql/` | DDL（真源） | DBA/架构师 |
 | `dbt/models/` | 转换逻辑（真源） | 数据工程师 |
@@ -137,12 +143,12 @@ Airflow 里的 DAG 默认**暂停**：`fr2052a_daily_batch`、`fr2052a_backfill_
 
 ## 已知坑
 
-详见 [KNOWN-ISSUE.md](KNOWN-ISSUE.md#已知坑)。
+详见 [KNOWN-ISSUE.md](KNOWN-ISSUE.md#已知坑与决策)。
 
 - `#pg18-data-dir-change` — PG 18 改了数据目录约定
 - `#spark-minio-endpoint` — Spark 连接 MinIO 必须用 IP，不能用 localhost
 - `#gl-reconciliation-mismatch` — GL 对账需按 Section 汇总后比对
-- `#hqla-cap-not-applied` — HQLA 二级资产 40% 上限需显式截断
+- `#hqla-cap-not-applied` — HQLA 二级资产上限需显式截断（基数口径见 `#hqla-cap-basis`）
 - `#hqla-cap-basis` — HQLA 二级资产上限的基数是扣除后的 HQLA，等价于一级资产的 2/3
 - `#section-a-d-empty` — 报表 Section A 与 D 的 6 列在演示环境恒为 NULL
 - `#catalog-name-drift` — Iceberg catalog 改名后旧注册行还在，清理脚本成了空操作
@@ -152,6 +158,14 @@ Airflow 里的 DAG 默认**暂停**：`fr2052a_daily_batch`、`fr2052a_backfill_
 - `#dockerhub-image-removed` — minio/spark 官方镜像已从 Docker Hub 下架
 - `#detail-report-mismatch` — 明细与报表口径不一致（正回购/30天过滤）
 - `#scd2-reversed-interval` — 版本区间不得反向（失效日早于生效日）
+- `#dead-ows-tables` — 三张 OWS 汇总表无消费者（登记待下线）
+- `#report-history-reset-exception` — 版本历史表不在复位清单（历史不可变是硬性质）
 - `#delegate-audit-20260917` — 三路独立审查的 80 条发现与处置
+- `#recon-benchmark-synthetic` — Section E 的独立基准在演示环境里是构造出来的
+- `#cumulative-gap-column-removed` — 累计缺口列删除（与净缺口同值）
+- `#row-hash-baseline-reset` — 改 row_hash 定义必须先重建版本基线
+- `#export-after-submission-gate` — 已报送期的覆盖写闸（内容指纹判据）
 - `#retired-report-id-in-ledger` — 报表身份改名后，台账会留下对不上报表的孤儿行
 - `#monitoring-stack-scope` — 监控接 Prometheus 与 Grafana，指标来自巡检脚本，不推送
+- `#audit-access-log-no-writer` — 读取审计表当前没有写入方
+- `#read-audit-gap` — 读取级留痕未部署（pgaudit / 语句日志）

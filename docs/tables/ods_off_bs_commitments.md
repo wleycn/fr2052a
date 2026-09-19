@@ -53,7 +53,7 @@ Bronze（源系统接入，Iceberg `bronze` 命名空间）
 
 ## PII 字段与脱敏方式
 
-本层保留原始标识（如 `account_number`、`customer_id`），**脱敏在 OWD 层发生**。明文对照只住 `secure.fr2052a_pii_map`，由合规员与管理员两个角色可见。
+本表无 PII 列，无需脱敏：列清单里的标识是 `commitment_id`（承诺编号）与 `counterparty_id`（交易对手编号），后者是机构编码 —— 本演示的表外账簿只与金融机构往来，标识的是机构不是个人，属商业机密而非个人数据，故有意保留明文（脱敏边界声明见 `dbt/models/staging/schema.yml`）。
 
 ## 生命周期
 

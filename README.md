@@ -19,8 +19,8 @@ FR 2052a 是美联储针对大型复杂银行组织的流动性监控报告，�
 
 | 位置 | 承载 | 组件 |
 |---|---|---|
-| Server 1 `192.168.17.22` | 存储与调度 | PostgreSQL 18.6、MinIO、Airflow 2.10.5 |
-| Server 2 `192.168.17.24` | 计算与消息 | Kafka 4.3.1、Spark 3.5.9、Iceberg 1.11 |
+| Server 1 `192.168.17.22` | 存储与调度 | PostgreSQL 18.6、MinIO、Airflow 2.10.5、Prometheus + Grafana |
+| Server 2 `192.168.17.24` | 计算与消息 | Kafka 4.3.1、Spark 3.5.9、Iceberg 1.11、node_exporter 指标暴露 |
 | 开发机 `192.168.17.11` | 代码与驱动脚本 | 本仓库、样本数据生成器、重置与同步脚本 |
 
 数据分层与写入方：
@@ -72,7 +72,7 @@ git config core.hooksPath .githooks   # 做一次：之后每次提交前自动�
 |---|---|
 | 跑整条链路 | `bash run-daily-pipeline.sh` |
 | 只跑某几个环节 | `bash run-daily-pipeline.sh dbt-run dq-rules export-pg` |
-| 列出全部环节及说明 | `bash run-daily-pipeline.sh --help` |
+| 列出全部环节及说明 | `bash run-daily-pipeline.sh --list` |
 | 让 Airflow 按环节接管 | 见 `deploy/server1/airflow/dags/`（5 个 DAG，环节调同一份编排） |
 | 单跑接入或实时扫描 | `bash run-daily-pipeline.sh ods-replay realtime-scan` |
 | GL 对账 | 由 `dbt-run` 产出结论、`verify-ads` 核对；单跑对账 DAG 见 `deploy/server1/airflow/dags/fr2052a_gl_reconciliation.py` |
@@ -94,6 +94,8 @@ demo-fr2052a/
 │   ├── business/              # 工程文档（业务文档七份）
 │   ├── tables/                # 表契约（一表一份）
 │   ├── rules/                 # 规范文件（结构 / 编码 / 流程 / 验收）
+│   ├── changes/               # 变更留痕（逐笔，每模块一份）
+│   ├── CRON-DESIGN.md         # 定时任务说明（DAG 调度与服务器 cron）
 │   └── build-log.md           # 构建日志（E0 起逐阶段记录）
 ├── deploy/
 │   ├── server1/               # Server 1 部署（PG + MinIO + Airflow + 监控）与 Airflow DAG
@@ -108,13 +110,15 @@ demo-fr2052a/
 ├── python/
 │   ├── generators/            # 样本数据生成（固定种子，可复现）
 │   ├── lakehouse/             # Iceberg 读写、SCD2、重述、表维护
-│   ├── producers/ consumers/  # Kafka 生产与消费
+│   ├── producers/             # Kafka 生产
+│   ├── consumers/             # Kafka 消费入湖
 │   ├── exporters/             # 导出到 PostgreSQL、报送文件生成
 │   ├── validators/            # 数据质量、放行闸、报送核对
 │   ├── alerts/                # 熔断判定、实时敞口扫描与汇总
 │   ├── governance/            # 血缘、脱敏对照表、权限核对、巡检
 │   └── audit/                 # 时间旅行与追溯
 ├── config/                    # 主题清单、阈值声明（唯一来源）
+├── todo/                      # 交接单（会话接力，状态写在文件名后缀）
 └── sample_data/               # 样本数据（可重建）
 ```
 

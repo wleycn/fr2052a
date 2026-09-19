@@ -6,7 +6,7 @@ Ref（引用数据，Iceberg `ref` 命名空间）
 
 ## 主题
 
-数据质量规则定义：20 条 VDQ 的表达式、层级、严重度。
+数据质量规则定义：21 条 VDQ（`VDQ-001` 至 `VDQ-021`）的表达式、层级、严重度。
 
 ## 粒度
 
@@ -55,7 +55,7 @@ Iceberg v2 表，快照保留 7 天或至少 10 个（`python/lakehouse/maintain
 
 ## 上下游依赖
 
-- **上游**：无上游表，种子来自 `python/generators/ref_data.py`（与 `[02]模块设计.md` §2.7 的 20 条逐条对应）。
+- **上游**：无上游表，种子来自 `python/generators/ref_data.py`（与 `[02]模块设计.md` §2.7 的 20 条逐条对应，另加实现期新增的 `VDQ-021` 质押标记取值合法，全集 21 条）。
 - **下游**：`python/validators/run_dq_rules.py` 读它执行校验，结论落 `ads.ads_fr2052a_validation_log`。
 
 ## 质量规则清单

@@ -58,4 +58,8 @@ Iceberg v2 表，快照保留 7 天或至少 10 个（`python/lakehouse/maintain
 
 ## 质量规则清单
 
-本层规则共 8 条：`VDQ-003` 金额非负、`VDQ-004` 利率区间、`VDQ-005` 币种三位 ISO、`VDQ-006` 已用额度不超授信、`VDQ-007` 回购抵押品市值合理、`VDQ-008` 到期日不早于报告日、`VDQ-009` 折算误差小于 1%、`VDQ-020` LEI 格式。
+本表不是 `run_dq_rules.py` 的规则目标：`RULE_TARGETS` 里那 8 条规则没有一条落到 `silver.stg_fx_rates` —— `VDQ-003` 落 `silver.owd_deposits`，`VDQ-004` 落 `owd_deposits`/`owd_secured_financing`/`owd_loans`，`VDQ-005` 落 `ALL_OWD`，`VDQ-006` 落 `owd_loans`，`VDQ-007` 落 `owd_secured_financing`，`VDQ-008` 落 5 张 `owd_*`，`VDQ-009` 是跨表规则（由 `python/lakehouse/verify_silver.py` 重算覆盖），`VDQ-020` 落 `ref.ref_counterparty`。
+
+本表自身的正确性由 dbt 单数测试 `dbt/tests/assert_fx_covered.sql` 守：ODS 六张明细表出现的 `(report_date, currency)` 必须在 `stg_fx_rates` 里有 MID 汇率，缺一条即测试失败。判据的用意是「折算失败必须出声」—— 缺汇率时 OWD 的 join 落空、金额列变 NULL、报表出来是 0 而不报错。
+
+折算链路上游（各 ODS 表）由 `ALL_BRONZE` 上的 `VDQ-002`（关键字段非空）与 `VDQ-016`（T+1 加载时效）把关；`ref.ref_exchange_rates` 不设 VDQ 校验。

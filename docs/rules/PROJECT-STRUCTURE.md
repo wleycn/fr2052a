@@ -53,3 +53,4 @@
 | 业务规则 | `dbt/macros/fr2052a_rules.sql` | HQLA、到期分桶、现金流 Cap |
 | 部署配置 | `deploy/server{1,2}/` | docker-compose + env |
 | 调度定义 | `deploy/server1/airflow/dags/` | DAG 定义（5 个，已实现）|
+| 调度说明 | `docs/CRON-DESIGN.md` | 全部定时任务的单一说明；服务器 cron 的声明文件在 `deploy/server2/crontab.example` |

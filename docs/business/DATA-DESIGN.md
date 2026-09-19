@@ -28,7 +28,7 @@ Gold / ADS
         │
         ├── 报送文件生成：XBRL / XML / CSV
         ├── 血缘与监管映射：dbt meta 声明 + render_lineage.py 渲染
-        └── 巡检：pipeline_health.py（8 项：熔断 / 校验 / 预警 / 报送 / 重述 / 实时事件 / 连接 / 滞后 / 磁盘）
+        └── 巡检：pipeline_health.py（9 项：熔断 / 校验 / 预警 / 报送 / 重述 / 实时事件 / 连接 / 滞后 / 磁盘）
 ```
 
 ### 真源划分
@@ -129,7 +129,7 @@ ODS 各表的行数由三类来源组成：子公司配额、母公司追加（�
 | `silver.owd_gl_entries` | 标准化总账余额 | `bronze.ods_gl_balances` |
 | `silver.owd_treasury_cash_position` | 标准化司库现金头寸（对账单余额与未达账项） | `bronze.ods_treasury_cash_position` |
 | `silver.owd_off_bs` | 标准化表外承诺 | `bronze.ods_off_bs_commitments` |
-| `silver.ows_hqla_summary` | HQLA 汇总（按等级与受限状态汇总市值、折扣后价值；二级资产的 40% 上限在**报表层**应用，本层不截断） | `owd_securities` |
+| `silver.ows_hqla_summary` | HQLA 汇总（按等级与受限状态汇总市值、折扣后价值；二级资产认列额上限按「一级资产 × 2/3」在**报表层**应用，本层不截断） | `owd_securities` |
 | `silver.ows_collateral_summary` | 担保品汇总（按证券类型、等级、发行国汇总） | `owd_securities` |
 | `silver.ows_cash_position` | 现金头寸 | `owd_*` |
 | `silver.ows_cashflow_projection` | 现金流预测 | `owd_*` 到期分桶 |
@@ -260,7 +260,7 @@ HQLA 存量还有一道**到期窗口**：剩余期限 30 天以内的证券不�
 
 被排除的那一块不消失：单列在 `sec_i_unencumbered_near_maturity`，并进 Section G 的构成，`Section I/G 恒等式` 因此仍然成立。
 
-演示数据里约两成证券持仓是 30 天以内到期的短期票据（国债与机构债，见生成器的 `SHORT_DATED_SECURITY_RATIO`）。这批持仓专门留着：没有它们，这条规则在样本上无对象可判 —— 全是 60 天以上持仓时，改不改代码结果都一样，规则等于没验证过。
+演示数据里约一成半证券持仓是 30 天以内到期的短期票据（国债与机构债，比例由生成器的 `SHORT_DATED_SECURITY_RATIO` 定为 0.15）。这批持仓专门留着：没有它们，这条规则在样本上无对象可判 —— 全是 60 天以上持仓时，改不改代码结果都一样，规则等于没验证过。
 
 两个口径不要混：Section G 的 `sec_g_hqla_l1_mv` / `l2a` / `l2b` 是**组合按 HQLA 分类的构成**（含已质押与 30 天内到期的证券，回答「我们持有多少合格资产」）；Section I 的 `sec_i_unencumbered_*` 是**可计入存量的部分**（未受限 + 剩余期限 30 天以上，回答「现在能用来扛 30 天流出的有多少」）。LCR 分子取 Section I 与现金，不取 Section G。
 

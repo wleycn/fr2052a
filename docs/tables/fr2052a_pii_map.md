@@ -30,7 +30,7 @@
 |---|---|---|
 | `pii_token` | TEXT NOT NULL | 脱敏后的确定性 token |
 | `pii_plaintext` | TEXT NOT NULL | 明文原值 |
-| `source_object` | TEXT NOT NULL | 明文来源，如 bronze.ods_deposits |
+| `source_object` | TEXT NOT NULL | 明文来源，如 landing.ods_deposits |
 | `pii_column` | TEXT NOT NULL | 明文列名，如 customer_id |
 | `entity_code` | TEXT | 该记录所属法人实体，便于按实体授权 |
 | `loaded_at` | TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP |  |
@@ -53,7 +53,7 @@
 
 ## 上下游依赖
 
-- **上游**：`bronze.ods_deposits`、`ods_loans` 的明文标识列。
+- **上游**：`landing.ods_deposits`、`landing.ods_loans` 的明文标识列（落地 CSV；`build_pii_vault.py` 写入的 `source_object` 取 `landing.{table}`）。
 - **下游**：合规调查与监管问答，不参与日常分析链路。
 
 ## 质量规则清单

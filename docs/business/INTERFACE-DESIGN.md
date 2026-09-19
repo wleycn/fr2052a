@@ -159,97 +159,32 @@ python producers/replay_ods_to_kafka.py --data-dir <dir> --config <json>
 
 ## 4. Kafka Topic 契约
 
-### 4.1 `core_banking_txns`
+主题清单的**唯一声明来源**是 `config/pipeline_topics.json`：它含内网与外网地址、分区数、源系统、落点表与生产者标志。建主题脚本、重放生产者与入湖消费者都读这一份。
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `source_system` | VARCHAR(20) | 是 | 来源系统编码 |
-| `source_record_id` | VARCHAR(50) | 是 | 源系统记录主键 |
-| `txn_type` | VARCHAR(20) | 是 | `DEPOSIT` / `WITHDRAWAL` / `TRANSFER` |
-| `amount` | NUMERIC(18,4) | 是 | 金额 |
-| `currency` | CHAR(3) | 是 | ISO 4217 币种 |
-| `event_time` | TIMESTAMPTZ | 是 | 事件时间 |
+载荷的统一约定是「**投递的就是落点表的行**」：`python/producers/replay_ods_to_kafka.py` 用 `to_json(struct(整行列))` 把整行序列化成消息 value，key 取主键；消费者 `python/consumers/kafka_to_iceberg.py` 反序列化后 MERGE 进落点表。因此**每个主题的字段清单不在本节重复**，看落点表契约即可（`docs/tables/{表名}.md`）。
 
-### 4.2 `treasury_deals`
+| 主题 | 源系统 | 落点表（字段见该表契约） | 有源系统生产者 |
+|------|--------|--------------------------|----------------|
+| `core_banking_txns` | `CORE_BANKING` | `bronze.ods_deposits` | 是 |
+| `loan_book` | `LOAN_SYS` | `bronze.ods_loans` | 是 |
+| `treasury_deals` | `TREASURY_SYS` | `bronze.ods_repo_transactions` | 是 |
+| `custody_positions` | `CUSTODY_SYS` | `bronze.ods_securities` | 是 |
+| `derivatives_trades` | `DERIV_SYS` | `bronze.ods_derivatives` | 是 |
+| `gl_entries` | `FINANCE_SYS` | `bronze.ods_gl_balances` | 是 |
+| `treasury_cash_position` | `TREASURY_SYS` | `bronze.ods_treasury_cash_position` | 是 |
+| `off_bs_commitments` | `OFFBS_SYS` | `bronze.ods_off_bs_commitments` | 是 |
+| `market_data_prices` | `MARKET_DATA` | 无：声明保留，本演示未生成对应 ODS 表 | 否 |
+| `reference_data_updates` | `REF_DATA` | 无：引用数据走批加载直入 `ref` 命名空间 | 否 |
+| `fr2052a_alerts` | `ALERTING` | 无：本项目自己产出的输出主题，载荷见 §4.1 | 否 |
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `deal_id` | VARCHAR(30) | 是 | 交易编号 |
-| `deal_type` | VARCHAR(20) | 是 | `REPO` / `REVERSE_REPO` / `SEC_LENDING` |
-| `notional` | NUMERIC(18,4) | 是 | 名义本金 |
-| `currency` | CHAR(3) | 是 | 币种 |
-| `counterparty_id` | VARCHAR(30) | 是 | 交易对手 ID |
-| `event_time` | TIMESTAMPTZ | 是 | 事件时间 |
+### 4.1 输出主题 `fr2052a_alerts` 的载荷
 
-### 4.3 `derivatives_trades`
+这个主题不与落点表对应。它有两个写入方，载荷都是 JSON 但形状不同，订阅方按 `alert_code` 是否存在来区分：
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `trade_id` | VARCHAR(30) | 是 | 交易编号 |
-| `instrument_type` | VARCHAR(20) | 是 | `IRS` / `CDS` / `FX_FWD` / `FX_SWAP` / `OPTION` |
-| `notional` | NUMERIC(18,4) | 是 | 名义本金 |
-| `currency` | CHAR(3) | 是 | 币种 |
-| `counterparty_id` | VARCHAR(30) | 是 | 交易对手 ID |
-| `event_time` | TIMESTAMPTZ | 是 | 事件时间 |
-
-### 4.4 `market_data_prices`
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `price_type` | VARCHAR(20) | 是 | `FX_RATE` / `SEC_PRICE` |
-| `instrument_id` | VARCHAR(30) | 是 | 工具编号 |
-| `price` | NUMERIC(18,6) | 是 | 价格 |
-| `currency` | CHAR(3) | 是 | 币种 |
-| `timestamp` | TIMESTAMPTZ | 是 | 价格时间 |
-
-### 4.5 `gl_entries`
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `gl_account_id` | VARCHAR(30) | 是 | 总账科目编号 |
-| `debit` | NUMERIC(20,2) | 是 | 借方余额 |
-| `credit` | NUMERIC(20,2) | 是 | 贷方余额 |
-| `currency` | CHAR(3) | 否 | 默认 USD |
-| `entry_date` | DATE | 是 | 分录日期 |
-| `event_time` | TIMESTAMPTZ | 是 | 事件时间 |
-
-### 4.6 `reference_data_updates`
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `ref_type` | VARCHAR(30) | 是 | `ENTITY` / `COUNTERPARTY` / `CURRENCY` |
-| `ref_id` | VARCHAR(30) | 是 | 主键 |
-| `action` | VARCHAR(10) | 是 | `INSERT` / `UPDATE` / `DELETE` |
-| `data_json` | JSONB | 是 | 变更数据 |
-| `timestamp` | TIMESTAMPTZ | 是 | 变更时间 |
-
-### 4.7 `fr2052a_alerts`
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `alert_id` | UUID | 是 | 全局唯一标识 |
-| `report_date` | DATE | 是 | 受影响的报表日 |
-| `source_model` | VARCHAR(255) | 是 | 触发告警的 dbt 模型名 |
-| `severity` | VARCHAR(20) | 是 | `CRITICAL` / `WARNING` / `INFO` |
-| `message` | TEXT | 是 | 人类可读描述 |
-| `created_at` | TIMESTAMPTZ | 是 | 创建时间 |
-| `is_resolved` | BOOLEAN | 否 | 是否已解决 |
-| `resolution_note` | TEXT | 否 | 解决说明 |
-
-### 4.8 `treasury_cash_position`
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `position_type` | VARCHAR(20) | 是 | `VAULT_CASH` / `DUE_FROM_BANKS` |
-| `custodian_id` | VARCHAR(20) | 是 | 保管机构：`OWN-VAULT` 本行库房、`CB-XXX` 代理行 |
-| `account_ref` | VARCHAR(40) | 是 | 账户或库房标识 |
-| `currency` | CHAR(3) | 是 | 币种 |
-| `balance_amount` | NUMERIC(20,2) | 是 | 对账单余额或盘点金额（原币） |
-| `in_transit_deposits_amount` | NUMERIC(20,2) | 是 | 在途存款（账面已记、对账单未到） |
-| `outstanding_checks_amount` | NUMERIC(20,2) | 是 | 未兑现支票（账面已扣、对账单未扣） |
-| `event_time` | TIMESTAMPTZ | 是 | 事件时间 |
-
-司库系统的现金头寸快照，落 `bronze.ods_treasury_cash_position`。它是 GL 对账 Section E（现金）的独立基准：报送侧的现金出自总账，两侧同源就对不出错，因此基准换成这份对账单/盘点口径。
+| 写入方 | 载荷字段 | 说明 |
+|--------|----------|------|
+| `python/alerts/liquidity_monitor.py` | `report_date` / `entity_code` / `alert_code` / `severity` / `metric_name` / `metric_value` / `message` / `blocks_submission` | 指标越线预警。投递失败只打 WARN、不改闸状态：闸的判据是库里的记录，Kafka 只是通知通道 |
+| `python/alerts/realtime_scanner.py` | 实时扫描的候选明细行（存款明细字段加扫描计算列） | 大额未保险存款与未提取承诺事件 |
 
 ## 5. Airflow DAG 接口
 

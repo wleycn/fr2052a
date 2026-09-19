@@ -14,7 +14,7 @@ Silver（标准化明细，Iceberg `silver` 命名空间）
 
 ## 业务主键
 
-`source_system` + `source_record_id`。
+`source_system` + `source_record_id` + `report_date`。与 `python/lakehouse/owd_scd2.py` 的 `KEY_COLUMNS` 一致；必须带 `report_date`：同一源记录号在不同报告日是两条独立记录，去掉它会把不同报告日的两天并成同一条记录、抹掉其中一天。
 
 ## 去重方式
 
@@ -45,7 +45,7 @@ dbt `table` 物化，每次运行整表重建：先建后换，不留半成品�
 
 ## 金额单位约定
 
-USD，`DECIMAL(18,2)`。保留 `*_lc` 原币列与 `exchange_rate` 用于核对折算。
+USD，`DECIMAL(18,2)`。总账本身以集团本位币 USD 记账，不做折算，因此本表既没有原币列也没有汇率列。
 
 ## PII 字段与脱敏方式
 

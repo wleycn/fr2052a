@@ -1,0 +1,10 @@
+# FR 2052a 的服务器定时任务声明（Server 2）。
+#
+# 这份文件是仓库内的副本，真身在 Server 2 的 crontab 里。装上：
+#   scp deploy/server2/crontab.example hermes@192.168.17.24:/tmp/fr2052a-crontab
+#   ssh hermes@192.168.17.24 "crontab /tmp/fr2052a-crontab && crontab -l"
+#
+# 每 5 分钟把巡检结论转成 Prometheus 能抓的指标。脚本自己会读同目录的 .env，
+# 拿不到凭据时不覆盖上一份指标文件，由「指标过期」告警暴露出来。
+# 说明见 docs/CRON-DESIGN.md。
+*/5 * * * * /home/hermes/fr2052a-infra/health_to_metrics.sh >> /tmp/fr2052a-health-metrics.log 2>&1

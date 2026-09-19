@@ -10,38 +10,38 @@
 
 | # | 检查项 | 标准 | 状态 | 证据 |
 |---|--------|------|------|------|
-| 1 | 命名规范 | `ruff` 命名规则（`N`）全仓通过 | ✅ | `make lint` 通过，40 个文件零告警 |
+| 1 | 命名规范 | `ruff` 命名规则（`N`）全仓通过 | ✅ | `make lint` 通过，41 个文件零告警 |
 | 2 | 注释质量 | 注释解释「为什么」，出现与实现不符的注释即打回 | ✅ | 本轮修掉 4 处与实现不符的注释（覆盖写机制、熔断触发条件、生效日约定、DQ 日志粒度） |
-| 3 | 类型注解 | `mypy` 通过，禁未注解函数与裸泛型 | ✅ | 40 个文件零错误；配置在项目根 `pyproject.toml` |
+| 3 | 类型注解 | `mypy` 通过，禁未注解函数与裸泛型 | ✅ | 41 个文件零错误；配置在项目根 `pyproject.toml` |
 | 4 | docstring | `ruff` 的 `D` 规则（google 约定）全仓通过 | ✅ | 本轮补齐 113 条 docstring，随后全仓零告警 |
 | 5 | 错误处理 | 不吞异常；失败必须留痕或直接报错 | ✅ | 本轮消除 11 处「静默失败」：解析为空、查不到行、重复主键、状态位不前进等，全部改为显式报错 |
 | 6 | 核对脚本覆盖 | 每个数据层都有核对脚本，且核对脚本必须进跑批执行序列；判据要能区分「零命中」与「读不到」 | ✅ | 5 个核对环节（bronze/silver/scd2/ads/rbac）都在 `run-daily-pipeline.sh` 的执行序列里；本轮的 11 个缺陷里有 6 个正是「判据在但没生效」 |
-| 7 | lint 与格式 | `make lint` 前半段：`ruff check` 与 `ruff format --check` 全绿 | ✅ | 40 个文件零告警；26 个文件按 ruff 统一了格式，格式化前后字节码指纹一致 |
-| 8 | mypy 通过 | `make lint` 后半段：`mypy` 零错误 | ✅ | 40 个文件；无类型信息的第三方库在 `pyproject.toml` 的 overrides 里声明 |
-| 9 | 接口契约 | 与 INTERFACE-DESIGN.md 逐条对齐 | ✅ | 本轮把主题清单（7 条→10 条）、DAG 任务流、报送台账字段、错误码里的表名按实现校正 |
+| 7 | lint 与格式 | `make lint` 前半段：`ruff check` 与 `ruff format --check` 全绿 | ✅ | 41 个文件零告警；26 个文件按 ruff 统一了格式，格式化前后字节码指纹一致 |
+| 8 | mypy 通过 | `make lint` 后半段：`mypy` 零错误 | ✅ | 41 个文件；无类型信息的第三方库在 `pyproject.toml` 的 overrides 里声明 |
+| 9 | 接口契约 | 与 INTERFACE-DESIGN.md 逐条对齐 | ✅ | 主题契约按 `config/pipeline_topics.json` 校正（11 条），DAG 任务流、报送台账字段、错误码里的表名同步按实现校正 |
 | 10 | 文档同步 | 相关文档与实现一致 | ✅ | 本轮同步 README、PROJECT、DATA-DESIGN、MODULE-DESIGN、INTERFACE-DESIGN、DOMAIN-LANGUAGE、CHANGELOG |
 
 ## 发布就绪检查项
 
 | # | 检查项 | 标准 | 状态 | 证据 |
 |---|--------|------|------|------|
-| 1 | 端到端重跑 | `bash deploy/reset-demo.sh --apply` 全链路通过 | ✅ | 复核：**18 个环节全绿**，耗时 **3 分 58 秒**；巡检确认熔断 OPEN、**校验 21 条**、重述 0 次 |
+| 1 | 端到端重跑 | `bash deploy/reset-demo.sh --apply` 全链路通过 | ✅ | 复核：**19 个环节全绿**，耗时 **3 分 58 秒**；巡检确认熔断 OPEN、**校验 21 条**、重述 0 次 |
 | 2 | 可复现性 | 同一样本数据重复跑，报表主键集合、行数、对账结论一致 | ✅ | 样本数据由固定种子生成；dbt 多轮重跑数值不变；报表主键为确定性取值 |
 | 3 | 独立复核 | 由未参与编写的一方实跑关键判据后给结论 | 🔍 | 不适用：单人加 agent 的演示项目没有第三方执行方。替代标准＝判据由核对脚本与端到端重跑实核，偏差登记见 `docs/business/KNOWN-ISSUE.md` 的「独立复核不做」行 |
 | 4 | 文档完整 | README + 九项核心文档 + 构建日志齐全 | ✅ | `docs/business/` 七份 + `docs/rules/` 四份 + `docs/build-log.md` |
-| 5 | 变更日志已更新 | CHANGELOG.md 有对应条目 | ✅ | E6-E7 条目含已完成项与关键修复 |
+| 5 | 变更日志已更新 | `docs/changes/engineering.md` 有对应条目 | ✅ | 逐笔变更落 `docs/changes/engineering.md`；`CHANGELOG.md` 只记里程碑，口径见该文件顶部 |
 | 6 | 已知坑已登记 | KNOWN-ISSUE.md 有锚点与成因 | ✅ | 含 `#scd2-reversed-interval`、`#report-history-reset-exception`、`#dead-ows-tables`；其余坑记在构建日志 E6 小节 |
 | 7 | 部署清单已验证 | `bash deploy/sync-deploy.sh --check` 无漂移 | ✅ | 两台服务器均无漂移 |
 | 8 | 凭据已隔离 | `.env` 不在版本库 | ✅ | `git ls-files` 不含任何 `.env`；凭据只由 `.env` 注入 |
 | 9 | 回滚方案 | 代码可回退、环境可重建 | ✅ | 代码走 git revert；数据走 `deploy/reset-demo.sh --apply` 重建 |
 | 10 | 巡检可读 | `pipeline_health` 覆盖熔断、质量、报送、重述、实时事件、滞后、连接、磁盘，且退出码恒为 0 | ✅ | 观察而非闸：用巡检当闸会让「巡检挂了」与「系统有问题」分不开 |
-| 11 | CI 绿灯 | 推送后 GitHub Actions 上 `lint` 工作流通过 | ✅ | 运行 35237994950，head_sha `37a5d26`，结论 success；另做反向验证：临时分支故意留一个未使用的 import，运行 35238108100 结论 failure，验证后删分支 |
+| 11 | CI 绿灯 | 推送后 GitHub Actions 上 `lint` 工作流通过 | ✅ | 运行 35425318611，head_sha `fd56811`，结论 success。反向验证（历史）：临时分支故意留一个未使用的 import，运行 35238108100 结论 failure，验证后删分支 |
 
 ## 数据层验收
 
 | # | 检查项 | 标准 | 状态 | 证据 |
 |---|--------|------|------|------|
-| 1 | 表结构一致 | `verify_ods_schema.py` 通过，且 DDL 与 DATA-DESIGN.md 一致 | ✅ | 16/16 表结构匹配；§2.1 清单本轮按实现重写 |
+| 1 | 表结构一致 | `verify_ods_schema.py` 通过，且 DDL 与 DATA-DESIGN.md 一致 | ✅ | 17/17 表结构匹配（ref 9 + bronze 8）；§2.1 清单本轮按实现重写 |
 | 2 | 索引与分区 | 控制表关键查询有索引；湖表按报告日分区 | ✅ | `sql/postgres/10_control_tables.sql` 建索引；ODS 表按 `days(report_date)` 分区 |
 | 3 | 引用完整性 | — | 🔍 | 不适用：Iceberg 不支持外键，报送服务层表由导出作业重建。替代：键唯一性与版本区间不变式由核对脚本保证，违反即报错 |
 | 4 | 数据质量 | 一轮校验里同一规则只有一行，且结论落在校验日志 | ✅ | 修掉「重跑翻倍」后，单批次固定 **21 行**（规则集 21 条；此前跑 8 次累积 160 行） |
@@ -52,10 +52,10 @@
 
 | # | 检查项 | 标准 | 状态 | 证据 |
 |---|--------|------|------|------|
-| 1 | 全链路时长 | ≤ 15 分钟 | ✅ | 重跑实测 **3 分 58 秒**（18 个环节，含 dbt 19 个模型与 33 条数据测试） |
-| 2 | 单环节时长 | 任一环节 ≤ 5 分钟 | ✅ | 同一轮里 18 个环节合计 3 分 58 秒，最慢的环节在 1 分钟内 |
+| 1 | 全链路时长 | ≤ 15 分钟 | ✅ | 重跑实测 **3 分 58 秒**（19 个环节，含 dbt 19 个模型与 33 条数据测试） |
+| 2 | 单环节时长 | 任一环节 ≤ 5 分钟 | ✅ | 同一轮里 19 个环节合计 3 分 58 秒，最慢的环节在 1 分钟内 |
 | 3 | 放行闸与巡检响应 | 从流水线日志读 `gate` 与 `health` 两个环节各自的耗时，均 ≤ 30 秒 | ✅ | 实测（Server 2）：`gate` 0.070 秒，日志首行写「熔断闸 GLOBAL：OPEN，允许生成报送文件」；`health` 1.858 秒。两个环节都在 30 秒标准内；本项目无对外接口，故不适用「API p95」 |
-| 4 | 库查询计划 | 控制表关键查询走索引 | ✅ | 三张控制表各跑一条 EXPLAIN：`restatement_log` 走 `Index Scan using idx_restatement_report`；`submission`（15 行）与 `validation_log`（21 行）走 `Seq Scan`，成本 2.33 与 8.31。三张表的关键索引都在位，单页小表下顺序扫描是规划器的选择；数据量增大后是否转索引扫描未实测。关键索引见下方一行 |
+| 4 | 库查询计划 | 控制表关键查询走索引 | ✅ | 三张控制表各跑一条 EXPLAIN：`restatement_log` 走 `Index Scan using idx_restatement_report`；`submission`（18 行）与 `validation_log`（21 行）走 `Seq Scan`，成本 2.33 与 8.31。三张表的关键索引都在位，单页小表下顺序扫描是规划器的选择；数据量增大后是否转索引扫描未实测。关键索引见下方一行 |
 
 三张表的关键索引：`ads_fr2052a_submission` 的 `ads_fr2052a_submission_uk (report_id, file_format)` 与 `idx_submission_report (report_date, entity_code)`；`ads_fr2052a_validation_log` 的 `idx_validation_log_batch (batch_id, check_result)`；`ads_restatement_log` 的 `idx_restatement_report (report_date, entity_code)`。
 
@@ -67,7 +67,7 @@
 | 2 | PII 已脱敏 | 明细层无明文 | ✅ | OWD 层用加盐 SHA-256；明文唯一落点 `secure.fr2052a_pii_map`，仅合规与管理员角色可读 |
 | 3 | 传输加密 | — | 🔍 | 不适用：演示环境为单机容器与内网直连，未启用 TLS/SASL。替代：凭据只在服务器本地 `.env`，跨机只走内网 |
 | 4 | 权限控制 | 四角色对三对象的读写符合预期 | ✅ | 12 项权限逐角色实读核对，全部符合预期 |
-| 5 | 审计日志 | 变更与访问有留痕 | ✅ | `audit.audit_change_log` 与 `audit.audit_access_log` 由环节写入 |
+| 5 | 审计日志 | 变更与访问有留痕 | ✅ | `audit.audit_change_log` 由环节写入并有行；`audit.audit_access_log` 只建了表与索引，**当前没有写入方**，恒为空，已登记为已知局限（见 `docs/business/KNOWN-ISSUE.md` 的 `#audit-access-log-no-writer` 与 `#read-audit-gap`） |
 
 ## 签名确认
 

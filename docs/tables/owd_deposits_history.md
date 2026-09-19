@@ -16,7 +16,7 @@ Silver（版本历史，Iceberg `silver` 命名空间）
 
 ## 业务主键
 
-`source_system` + `source_record_id` + `record_version`。
+`source_system` + `source_record_id` + `report_date` + `record_version`。自然键为 `source_system` + `source_record_id` + `report_date`（同 `python/lakehouse/owd_scd2.py` 的 `KEY_COLUMNS`）：同一源记录号在不同报告日是两条独立记录，各起一条版本链；`record_version` 只区分同一自然键内部的版本序号。
 
 ## 去重方式
 
@@ -54,6 +54,7 @@ Silver（版本历史，Iceberg `silver` 命名空间）
 | `is_insured` |  |  |
 | `insured_amount_usd` |  |  |
 | `branch_code` |  |  |
+| `is_intracompany` | BOOLEAN | 集团内往来标记：交易对手类型为 `AFFILIATE` 时 true，其余（含 NULL）为 false，由 `is_affiliate_counterparty` 宏判定。 |
 | `event_time` |  |  |
 | `etl_batch_id` |  |  |
 | `begin_date` |  | 版本列 |

@@ -14,7 +14,7 @@ Silver（标准化明细，Iceberg `silver` 命名空间）
 
 ## 业务主键
 
-`source_system` + `source_record_id`。
+`source_system` + `source_record_id` + `report_date`。与 `python/lakehouse/owd_scd2.py` 的 `KEY_COLUMNS` 一致；必须带 `report_date`：同一源记录号在不同报告日是两条独立记录，去掉它会把不同报告日的两天并成同一条记录、抹掉其中一天。
 
 ## 去重方式
 
@@ -52,10 +52,11 @@ dbt `table` 物化，每次运行整表重建：先建后换，不留半成品�
 | `is_insured` |
 | `insured_amount_usd` |
 | `branch_code` |
+| `is_intracompany` |
 | `event_time` |
 | `etl_batch_id` |
 
-列清单与顺序以 `dbt/models/staging/owd_deposits.sql` 的最终投影为准；类型由 Spark 在写入 Iceberg 时推断，因此这里只列字段名，不复制一份会过期的类型表。
+列清单与顺序以 `dbt/models/staging/owd_deposits.sql` 的最终投影为准；类型由 Spark 在写入 Iceberg 时推断，因此这里只列字段名，不复制一份会过期的类型表。 `is_intracompany` 为布尔列：交易对手类型为 `AFFILIATE` 时 true，其余（含 NULL）为 false。
 
 ## 金额单位约定
 

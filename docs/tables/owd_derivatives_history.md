@@ -16,7 +16,7 @@ Silver（版本历史，Iceberg `silver` 命名空间）
 
 ## 业务主键
 
-`source_system` + `source_record_id` + `record_version`。
+`source_system` + `source_record_id` + `report_date` + `record_version`。自然键为 `source_system` + `source_record_id` + `report_date`（同 `python/lakehouse/owd_scd2.py` 的 `KEY_COLUMNS`）：同一源记录号在不同报告日是两条独立记录，各起一条版本链；`record_version` 只区分同一自然键内部的版本序号。
 
 ## 去重方式
 
@@ -47,7 +47,10 @@ Silver（版本历史，Iceberg `silver` 命名空间）
 | `maturity_date` |  |  |
 | `days_to_maturity` |  |  |
 | `maturity_bucket` |  |  |
+| `is_intracompany` | BOOLEAN | 集团内往来标记：交易对手类型为 `AFFILIATE` 时 true，其余（含 NULL）为 false，由 `is_affiliate_counterparty` 宏判定。 |
 | `mtm_value_usd` |  |  |
+| `mtm_currency` | STRING | 盯市价值币种（ODS 声明）；盯市折算所用汇率按此币种取。 |
+| `mtm_exchange_rate` | DECIMAL(18,8) | 折算 `mtm_value_usd` 所用的 `mtm_currency` 对 USD 汇率（`stg_fx_rates.spot_rate`）。 |
 | `is_central_cleared` |  |  |
 | `csa_agreement_id` |  |  |
 | `is_bilateral_netted` |  |  |
@@ -65,7 +68,7 @@ Silver（版本历史，Iceberg `silver` 命名空间）
 
 ## 金额单位约定
 
-USD，`DECIMAL(18,2)`。保留 `*_lc` 原币列与 `exchange_rate` 用于核对折算。
+USD，`DECIMAL(18,2)`。本表没有 `*_lc` 原币列：名义本金与抵押品按 `currency_code` 的汇率折 USD，盯市价值按 `mtm_currency` 折算，所用币种与汇率已落成 `mtm_currency`、`mtm_exchange_rate` 两列，折算口径可核。
 
 ## PII 字段与脱敏方式
 

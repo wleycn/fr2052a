@@ -39,19 +39,19 @@
 
 | 要求 | 由谁强制 | 现状 |
 |------|----------|------|
-| ruff 检查与格式化 | `ruff check` 与 `ruff format --check` | 39 个 Python 文件零告警、格式已统一 |
-| 类型注解必须添加 | `mypy`，开了「禁未注解函数」与「禁裸泛型」 | 39 个文件零错误 |
+| ruff 检查与格式化 | `ruff check` 与 `ruff format --check` | 41 个 Python 文件零告警、格式已统一 |
+| 类型注解必须添加 | `mypy`，开了「禁未注解函数」与「禁裸泛型」 | 41 个文件零错误 |
 | docstring 必须添加（Google 风格） | `ruff` 的 `D` 规则，`pydocstyle` 走 google 约定 | 全仓零告警 |
 
 被排除的规则与理由都写在 `pyproject.toml` 里，改口径只能改那一处：
 
 | 规则 | 命中 | 排除理由 |
 |------|------|----------|
-| `D415` | 234 | 只认 `.` `?` `!` 结尾。本项目 docstring 用中文，句末是「。」，规则表达不了 |
-| `N812` | 5 | 禁止 `import functions as F`，而这是 PySpark 全生态的写法 |
-| `RUF001` | 479 | 把字符串里的中文全角标点判成「歧义字符」 |
-| `RUF002` | 1065 | 同 `RUF001`，对象是 docstring |
-| `RUF003` | 245 | 同 `RUF001`，对象是注释 |
+| `D415` | 281 | 只认 `.` `?` `!` 结尾。本项目 docstring 用中文，句末是「。」，规则表达不了 |
+| `N812` | 6 | 禁止 `import functions as F`，而这是 PySpark 全生态的写法 |
+| `RUF001` | 693 | 把字符串里的中文全角标点判成「歧义字符」 |
+| `RUF002` | 1546 | 同 `RUF001`，对象是 docstring |
+| `RUF003` | 550 | 同 `RUF001`，对象是注释 |
 
 只排除有命中的规则：`D401` 与 `D202` 在本仓当前 0 命中，就不列进排除表，留着它们继续管事。
 
@@ -108,7 +108,7 @@ def generate_sample_data(
 
 ```sql
 CREATE TABLE ads.fr2052a_alerts (
-    alert_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    alert_id BIGSERIAL PRIMARY KEY,
     report_date DATE NOT NULL,
     severity VARCHAR(20) NOT NULL CHECK (severity IN ('CRITICAL', 'WARNING', 'INFO')),
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -128,7 +128,8 @@ WHERE severity = 'CRITICAL' AND is_resolved = FALSE;
 
 ### macro 命名
 
-- 宏名：`fr2052a_{功能}`（如 `fr2052a_hqla_classification`）
+- 宏名不带前缀，用功能名（如 `hqla_level`、`maturity_bucket`、`mask_pii`）
+- 文件名以 `fr2052a_` 开头（如 `dbt/macros/fr2052a_rules.sql`），一个文件放一类规则
 - 参数名：snake_case
 
 ### 测试
@@ -141,6 +142,8 @@ WHERE severity = 'CRITICAL' AND is_resolved = FALSE;
 ## Git 规范
 
 ### 分支命名
+
+本项目单人加 agent，默认**直接提交到 `main`**，不开 feature 分支也不提 MR（见 `AGENTS.md` §4）。确需并行试验时按下表命名，用完即删：
 
 - feature: `feature/{功能}`（如 `feature/gl-reconciliation`）
 - fix: `fix/{问题}`（如 `fix/pg18-data-dir`）

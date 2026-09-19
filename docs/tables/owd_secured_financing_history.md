@@ -16,7 +16,7 @@ Silver（版本历史，Iceberg `silver` 命名空间）
 
 ## 业务主键
 
-`source_system` + `source_record_id` + `record_version`。
+`source_system` + `source_record_id` + `report_date` + `record_version`。自然键为 `source_system` + `source_record_id` + `report_date`（同 `python/lakehouse/owd_scd2.py` 的 `KEY_COLUMNS`）：同一源记录号在不同报告日是两条独立记录，各起一条版本链；`record_version` 只区分同一自然键内部的版本序号。
 
 ## 去重方式
 
@@ -56,6 +56,7 @@ Silver（版本历史，Iceberg `silver` 命名空间）
 | `days_to_maturity` |  |  |
 | `maturity_bucket` |  |  |
 | `is_open_ended` |  |  |
+| `is_intracompany` | BOOLEAN | 集团内往来标记：交易对手类型为 `AFFILIATE` 时 true，其余（含 NULL）为 false，由 `is_affiliate_counterparty` 宏判定。 |
 | `master_agreement_type` |  |  |
 | `netting_agreement_id` |  |  |
 | `is_nettable` |  |  |
@@ -70,7 +71,7 @@ Silver（版本历史，Iceberg `silver` 命名空间）
 
 ## 金额单位约定
 
-USD，`DECIMAL(18,2)`。保留 `*_lc` 原币列与 `exchange_rate` 用于核对折算。
+USD，`DECIMAL(18,2)`。保留 `cash_amount_lc` 与 `collateral_mv_lc` 两个原币列用于核对折算；汇率不落列，折算结果即 `cash_amount_usd` 与 `collateral_mv_usd`。
 
 ## PII 字段与脱敏方式
 

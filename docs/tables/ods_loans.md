@@ -61,7 +61,7 @@ Bronze（源系统接入，Iceberg `bronze` 命名空间）
 
 ## PII 字段与脱敏方式
 
-本层保留原始标识（如 `account_number`、`customer_id`），**脱敏在 OWD 层发生**。明文对照只住 `secure.fr2052a_pii_map`，由合规员与管理员两个角色可见。
+本层保留明文标识：`loan_id`（贷款账号）与 `borrower_id`（借款人编号），两者都是直接标识，**脱敏在 OWD 层发生**（`dbt/models/staging/owd_loans.sql` 以 `mask_pii` 宏把两列换成 `h_` 前缀的确定性 token，声明见 `dbt/models/staging/schema.yml` 的 `meta.pii`）。明文对照只住 `secure.fr2052a_pii_map`，由合规员与管理员两个角色可见。
 
 ## 生命周期
 

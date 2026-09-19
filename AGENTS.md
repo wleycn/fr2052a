@@ -23,7 +23,8 @@
 - 数据质量：自研规则引擎，规则落 `ref.ref_validation_rules`，由 `run_dq_rules.py` 执行
 - 元数据治理：dbt `schema.yml` 的 meta 声明 + `render_lineage.py` 渲染血缘
 - 开放表格式：Apache Iceberg 1.11（JDBC catalog：元数据在 PG，数据在 MinIO）
-- 巡检：`pipeline_health.py` 检查熔断、校验、预警、报送、重述、实时事件、PG 连接、Kafka 滞后与磁盘（8 项）
+- 巡检：`pipeline_health.py` 检查熔断、校验、预警、报送、重述、实时事件、PG 连接、Kafka 滞后与磁盘（9 项）
+- 监控：Prometheus + Grafana（指标复用巡检脚本的 `--json` 输出，Server 2 采集、Server 1 出面板）
 
 ## 2. 上下文加载（动手前必做）
 
@@ -31,7 +32,7 @@
 
 1. 读本文 §3 红线清单
 2. 读 `docs/rules/PROJECT-STRUCTURE.md` 的「目录职责」与「收口点」
-3. 读 `docs/rules/CODING-STANDARD.md` 的本类型红线
+3. 读 `docs/rules/CODING-STANDARD.md` 的「代码风格」与「依赖管理」两节
 4. 涉及数据变更 → 读 `docs/business/DATA-DESIGN.md` 的表契约（分层表清单、字段语义、口径）
 5. **合计不超过 3 个规则文件**（防上下文过载）
 
@@ -67,7 +68,7 @@
 - 单次变更不超过文件总量的 **40%**。阈值**只对改动前达到 200 行的文件**适用，不足 200 行不受限。超出就拆成多次，逐步验证。
 - 注释与 docstring 要和代码在同一个提交里改。不许留下与实现不符的注释。注释解释「**为什么**」，不复述「是什么」。细则见 `docs/rules/CODING-STANDARD.md` 的注释一节。
 - 写文档、写回报、写交付说明之前，先载入技能 `docs-writing-discipline`，按其检查表通读一遍再交
-- 迁移脚本必须由人类逐行 review 并在 PR 中 comment 确认
+- 迁移脚本必须由人类逐行 review。本项目不开 PR，review 结论写进 `docs/changes/{module}.md` 条目的「验证」段
 
 ## 6. 变更留痕
 
@@ -93,7 +94,7 @@
 ## 9. 项目地图（文件索引）
 
 > 回答「东西在哪」。
-> 生成规则：把**项目里真实存在**的文件填进下表，删掉不适用的行。表内路径必须真实可访问。被引用文件的存在性检查尚未实现，已登记在 `KNOWN-ISSUE.md`；当前靠评审核对。目录路径与 `config/` 下的条目要由审查者核实。
+> 生成规则：把**项目里真实存在**的文件填进下表，删掉不适用的行。表内路径必须真实可访问；路径存在性与锚点由 `.githooks/pre-commit` 调用的共享门禁检查（告警级，不阻断提交）。目录路径与 `config/` 下的条目要由审查者核实。
 
 | 类别 | 位置 | 用途 |
 |---|---|---|
@@ -105,6 +106,7 @@
 | 偏离登记处 | `docs/business/KNOWN-ISSUE.md` | 已知坑 / 设计决策 / 与上游规范不一致处的逐条登记（禁止无登记降标准） |
 | 变更留痕 | `docs/changes/{module}.md` | 功能与契约变更的按模块条目（范围 / 变更 / 验证 / 回滚）；E0–E7 的构建过程另见 `docs/build-log.md` |
 | 交接单 | `todo/` | 会话接力：一份一次交接，`<YYYYMMDD>-<主题>.<状态>`，状态迁移用 `git mv` 改名，`.done` 留档不删 |
+| 调度说明 | `docs/CRON-DESIGN.md` | 全部定时任务的单一说明；服务器 cron 的声明文件在 `deploy/server2/crontab.example` |
 | 部署清单 | `deploy/` | Server 1/2 部署脚本与配置 |
 | SQL DDL | `sql/iceberg/` | Iceberg 表定义（真源） |
 | dbt 项目 | `dbt/` | 模型 / 宏 / 配置 |
@@ -116,7 +118,7 @@
 ## 10. 技能地图（阶段 → 技能）
 
 > 回答「这个阶段该用哪个技能」。
-> 阶段定义见 `docs/rules/DEVELOP-FLOW.md` §1（十阶段）与 §1.1（阶段 4 子步骤）。下表只接**技能库里真实存在**的技能，名字必须可查；当前由 `make lint`（本地钩子与 CI 都跑它）覆盖代码侧检查。
+> 阶段定义见 `docs/rules/DEVELOP-FLOW.md` 的「阶段定义」表（十阶段）与「阶段 4 子步骤」表。下表只接**技能库里真实存在**的技能，名字必须可查；当前由 `make lint`（本地钩子与 CI 都跑它）覆盖代码侧检查。
 > 用法：进入某阶段前先载入该阶段技能（`skill_view`），按它的 Phase 或 Step 执行。禁用「通用做法」替代技能流程。
 
 | 阶段 | 技能 | 什么时候用 |

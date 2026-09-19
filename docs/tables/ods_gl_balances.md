@@ -47,11 +47,11 @@ Bronze（源系统接入，Iceberg `bronze` 命名空间）
 
 ## 金额单位约定
 
-原币种，`DECIMAL(18,4)`。本层不做任何换算，折算在 OWD 层发生。
+原币种，`DECIMAL(20,2)`（与本节上面的字段清单一致：`debit_balance`、`credit_balance` 都是 `DECIMAL(20,2)`）。本层不做任何换算，折算在 OWD 层发生。
 
 ## PII 字段与脱敏方式
 
-本层保留原始标识（如 `account_number`、`customer_id`），**脱敏在 OWD 层发生**。明文对照只住 `secure.fr2052a_pii_map`，由合规员与管理员两个角色可见。
+本表无 PII 列，无需脱敏：总账科目维度的 `gl_account_id`（总账科目号）与 `account_name`（科目名称）都不含客户或账户标识。
 
 ## 生命周期
 

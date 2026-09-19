@@ -29,7 +29,7 @@
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `report_date` | DATE NOT NULL | 报告日 |
-| `entity_code` | TEXT NOT NULL | 法人实体编码，ENT001 为集团合并口径 |
+| `entity_code` | TEXT NOT NULL | 法人实体编码：法人实体单体为 `ENT001`–`ENT005`，集团合并行用保留码 `GRP001`（不代表任何法人实体）。指标由报表行逐行换算（`python/alerts/liquidity_monitor.py`），合并行取到的即 `GRP001` |
 | `is_consolidated` | BOOLEAN NOT NULL DEFAULT FALSE | 是否合并口径 |
 | `hqla_l1_unencumbered_usd` | NUMERIC(20, 2) | 未质押一级资产市值 + 现金与同业存放（后者按 LCR 口径全额计入，无质押概念） |
 | `hqla_l2a_unencumbered_usd` | NUMERIC(20, 2) | 未质押二级 A 类资产市值。三个等级都只计剩余期限 30 天以上的部分：窗口内到期的走 30 天流入，两边都算就是双向计量 |

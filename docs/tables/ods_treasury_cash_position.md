@@ -70,4 +70,4 @@ Iceberg v2 表，快照保留 7 天或至少 10 个（`python/lakehouse/maintain
 
 ## 质量规则清单
 
-本层规则共 2 条：`VDQ-001` 表非空、`VDQ-002` `source_record_id` 与 `currency` 非空（见 `python/validators/run_dq_rules.py` 的 `ALL_BRONZE`）。表结构漂移闸：`python/lakehouse/verify_ods_schema.py`（CSV 表头与表列逐列比对）。
+本层规则共 3 条：`VDQ-001` 表非空、`VDQ-002` `source_record_id` 与 `currency` 非空、`VDQ-016` T+1 加载时效（`etl_load_timestamp` 不得晚于报告日 +1 天 08:00）—— 三条都挂在 `python/validators/run_dq_rules.py` 的 `ALL_BRONZE` 上。表结构漂移闸：`python/lakehouse/verify_ods_schema.py`（CSV 表头与表列逐列比对）。

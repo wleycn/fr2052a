@@ -11,12 +11,12 @@
 | #pg18-data-dir-change | 09-16 | PG 18 启动失败，日志报 `there appears to be PostgreSQL data in /var/lib/postgresql/data (unused mount/volume)` | `postgres:18-alpine` 的 `PGDATA` 变为 `/var/lib/postgresql/18/docker`，镜像的 `VOLUME` 声明在 `/var/lib/postgresql`。按 17 及以前习惯把卷挂在 `/var/lib/postgresql/data` 会被判定为废弃挂载并拒绝启动 | ✅ 修法：卷改挂 `/var/lib/postgresql`。重建数据卷时必须沿用此路径 | Server 1 部署 | BUILD-LOG E1 |
 | #spark-minio-endpoint | 09-16 | Spark 连接 MinIO 失败，报 connection refused | Spark 中必须用 `192.168.17.22:9000`，不能用 `localhost`（跨容器网络）| ✅ 修正 Spark catalog config 中的 endpoint | Server 2 Spark 配置 | BUILD-LOG E3 |
 | #gl-reconciliation-mismatch | 09-16 | GL 对账 8 项全 FAIL | ① 按单科目比 Section 合计（应汇总后再比）② 按实体匹配集团口径（应去掉实体匹配）③ 总账原本独立随机数，与业务明细无关 | ✅ 修法：按 Section 汇总总账后再比；总账由业务明细倒推（资产科目取自各业务表，权益作轧差项） | GL 对账模块 | BUILD-LOG E4.1 |
-| #hqla-cap-not-applied | 09-16 | 报表未应用 HQLA 二级资产 40% 上限，二级资产占比 83.66% | 原样报出，未做监管计算截断 | ✅ 补 `sec_g_hqla_capped_total_usd` = 一级全额 + 二级按 40% 截断 | ADS 报表计算 | BUILD-LOG E4.1 |
+| #hqla-cap-not-applied | 09-16 | 报表未应用 HQLA 二级资产上限，二级资产占比 83.66% | 原样报出，未做监管计算截断 | ✅ 补 `sec_g_hqla_capped_total_usd` = 一级全额 + 二级按上限截断；上限的基数口径后来在 09-19 修正，见 `#hqla-cap-basis` | ADS 报表计算 | BUILD-LOG E4.1 |
 | #python314-incompatible | 09-16 | Python 3.14.4 装不上 Great Expectations 与 pyspark | GE 要求 `>=3.10,<3.14`；pyspark 3.5.0 不支持 3.14 | ✅ 在服务器上用 uv 装独立 Python 3.12 venv | Server 2 环境 | BUILD-LOG E0 |
 | #dockerhub-image-removed | 09-16 | `minio/minio` 与 `bitnami/spark` 从 Docker Hub 下架 | 镜像源失效 | ✅ MinIO 改走 `quay.io/minio/minio`；Spark 改用官方 `apache/spark` | Server 1/2 部署 | BUILD-LOG E0 |
 | #detail-report-mismatch | 09-16 | Section B 明细与报表口径不一致，差 25 亿；Section F 明细 13 亿 vs 报表 0 | 明细把正回购与逆回购混在一起，报表只算正回购；明细没按 30 天过滤 | ✅ 明细按 `line_item` 拆开，30 天过滤下沉到明细 | OWD/OWS 模型 | BUILD-LOG E4.1 |
-| #delegate-audit-20260917 | 09-17 | 三路独立审查（代码 / dbt 与 SQL / 文档）共提出 80 条发现，其中一条是三路都报同一条（DAG 授权晚于导出） | 长期单方视角审查，缺口集中在「规则声称的机制没落地」「文档抄自设计稿而非实现」两类 | ✅ 已修 29 条（含 DAG 顺序、恒成功的源文件检查、宏表与 CLI 契约表、README 跑不通的命令）；剩 45 条涉及口径与设计取舍，未动 | 全项目 | `docs/AUDIT-2026-09-17-delegate-review.md` |
-| #scd2-reversed-interval | 09-17 | 版本历史表出现「失效日早于生效日」的反向区间（owd_deposits 1 行、owd_gl_entries 20 行） | 写失效日时直接取「本次生效日 - 1」，未与该版本自己的生效日比较。两个调用方的生效日约定一旦不一致（重述用处理日 2026-09-17、日批用报告日 2026-09-16），后跑的那次必然算出反向区间 | ✅ 修法：写入侧用 `greatest(生效日 - 1, 该版本生效日)` 兜底并写完自检不变式；日批生效日改为报告日次日；`verify-scd2` 纳入日批环节；存量脏行由 `sql/iceberg/oneoff/07_fix_reversed_intervals.sql` 修 | SCD2 版本历史 | BUILD-LOG E6.2 |
+| #delegate-audit-20260917 | 09-17 | 三路独立审查（代码 / dbt 与 SQL / 文档）共提出 80 条发现，其中一条是三路都报同一条（DAG 授权晚于导出） | 长期单方视角审查，缺口集中在「规则声称的机制没落地」「文档抄自设计稿而非实现」两类 | ✅ 已全部收口：批次 A1–C7 与 09-19 两批把剩余 45 条逐条处理完（含 DAG 顺序、恒成功的源文件检查、宏表与 CLI 契约表、README 跑不通的命令）。逐条状态见 `docs/AUDIT-2026-09-17-delegate-review.md` | 全项目 | `docs/AUDIT-2026-09-17-delegate-review.md` |
+| #scd2-reversed-interval | 09-17 | 版本历史表出现「失效日早于生效日」的反向区间（owd_deposits 1 行、owd_gl_entries 20 行） | 写失效日时直接取「本次生效日 - 1」，未与该版本自己的生效日比较。两个调用方的生效日约定一旦不一致（重述用处理日 2026-09-17、日批用报告日 2026-09-16），后跑的那次必然算出反向区间 | ✅ 修法：写入侧用 `greatest(生效日 - 1, 该版本生效日)` 兜底并写完自检不变式；日批生效日改为报告日次日；`verify-scd2` 纳入日批环节；存量脏行由 `sql/iceberg/oneoff/07_fix_reversed_intervals.sql` 修 | SCD2 版本历史 | BUILD-LOG E6「踩到的坑」第 5 条 |
 | #dead-ows-tables | 09-18 | 三张 OWS 汇总表（`ows_hqla_summary`、`ows_collateral_summary`、`ows_funding_summary`）在全仓无任何下游消费者，却随每次 dbt 全量物化 | 血缘图与表契约原先声称它们喂报表，实际报表直接读 OWD 明细 —— 文档抄的是设计稿，不是实现 | ✅ 已把文档与血缘改成与实现一致并登记待下线。保留原因：`migration-notes` 记的汇总层设计占位，dbt 按工程整体物化，删掉要同时改模型与建表脚本；下线条件 = 确认无人接入后删模型、建表脚本与表契约三处 | OWS 汇总层 | `docs/AUDIT-2026-09-17-delegate-review.md` 第 17 条 |
 | #cumulative-gap-column-removed | 09-18 | 报表删掉了需求文档列过的 `sec_k_cumulative_30d_gap` | 原实现里它与 `sec_k_net_funding_gap` 是同一个表达式（审计第 14 条）。先按「按到期桶逐桶累计、取最低点」真正实现，实测发现 LCR 形状的数据里逐桶累计净现金流单调递减 —— 最低点恰好等于窗口末累计值，也就是净缺口，两期 6/6 行相等 | ✅ 决策：删除该列（审计给的第二个选项）。理由：留两列一个数等于用两个名字写同一件事，且名字会让人以为它回答了另一个问题；改名仍是重复列。时间维度的缺口若要报，应按到期桶出向量 | ADS 报表 Section K | `docs/AUDIT-2026-09-17-delegate-review.md` 第 14 条 |
 | #row-hash-baseline-reset | 09-18 | 把 `etl_source_file` 从 SCD2 的 row_hash 里剔除后，第一次归并会把**全表**判定为「已变更」 | row_hash 是历史行按旧定义算出来的，改定义等于换了比较基准；而这个列的取值范围含报告日（上游文件名 + 日期），一旦重放换名就会让全表版本号狂涨、`last_modified_reason` 被写成一堆不存在的 CORRECTION | ✅ 纪律：改哈希定义必须同时做一次基线重建（`sql/iceberg/oneoff/06_rebuild_owd_history.sql` 删历史表 → `owd_scd2.py` 重建干净基线）；这条已写在 `owd_scd2.py` 的 `EXCLUDED_FROM_HASH` 处，防止下一个人直接改完上线 | SCD2 版本历史 | `docs/changes/engineering.md` 的 c7 条目 |
@@ -30,6 +30,9 @@
 | #l2-recognized-not-split | 09-19 | 报表不单列「二级资产认列额」，读者看不到二级实际认了多少 | 审计方案曾建议新增 `sec_g_hqla_l2_recognized_usd` 列 | ✅ 决策：不加列，改在表契约与模型列注释里写明派生关系（`认列额 = 认列总额 − 一级市值 = min(原始二级, 一级 × 2/3)`）。理由：该值可由两列精确还原（两位小数相减），行级恒等式已由 VDQ-017 逐行守着，加列要连带 PG 迁移、导出列比对、报送文件的取列排除清单与表契约，成本明显高于收益。代价：Section G 的呈现与流入侧不对称，且减法把语义藏在算式里；回退：按上述四处一起补列 | ADS 报表 Section G | `docs/tables/ads_fr2052a_report.md` 的派生关系一节 |
 | #retired-report-id-in-ledger | 09-19 | 报送台账里 `ENT001-FR2052A-20260916-01` 的 3 行（CSV/XBRL/XML）对应不上任何一条报表：2026-09-16 的报表只有 6 个身份，台账有 7 个 | C3-2a 把「ENT001 兼作合并行」改成「GRP001 承担合并」，报表标识的末段随之分三档。改名之前报出去的那一批在台账里留下 3 行旧身份，状态仍是 ACCEPTED，磁盘上的旧文件也还在 | ✅ 修法：按裁决清掉 —— PG 删 3 行（`DELETE FROM ads.ads_fr2052a_submission WHERE report_id = 'ENT001-FR2052A-20260916-01'`，实测删 3），并删磁盘上对应的 3 个旧文件。删后报表身份与台账身份都是 6 个、台账 18 行，`verify-submission` 重跑报「6 个报送主体、18 个文件与台账逐条一致」。教训：改报表身份（改名或改标识末段）要连台账一起清，`verify-submission` 按 report_id 逐条核对，对不上报表的孤儿行不会报红 | 报送台账与报送文件目录 | `docs/changes/engineering.md` 的 submission-ledger-refresh 条目 |
 | #monitoring-stack-scope | 09-19 | 需求文档提到 Grafana / Prometheus / Superset，此前一个都没部署；「要接的话接到哪一步」也没有地方说清 | 原件只写了选型，没写哪些指标要上、由谁采集、告警怎么发 | ✅ 决策：接简单版。指标来源复用 `pipeline_health.py --json`（15 个：熔断、校验、预警、报送、重述、Kafka 滞后、PG 连接、磁盘），Server 2 的 `health_to_metrics.sh` 每 5 分钟写成 node_exporter 的 textfile，Server 1 的 Prometheus 抓、Grafana 出面板；6 条告警规则在 Prometheus 与 Grafana 里可见但不推送（要推送得再上 Alertmanager）；Grafana 开匿名只读，管理员口令走 .env 的 `GRAFANA_ADMIN_PASSWORD`，未设时沿用镜像出厂口令；BI 不做 | 监控与看板 | `docs/changes/engineering.md` 的 monitoring-stack 条目 |
+
+| #audit-access-log-no-writer | 09-19 | 表契约与验收清单都称 `audit.audit_access_log` 由环节写入，实测全仓没有任何写入方（只有建表、索引与 reset 时的 TRUNCATE），该表恒为空 | 读取级留痕在需求里属可选增强，实现时建了表但没人接写入；文档抄的是设计意图，不是实现 | ✅ 修法：按实况改文档 —— 表契约与验收清单都改成「当前无写入方」，并登记为已知局限；要真做需接 pgaudit 或语句日志，见 `#read-audit-gap` | 审计层 | `docs/tables/audit_access_log.md`、`docs/rules/ACCEPTANCE-CHECKLIST.md` |
+| #read-audit-gap | 09-19 | `sql/postgres/20_security.sql` 的注释写「这是缺口，已记在 docs/business/KNOWN-ISSUE.md」，但 KNOWN-ISSUE 里没有这一条 | 写注释时留了指针，登记动作没跟上，之后也没人回读 | ✅ 修法：在 KNOWN-ISSUE 补这一条，注释的指针才成立。缺口本身保留：读取级留痕需要 pgaudit 扩展或语句日志，本演示未部署 | 审计层 | `sql/postgres/20_security.sql` |
 
 <!-- PROJECT.md 索引行（复制区）：
 - `#pg18-data-dir-change` — PG 18 改了数据目录约定
@@ -54,6 +57,8 @@
 - `#export-after-submission-gate` — 已报送期的覆盖写闸（内容指纹判据）
 - `#retired-report-id-in-ledger` — 报表身份改名后，台账会留下对不上报表的孤儿行
 - `#monitoring-stack-scope` — 监控接 Prometheus 与 Grafana，指标来自巡检脚本，不推送
+- `#audit-access-log-no-writer` — 读取审计表当前没有写入方
+- `#read-audit-gap` — 读取级留痕未部署（pgaudit / 语句日志）
 -->
 
 ## 规范偏离（本项目 vs 上游）
@@ -63,9 +68,11 @@
 标准做法是**默认值**，偏离是例外。允许偏离的前提是四条**同时**成立：
 
 1. **逐条登记**：一行一条，四列 = 问题 / 上游要求 / 本项目做法 / 处置。
-2. **处置列指向真实锚点**：写成本文件里已有的锚点行，即首列的 `#kebab-case`；只写「已说明」不合格。
+2. **处置列可跳转**：有对应坑表条目的，写成该条目的锚点名（`#kebab-case`）；没有对应条目的，写明上游文件出处或决策记录位置。只写「已说明」不合格。
 3. **说明为什么不采用标准做法**：「本项目特殊」这类空理由不合格。
 4. **记代价与回退成本**：在本节末尾的汇总里各写一行。
+
+**锚点形态**：本文件的锚点住坑表**首列**（`| #kebab-case | …`），不是 `### #slug` 标题。共享门禁里的「偏离锚点」判据认的是后者，因此在本仓恒不触发，且它只到告警级、不阻断提交。这条差异按本节的第 2 条登记保留；要让判据在本仓生效，须改 ng 仓的共享工具，届时要跑全项目回归。
 
 **禁止无登记地默默降标准**；「这只是个例」不是免于登记的理由。
 
@@ -91,6 +98,8 @@
 | lint 口径排除 4 类规则 | 上游要求 `ruff check .`、`ruff format .`、`mypy .` 全过 | 配置收在项目根 `pyproject.toml`，排除 `D415`、`N812`、`RUF001`、`RUF002`、`RUF003` | ✅ 决策：前两类与中文写作冲突（`D415` 只认 ASCII 句末标点、`RUF001-003` 把全角标点当歧义字符），`N812` 与 PySpark 的 `functions as F` 写法冲突。逐条理由与命中数写在 `pyproject.toml` 注释里；无命中的 `D401`/`D202` 不排除，继续管事 |
 | 提交闸两道，本地在前 | 上游要求「等待 CI 通过」后合并 | 本地 `.githooks/pre-commit` 跑两道：`make lint` 加共享门禁；推送后 GitHub Actions 跑 `make lint` | ✅ 决策：本地先拦住，省一次往返；CI 兜住没配钩子的克隆。共享门禁的真身住 ng 仓，CI 环境没有那份克隆，所以不进 CI。gitee 只作镜像，没有 runner |
 | 不建单元测试套件 | 上游要求覆盖率 ≥ 80% | 未建 pytest 套件，判据改为数据层核对脚本全绿加端到端重跑 | ✅ 决策：本项目的风险在数据与编排，不在函数分支；核对脚本要能区分「零命中」与「读不到」 |
+| CHANGELOG 只记里程碑 | 上游模板要求变更日志逐条记录 | `CHANGELOG.md` 只写里程碑（阶段级），逐笔功能与契约变更落 `docs/changes/{module}.md` | ✅ 决策：项目已有 `docs/changes/` 承担逐笔留痕，两处都写必然互相漂；口径写在 `CHANGELOG.md` 顶部，验收清单的判据随之改成看 `docs/changes/` |
+| 日批自动过期 Iceberg 快照 | 红线 7 要求破坏性操作须人类显式授权；红线 9 要求每张表有快照保留与压缩策略 | 在日批末尾加一步 `maintain-tables --apply`；策略为保留 7 天且至少 10 个快照，命名空间含 `ref`、`bronze`、`silver`、`gold` | ✅ 决策（09-19）：把这条登记为**常设授权** —— 授权范围就是 `python/lakehouse/maintain_tables.py` 里声明的策略与命名空间，改该文件等于改授权范围；超出策略的删除仍需人工 |
 
 **适用边界**（条件条目为什么不在表里、本项目实际取了哪条路）：
 
@@ -111,6 +120,8 @@
 - **自研 DQ 引擎**（✅ 决策）——代价：GX 现成的算子与报告不可用；回退：把 ref 表规则翻译成 GX suite
 - **血缘自渲染**（✅ 决策）——代价：没有 DataHub 的搜索与影响面分析界面；回退：接入 DataHub 并导入 dbt manifest
 - **DQ 日志先清后写**（✅ 决策）——代价：日志环节多一步前置脚本；回退：改日志表为只留最近一次
+- **CHANGELOG 只记里程碑**（✅ 决策）——代价：只看 CHANGELOG 看不到逐笔变更，要另开 `docs/changes/`；回退：把 `docs/changes/` 的条目汇总并回写进 CHANGELOG
+- **日批自动过期快照**（✅ 决策）——代价：时间旅行与 `--diff` 只能查策略窗口内的快照（7 天且至少 10 个）；回退：把该环节从 `STEPS` 里移除，恢复手动执行
 - **lint 排除 4 类规则**（✅ 决策）——代价：这几类问题不再有机器兜底，只能靠评审看；回退：删掉 `pyproject.toml` 里对应的 `ignore` 项并批量整改
 - **提交闸本地优先**（✅ 决策）——代价：本地与 CI 都要维护可用环境，版本口径靠 `Makefile` 单源约束；回退：删掉 `.githooks/`，只留 CI
 - **不建单元测试套件**（✅ 决策）——代价：函数级回归只能靠核对脚本与端到端重跑，粒度偏粗；回退：补 pytest 套件并接进 `make lint`

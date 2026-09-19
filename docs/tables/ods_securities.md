@@ -61,7 +61,7 @@ Bronze（源系统接入，Iceberg `bronze` 命名空间）
 
 ## PII 字段与脱敏方式
 
-本层保留原始标识（如 `account_number`、`customer_id`），**脱敏在 OWD 层发生**。明文对照只住 `secure.fr2052a_pii_map`，由合规员与管理员两个角色可见。
+本表无 PII 列，无需脱敏：列清单里的标识是证券编码（`security_id`、`isin`、`cusip`）与 `issuer_id`（发行人编号），`issuer_id` 是发行机构编码，都不是个人标识。
 
 ## 生命周期
 

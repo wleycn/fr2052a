@@ -41,8 +41,8 @@
 | 检查项 | 命令 | 频率 |
 |--------|------|------|
 | Lint + 格式 + 类型 | `make lint` | 每次提交前由 `.githooks/pre-commit` 自动跑；推送后由 GitHub Actions 再跑一遍（`.github/workflows/lint.yml`） |
-| 数据层核对 | `bash deploy/server2/run-daily-pipeline.sh verify-bronze verify-silver verify-scd2 verify-ads verify-rbac` | 每次跑批后 |
-| dbt 模型 | `bash deploy/server2/run-daily-pipeline.sh dbt-run` | 每次模型变更后 |
+| 数据层核对 | `bash run-daily-pipeline.sh verify-bronze verify-silver verify-scd2 verify-ads verify-rbac` | 每次跑批后 |
+| dbt 模型 | `bash run-daily-pipeline.sh dbt-run` | 每次模型变更后 |
 | 端到端重跑 | `bash deploy/reset-demo.sh --apply` | 交付前 |
 | 部署无漂移 | `bash deploy/sync-deploy.sh --check` | 交付前 |
 
@@ -55,20 +55,20 @@
 | 1 | `references/` 下的需求原件，汇总进 `docs/business/PROJECT.md` |
 | 2 | `docs/business/DATA-DESIGN.md`、`MODULE-DESIGN.md`、`INTERFACE-DESIGN.md` |
 | 4 | 改完先 `make lint`；提交经 `.githooks/pre-commit` |
-| 5 | `bash deploy/server2/run-daily-pipeline.sh verify-bronze verify-silver verify-scd2 verify-ads verify-rbac` |
+| 5 | `bash run-daily-pipeline.sh verify-bronze verify-silver verify-scd2 verify-ads verify-rbac` |
 | 7 | `bash deploy/reset-demo.sh --apply` 整条链路重跑 |
 | 9 | `bash deploy/sync-deploy.sh` 把脚本同步到两台服务器 |
 
 ## 变更流程
 
-1. 创建 feature 分支
-2. 实现功能 + 写测试
-3. 本地 lint + test 通过
-4. 提交并推送
-5. 创建 MR
-6. 等待 CI 通过
-7. 人工评审
-8. 合并到 main
+本项目单人加 agent，流程压到四步（见 `AGENTS.md` §4：直接提交 `main`，不开分支不提 MR）：
+
+1. 实现功能 + 写测试
+2. 本地 `make lint` 通过；`.githooks/pre-commit` 会在提交前再跑一次
+3. 提交并推送到两个远程（`gitee` 与 `github`）
+4. 推送后由 GitHub Actions 再跑一遍 `lint`，红了当场修
+
+改动涉及契约与口径时，按 `docs/rules/ACCEPTANCE-CHECKLIST.md` 实核一遍，并把结论写进 `docs/changes/{module}.md` 的条目。
 
 ## 回滚策略
 
