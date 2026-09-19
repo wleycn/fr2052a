@@ -1,0 +1,63 @@
+# FR 2052a — Server 1 监控面板（Prometheus + Grafana）
+#
+# 承载：
+#   Prometheus : 抓 Server 2 上 node_exporter 暴露的巡检指标，保留 15 天
+#   Grafana    : 面板与告警展示，数据源与面板由 provisioning 文件自动挂载
+#
+# 指标来源不是新写的代码：Server 2 的 `health_to_metrics.sh` 每 5 分钟跑一次
+# `pipeline_health.py --json`，把结论写成 node_exporter 能读的文本文件。
+# 这样做的好处是巡检逻辑只有一份，面板与命令行看到的是同一个结论。
+#
+# 启动：cd ~/fr2052a-infra/monitoring && docker compose --env-file ../.env up -d
+# 停止：同上把 up -d 换成 down
+#
+# 镜像与端口给默认值：.env 里没写这些键也能起来，写了就以 .env 为准。
+
+name: fr2052a-monitoring
+
+services:
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v2.55.1}
+    container_name: fr2052a_prometheus
+    restart: unless-stopped
+    # 保留期按演示环境的磁盘余量定：指标本身很小，15 天足够看出趋势。
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  grafana:
+    image: ${GRAFANA_IMAGE:-grafana/grafana:11.5.1}
+    container_name: fr2052a_grafana
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      # 看板走匿名只读：演示环境看趋势不该还要登录一次。
+      # 要登录改面板时，在 .env 里设 GRAFANA_ADMIN_PASSWORD；不设则沿用镜像出厂口令。
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus_data:
+  grafana_data:

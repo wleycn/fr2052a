@@ -1,0 +1,20 @@
+# FR 2052a — Prometheus 抓取配置（监控侧的唯一来源）
+#
+# 只有一个抓取目标：Server 2 上的 node_exporter（9100）。
+# 巡检指标（fr2052a_*）由 Server 2 的 health_to_metrics.sh 写进 node_exporter
+# 的文本文件目录，node_exporter 再暴露出来 —— Prometheus 不会读文件，只能抓端点。
+#
+# Server 2 的地址与 PROJECT.md「运行环境」一节一致（192.168.17.24）。
+# 只在这里出现一次：改机器时改这一行，面板与告警都不用动。
+
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  - job_name: fr2052a-server2
+    static_configs:
+      - targets: ["192.168.17.24:9100"]

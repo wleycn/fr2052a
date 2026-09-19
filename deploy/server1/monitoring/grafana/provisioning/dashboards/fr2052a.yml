@@ -1,0 +1,12 @@
+apiVersion: 1
+
+# 面板由文件提供：改面板 = 改仓库里的 JSON，不在浏览器里点完就丢。
+providers:
+  - name: fr2052a
+    orgId: 1
+    folder: FR 2052a
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

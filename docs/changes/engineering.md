@@ -231,3 +231,11 @@
 - 验证：`verify-submission` 从磁盘重算文件哈希与台账逐条比对，「7 个报送主体、21 个文件与台账逐条一致」；随后整链重跑 18 个环节全绿。其中 `export-pg` 的「已报送期内容指纹」判据也通过 —— 它比的是 gold 与库内现值，与台账哈希无关，这里一并记录为当轮实测。
 - 回滚：台账刷新不可回滚，它记录的就是「当前库内数值对应的文件」。要回到旧哈希只能重建演示基线。
 - 收口：那 3 行退役身份按裁决清掉 —— PG 删 3 行（`DELETE FROM ads.ads_fr2052a_submission WHERE report_id = 'ENT001-FR2052A-20260916-01'`，实测删 3），磁盘上对应的 3 个旧文件一并删除。删后 2026-09-16 的报表身份与台账身份都是 6 个、台账 18 行，`verify-submission` 重跑报「6 个报送主体、18 个文件与台账逐条一致」。教训写在 KNOWN-ISSUE 的 `#retired-report-id-in-ledger`：改报表身份要连台账一起清，`verify-submission` 按 report_id 逐条核对，对不上报表的孤儿行不会报红。
+
+## monitoring-stack
+
+- 范围：`deploy/server1/monitoring/`（Prometheus 与 Grafana 的 compose、抓取配置、6 条告警规则、数据源与面板的 provisioning、面板 JSON）、`deploy/server2/monitoring/`（node_exporter 的 compose）、`deploy/server2/health_to_metrics.sh`、`deploy/server2/health_json_to_prom.py`、`README.md`、`docs/business/{PROJECT,KNOWN-ISSUE}.md`
+- 变更：监控按简单版接上。指标不另写采集逻辑，复用 `pipeline_health.py --json`（脚本本来就有这个开关），由 Server 2 的 `health_to_metrics.sh` 每 5 分钟转成 Prometheus 文本格式，写进 node_exporter 的 textfile 目录；Server 1 的 Prometheus 抓它，Grafana 出面板。15 个指标覆盖熔断、校验条数与 ERROR/WARNING、预警、报送文件与被拒数、重述次数、Kafka 滞后、PG 连接、磁盘占用；6 条告警规则与巡检脚本里的阈值对齐，不另立一套数字。三处取舍写在 KNOWN-ISSUE 的 `#monitoring-stack-scope`：告警只标红不推送（推送要再加 Alertmanager 与通知通道）、Grafana 走匿名只读（管理员口令走 .env，未设则沿用镜像出厂口令）、BI 不做。采集与转换分两个文件：shell 负责注入凭据与调用，Python 只做字段映射。
+- 验证：Server 1 抓 Server 2 的 9100，`grep -c '^fr2052a_'` 得 15；Prometheus 目标 `health=up` 且无 lastError，查 `fr2052a_dq_errors` 得 0；6 条告警规则全部加载；Grafana `/api/health` 正常（11.5.1），数据源 `fr2052a-prometheus` 经代理查询成功，面板 `fr2052a-health` 按 uid 取到（HTTP 200）；Server 2 的 cron 在 13:55:03 实跑过一次（指标文件时间戳与日志一致）。`make lint` 全绿（41 个文件）。
+- 回滚：Server 1 与 Server 2 各在 `~/fr2052a-infra/monitoring` 跑一次 `docker compose down`，删掉 Server 2 的 cron 那一行，`git revert` 本条目对应的提交。镜像与数据卷可留（下次直接起）也可删。
+- 一处工具链冲突（按 AGENTS §0 登记）：提交门禁的排版判据要求「docstring 后空一行」（阻断级），ruff 的 D202 要求「docstring 后不得有空行」。函数体紧接 docstring 时两条无法同时满足，本轮在 `deploy/server2/health_json_to_prom.py` 上被卡住。处理：按门禁的形态写（保留空行），并在该文件用 `# ruff: noqa: D202` 关掉冲突项、写明原因。根治要在 ng 仓放宽门禁那条判据（只对「docstring 后接嵌套 def/class 或块尾」要求空行），属共享工具链改动，未在本仓动。

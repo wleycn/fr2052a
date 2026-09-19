@@ -1,0 +1,13 @@
+apiVersion: 1
+
+# 数据源只有一个：同 compose 里的 Prometheus（容器名即主机名）。
+# uid 固定成 fr2052a-prometheus，面板 JSON 按这个 uid 引用，改名字会一起改坏。
+datasources:
+  - name: Prometheus
+    uid: fr2052a-prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 30s

@@ -1,0 +1,171 @@
+{
+  "uid": "fr2052a-health",
+  "title": "FR 2052a 跑批健康",
+  "tags": ["fr2052a", "health"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "editable": true,
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "熔断闸",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "fr2052a-prometheus" },
+      "targets": [{ "refId": "A", "expr": "fr2052a_breaker_halted" }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "OPEN（放行）", "color": "green", "index": 0 } } },
+            { "type": "value", "options": { "1": { "text": "HALTED（阻断）", "color": "red", "index": 1 } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "阻断级预警（未关闭）",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "fr2052a-prometheus" },
+      "targets": [{ "refId": "A", "expr": "fr2052a_alerts_blocking" }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "报送文件（含被拒）",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "fr2052a-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "fr2052a_submission_files", "legendFormat": "已登记" },
+        { "refId": "B", "expr": "fr2052a_submission_rejected", "legendFormat": "被拒" }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "指标新鲜度（秒前）",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "fr2052a-prometheus" },
+      "targets": [{ "refId": "A", "expr": "time() - fr2052a_health_last_run_timestamp" }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 600 },
+              { "color": "red", "value": 900 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "校验结果（ERROR / WARNING / 总条数）",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "fr2052a-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "fr2052a_dq_errors", "legendFormat": "ERROR" },
+        { "refId": "B", "expr": "fr2052a_dq_warnings", "legendFormat": "WARNING" },
+        { "refId": "C", "expr": "fr2052a_dq_rules_total", "legendFormat": "执行条数" }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "type": "gauge",
+      "title": "磁盘占用",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "fr2052a-prometheus" },
+      "targets": [{ "refId": "A", "expr": "fr2052a_disk_used_percent" }],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 70 },
+              { "color": "red", "value": 85 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "PG 连接与 Kafka 滞后",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "fr2052a-prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "fr2052a_pg_connections", "legendFormat": "PG 连接" },
+        { "refId": "B", "expr": "fr2052a_kafka_max_lag", "legendFormat": "Kafka 最大滞后" }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] }
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+# FR 2052a — Server 2 指标暴露（node_exporter）
+#
+# 为什么需要它：Prometheus 只能抓 HTTP 端点，读不了文件。巡检结论由
+# `health_to_metrics.sh` 每 5 分钟写成文本文件，这里用 node_exporter 的
+# textfile collector 把那个目录暴露成端点，Server 1 的 Prometheus 来抓。
+#
+# 有意的取舍：这里不挂宿主根目录、不加 pid:host。本演示要看的指标全部来自
+# 巡检结论（熔断、校验、预警、报送、滞后、磁盘占比），它们已经由脚本算好；
+# 再叠一层宿主级 CPU/IO 指标属于另一个话题，需要提权挂载，收益与风险不成比例。
+#
+# 启动：cd ~/fr2052a-infra/monitoring && docker compose --env-file ../.env up -d
+# 停止：同上把 up -d 换成 down
+
+name: fr2052a-monitoring
+
+services:
+  node-exporter:
+    image: ${NODE_EXPORTER_IMAGE:-prom/node-exporter:v1.8.2}
+    container_name: fr2052a_node_exporter
+    restart: unless-stopped
+    command:
+      - --collector.textfile.directory=/textfile
+    ports:
+      - "${NODE_EXPORTER_PORT:-9100}:9100"
+    volumes:
+      # 采集脚本写到宿主这个目录，容器只读挂进来。
+      # 路径与 health_to_metrics.sh 的默认输出目录必须一致。
+      - ./textfile:/textfile:ro

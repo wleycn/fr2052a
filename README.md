@@ -81,7 +81,7 @@ git config core.hooksPath .githooks   # 做一次：之后每次提交前自动�
 | 重置环境 | 在开发机执行 `bash deploy/reset-demo.sh --apply` |
 | 代码质量闸 | 在开发机执行 `make lint`（首次先 `git config core.hooksPath .githooks`） |
 
-Airflow 界面在 `http://192.168.17.22:8080`，MinIO 控制台在 `http://192.168.17.22:9001`。
+Airflow 界面在 `http://192.168.17.22:8080`，MinIO 控制台在 `http://192.168.17.22:9001`，监控面板在 `http://192.168.17.22:3000`（Grafana，匿名只读）。
 
 ## 目录速览
 
@@ -96,8 +96,8 @@ demo-fr2052a/
 │   ├── rules/                 # 规范文件（结构 / 编码 / 流程 / 验收）
 │   └── build-log.md           # 构建日志（E0 起逐阶段记录）
 ├── deploy/
-│   ├── server1/               # Server 1 部署（PG + MinIO + Airflow）与 Airflow DAG
-│   ├── server2/               # Server 2 部署（Kafka + Spark）与跑批编排
+│   ├── server1/               # Server 1 部署（PG + MinIO + Airflow + 监控）与 Airflow DAG
+│   ├── server2/               # Server 2 部署（Kafka + Spark + 指标暴露）与跑批编排
 │   ├── sync-deploy.sh         # deploy/ 同步与漂移检查
 │   └── reset-demo.sh          # 一键初始化环境（默认演练）
 ├── sql/

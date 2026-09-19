@@ -17,6 +17,7 @@
 | 结果库 | PostgreSQL | 18.6 |
 | 脱敏 | dbt 宏 + PostgreSQL secure schema（加盐 SHA-256） | - |
 | 巡检 | 自研 `pipeline_health.py`（熔断 / 校验 / 预警 / 报送 / 重述 / 实时事件 / 连接 / 滞后 / 磁盘） | - |
+| 监控 | Prometheus + Grafana（指标来自巡检脚本的 `--json` 输出，Server 2 采集、Server 1 出面板） | Prometheus 2.55.1 / Grafana 11.5.1 |
 | 代码质量闸 | ruff（检查 + 格式化）+ mypy，配置在项目根 `pyproject.toml` | ruff 0.14.4 / mypy 1.18.2 |
 
 ## 目录分层
@@ -43,8 +44,8 @@ demo-fr2052a/
 │   │   └── ACCEPTANCE-CHECKLIST.md
 │   └── build-log.md           # 构建日志（逐阶段记录）
 ├── deploy/
-│   ├── server1/               # Server 1 部署清单（PG + MinIO + Airflow）与 Airflow DAG
-│   ├── server2/               # Server 2 部署清单（Kafka + Spark）与跑批编排
+│   ├── server1/               # Server 1 部署清单（PG + MinIO + Airflow + 监控）与 Airflow DAG
+│   ├── server2/               # Server 2 部署清单（Kafka + Spark + 指标暴露）与跑批编排
 │   ├── sync-deploy.sh         # deploy/ 同步与漂移检查
 │   └── reset-demo.sh          # 一键初始化环境（默认演练）
 ├── sql/
@@ -110,8 +111,11 @@ demo-fr2052a/
 | Kafka（跨机） | 9094 | `kafka-topics --bootstrap-server 192.168.17.24:9094 --list` |
 | Kafka（容器内） | 9092 | 只在 Server 2 的容器网络里可用，广告地址是 `kafka:9092` |
 | Spark Master | 8081 | `curl -I http://192.168.17.24:8081` |
+| 监控 node_exporter | 9100 | `curl -s http://192.168.17.24:9100/metrics \| grep -c '^fr2052a_'` |
+| Prometheus | 9090 | `curl -s http://192.168.17.22:9090/-/healthy` |
+| Grafana | 3000 | `curl -s http://192.168.17.22:3000/api/health` |
 
-没有独立的元数据平台与监控面板，这是已决策的范围：血缘由 `render_lineage.py` 渲染成 Markdown 报告，巡检由 `pipeline_health.py` 直接输出结论；BI 不做，报表落 PG 后直接用 `psql` 查。决策与代价见 `KNOWN-ISSUE.md` 的「监控与 BI 栈未落地」行。
+监控按简单版接上：Server 2 的 `health_to_metrics.sh` 每 5 分钟把 `pipeline_health.py --json` 的巡检结论写成 node_exporter 能读的指标文件（15 个指标），Server 1 的 Prometheus 抓它、Grafana 出面板（`http://192.168.17.22:3000`，匿名只读）。6 条告警规则在 Prometheus 与 Grafana 里可见，未接推送通道。血缘由 `render_lineage.py` 渲染成 Markdown 报告；BI 不做，报表落 PG 后直接用 `psql` 查。边界与代价见 `KNOWN-ISSUE.md` 的「监控与 BI 栈未落地」行。
 
 Airflow 里的 DAG 默认**暂停**：`fr2052a_daily_batch`、`fr2052a_backfill_and_restate`、`fr2052a_realtime_alert`、`fr2052a_submission` 四个是暂停的，只有 `fr2052a_gl_reconciliation` 是放开的。日常跑批走 Server 2 的 `run-daily-pipeline.sh`，不经过调度器；要演示「由 Airflow 编排」时，先在 Web UI 或 `airflow dags unpause <dag_id>` 放开对应 DAG，再手动触发。
 
@@ -150,3 +154,4 @@ Airflow 里的 DAG 默认**暂停**：`fr2052a_daily_batch`、`fr2052a_backfill_
 - `#scd2-reversed-interval` — 版本区间不得反向（失效日早于生效日）
 - `#delegate-audit-20260917` — 三路独立审查的 80 条发现与处置
 - `#retired-report-id-in-ledger` — 报表身份改名后，台账会留下对不上报表的孤儿行
+- `#monitoring-stack-scope` — 监控接 Prometheus 与 Grafana，指标来自巡检脚本，不推送

@@ -29,6 +29,7 @@
 | #spark-decimal-division | 09-19 | 报表认列额比独立复算高出 1,478.06，`verify-ads` 因此报红 | Spark SQL 的 DECIMAL 除法只给 6 位小数：`2.0 / 3` 算成 `0.666667`，在 44 亿的一级资产基数上把上限抬高 1478.06。同一算式在小数上完全看不出来 —— 偏差由基数放大 | ✅ 修法：改成「一级 * 2 / 3」（乘 2 再除以整型 3，Spark 给 13 位小数），dbt 模型三处与 VDQ-017 判据同步改。纪律：DECIMAL 列上的比例运算别用两位小数字面量相除，先乘后整除；分成分级容差的判据挡不住这类 10⁻⁷ 级偏差 | 所有 DECIMAL 比例运算 | `docs/changes/engineering.md` 的 hqla-cap-basis 条目 |
 | #l2-recognized-not-split | 09-19 | 报表不单列「二级资产认列额」，读者看不到二级实际认了多少 | 审计方案曾建议新增 `sec_g_hqla_l2_recognized_usd` 列 | ✅ 决策：不加列，改在表契约与模型列注释里写明派生关系（`认列额 = 认列总额 − 一级市值 = min(原始二级, 一级 × 2/3)`）。理由：该值可由两列精确还原（两位小数相减），行级恒等式已由 VDQ-017 逐行守着，加列要连带 PG 迁移、导出列比对、报送文件的取列排除清单与表契约，成本明显高于收益。代价：Section G 的呈现与流入侧不对称，且减法把语义藏在算式里；回退：按上述四处一起补列 | ADS 报表 Section G | `docs/tables/ads_fr2052a_report.md` 的派生关系一节 |
 | #retired-report-id-in-ledger | 09-19 | 报送台账里 `ENT001-FR2052A-20260916-01` 的 3 行（CSV/XBRL/XML）对应不上任何一条报表：2026-09-16 的报表只有 6 个身份，台账有 7 个 | C3-2a 把「ENT001 兼作合并行」改成「GRP001 承担合并」，报表标识的末段随之分三档。改名之前报出去的那一批在台账里留下 3 行旧身份，状态仍是 ACCEPTED，磁盘上的旧文件也还在 | ✅ 修法：按裁决清掉 —— PG 删 3 行（`DELETE FROM ads.ads_fr2052a_submission WHERE report_id = 'ENT001-FR2052A-20260916-01'`，实测删 3），并删磁盘上对应的 3 个旧文件。删后报表身份与台账身份都是 6 个、台账 18 行，`verify-submission` 重跑报「6 个报送主体、18 个文件与台账逐条一致」。教训：改报表身份（改名或改标识末段）要连台账一起清，`verify-submission` 按 report_id 逐条核对，对不上报表的孤儿行不会报红 | 报送台账与报送文件目录 | `docs/changes/engineering.md` 的 submission-ledger-refresh 条目 |
+| #monitoring-stack-scope | 09-19 | 需求文档提到 Grafana / Prometheus / Superset，此前一个都没部署；「要接的话接到哪一步」也没有地方说清 | 原件只写了选型，没写哪些指标要上、由谁采集、告警怎么发 | ✅ 决策：接简单版。指标来源复用 `pipeline_health.py --json`（15 个：熔断、校验、预警、报送、重述、Kafka 滞后、PG 连接、磁盘），Server 2 的 `health_to_metrics.sh` 每 5 分钟写成 node_exporter 的 textfile，Server 1 的 Prometheus 抓、Grafana 出面板；6 条告警规则在 Prometheus 与 Grafana 里可见但不推送（要推送得再上 Alertmanager）；Grafana 开匿名只读，管理员口令走 .env 的 `GRAFANA_ADMIN_PASSWORD`，未设时沿用镜像出厂口令；BI 不做 | 监控与看板 | `docs/changes/engineering.md` 的 monitoring-stack 条目 |
 
 <!-- PROJECT.md 索引行（复制区）：
 - `#pg18-data-dir-change` — PG 18 改了数据目录约定
@@ -52,6 +53,7 @@
 - `#row-hash-baseline-reset` — 改 row_hash 定义必须先重建版本基线
 - `#export-after-submission-gate` — 已报送期的覆盖写闸（内容指纹判据）
 - `#retired-report-id-in-ledger` — 报表身份改名后，台账会留下对不上报表的孤儿行
+- `#monitoring-stack-scope` — 监控接 Prometheus 与 Grafana，指标来自巡检脚本，不推送
 -->
 
 ## 规范偏离（本项目 vs 上游）
@@ -80,7 +82,7 @@
 | 数据质量用自研规则引擎 | `[99]详细材料.md` 指定 Great Expectations | 规则定义已在 `ref.ref_validation_rules`，由 `run_dq_rules.py` 执行 | ✅ 决策：转成 GX suite 等于规则定义存两份，必然漂移 |
 | 血缘用 dbt meta 自渲染 | `[99]详细材料.md` 指定 DataHub | `dbt/models/**/schema.yml` 的 meta 声明 + `render_lineage.py` 渲染 | ✅ 决策：DataHub 部署成本高，演示价值等价 |
 | 机器门禁只落地一半 | 红线要求「能写成 lint、检查脚本或 CI check，就不指望模型读到」 | 代码侧闸已齐（`make lint` + 本地钩子 + CI + **共享门禁**）：头注缺失与悬空引用两项由 `.githooks/pre-commit` 调用的共享门禁承担。曾是机器闸的 `[AI]` 提交标记已按用户决定撤销，共享闸里的这一项也已删除 | ✅ 已补齐：共享门禁接进 `.githooks/pre-commit`（该仓用 `core.hooksPath`，不能直接跑模板的 `install.sh`）|
-| 监控与 BI 栈未落地 | 需求文档提到 Grafana / Prometheus / Superset | 三者都没有部署；巡检由 `pipeline_health.py`、血缘由 `render_lineage.py` 直接输出，报表落 PG 后用 `psql` 查 | ✅ 决策：09-19 裁决拆成两条 —— 监控由 `python/governance/pipeline_health.py` 直出结论，不接 Prometheus 与 Grafana；BI 明确不做，演示没有分析型消费方 |
+| 监控与 BI 栈未落地 | 需求文档提到 Grafana / Prometheus / Superset | 监控已按简单版接上：Server 2 采集巡检指标，Server 1 的 Prometheus 抓、Grafana 出面板；BI 仍不部署，报表落 PG 后用 `psql` 查 | ✅ 决策：09-19 裁决分两条 —— 监控接 Prometheus 与 Grafana，指标来源复用 `pipeline_health.py --json`，边界见本文件 monitoring-stack-scope 条；BI 明确不做，演示没有分析型消费方 |
 | 独立复核不做 | 上游要求由未参与编写的一方实跑关键判据后签名 | 单人加 agent 的演示项目没有第三方执行方 | ✅ 决策：不做第三方复核，`ACCEPTANCE-CHECKLIST.md` 第 3 项改为不适用并在证据列写明替代标准；判据本身仍由核对脚本与端到端重跑实核 |
 | docs/rules 允许项目侧手改 | 上游要求四件套由装配器产出，项目侧不得写入项目事实 | 本仓在其上手工补充了目录行与验收证据列 | ✅ 决策：保留手改，不重跑装配。代价是 `rules_assembly.py --check` 恒报不一致，改由本表登记兜底 |
 | 直接在 main 提交 | `AGENTS.md` §4 原要求走 feature 分支再提交 MR | 全部历史都在 main 上直接提交，仓库只有 main 一个分支 | ✅ 决策：把 §4 改成「直接提交 main，出问题靠 revert」；单人加 agent 的项目没有第三方评审人，分支与 MR 只增加动作 |
@@ -113,7 +115,7 @@
 - **提交闸本地优先**（✅ 决策）——代价：本地与 CI 都要维护可用环境，版本口径靠 `Makefile` 单源约束；回退：删掉 `.githooks/`，只留 CI
 - **不建单元测试套件**（✅ 决策）——代价：函数级回归只能靠核对脚本与端到端重跑，粒度偏粗；回退：补 pytest 套件并接进 `make lint`
 - **机器门禁补齐**（✅ 已补）——代价：每次提交多花约两秒，且闸真身住 ng 仓，机器上没有那份克隆时会退化成只跑 lint；回退：把共享门禁那一段从 `.githooks/pre-commit` 里删掉，回到只跑 `make lint`
-- **监控与 BI 都不接**（✅ 决策）——代价：没有历史趋势与告警推送，只有一次性的巡检输出；看数要自己写 SQL，没有可视化层；回退：接 Prometheus + Grafana（约一张 compose 文件）与 Superset（约一张 compose 文件加一份数据源配置）
+- **监控接了简单版，BI 不接**（✅ 决策）——代价：多两个常驻容器与一条每 5 分钟的 cron 要维护；告警只到「Prometheus 与 Grafana 里标红」，没有推送通道，要推送得再上 Alertmanager；看数要自己写 SQL，没有可视化分析层；回退：在 Server 1 与 Server 2 的 `~/fr2052a-infra/monitoring` 各跑一次 `docker compose down`，删掉 Server 2 的那一行 cron，仓库侧 `git revert`
 - **独立复核缺席**（✅ 决策）——代价：验收结论没有第三方背书，判据的可信度靠核对脚本的独立性；回退：请一个未参与编写的一方实跑 5 条关键判据并签名
 - **docs/rules 手改**（✅ 决策）——代价：装配校验恒报 4 处不一致，规则层与上游漂移只能靠人工比对；回退：从上游模板侧承载补充内容后重跑装配
 - **变更留痕启用**（✅ 已补）——代价：每次功能与契约变更多写一条四段条目；回退：删除 `docs/changes/` 下的条目文件并恢复 AGENTS §6 的原始措辞

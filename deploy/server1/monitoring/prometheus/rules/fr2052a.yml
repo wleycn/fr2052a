@@ -1,0 +1,64 @@
+# FR 2052a — 告警规则
+#
+# 阈值与 pipeline_health.py 里那两个常量对齐（PG 连接 80%、磁盘 85%），
+# 不另立一套：同一个判断在两处写两个数字，迟早对不上。
+#
+# 说明：这组规则会让 Prometheus 与 Grafana 把告警标成 firing。
+# 要推送（邮件 / 微信）还需要接 Alertmanager 与通知通道，本批未做，见 KNOWN-ISSUE。
+
+groups:
+  - name: fr2052a
+    rules:
+      - alert: Fr2052aBreakerHalted
+        expr: fr2052a_breaker_halted == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 熔断闸处于 HALTED，报送被阻断
+          description: 合规熔断器判定当前不满足报送条件，报送环节会被拒绝。
+
+      - alert: Fr2052aBlockingAlerts
+        expr: fr2052a_alerts_blocking > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: 存在未关闭的阻断级预警
+          description: ads.ads_fr2052a_alerts 里有 status=OPEN 且 blocks_submission 的记录。
+
+      - alert: Fr2052aDqErrors
+        expr: fr2052a_dq_errors > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: 最近批次出现 ERROR 级校验失败
+          description: 数据质量规则判出 ERROR，报表数值可能不成立。
+
+      - alert: Fr2052aDiskHigh
+        expr: fr2052a_disk_used_percent > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 磁盘占用超过 85%
+          description: 与巡检脚本里的 WARN_DISK_PERCENT 同一条阈值。
+
+      - alert: Fr2052aPgConnectionsHigh
+        expr: fr2052a_pg_connections > 0.8 * fr2052a_pg_connections_max
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: PG 连接使用率超过 80%
+          description: 与巡检脚本里的 WARN_CONNECTION_RATIO 同一条阈值。
+
+      - alert: Fr2052aHealthStale
+        expr: time() - fr2052a_health_last_run_timestamp > 900
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 巡检指标超过 15 分钟没有更新
+          description: 采集侧（Server 2 的 health_to_metrics.sh 或它的 cron）停了，指标是旧的。
