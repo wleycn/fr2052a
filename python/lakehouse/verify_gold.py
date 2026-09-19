@@ -510,6 +510,84 @@ def check_recon_benchmark(spark: SparkSession) -> list[CheckResult]:
     return results
 
 
+def check_section_i_identity(spark: SparkSession) -> list[CheckResult]:
+    """Section I/G 恒等式：未受限各项 + 已受限 = Section G 合计，且逐桶与 silver 独立复算一致。
+
+    这条恒等式是「HQLA 存量排除 30 天内到期的证券」那次改动的守门人：
+    被排除出去的那一块必须落进 unencumbered_near_maturity 桶里，否则恒等式立刻不平 ——
+    少算的钱不会在别的地方报出来，只会让 LCR 分子静静变小。
+    """
+    results: list[CheckResult] = []
+    for period in report_periods(spark):
+        rows = spark.sql(
+            f"""
+            select
+                round(sec_i_unencumbered_hqla_l1 + sec_i_unencumbered_hqla_l2a
+                      + sec_i_unencumbered_hqla_l2b + sec_i_unencumbered_non_hqla
+                      + sec_i_unencumbered_near_maturity + sec_i_encumbered_total, 2) as parts_sum,
+                round(sec_g_total_mv, 2) as section_g_total
+            from {REPORT}
+            where cast(report_date as string) = '{period}'
+            """
+        ).collect()
+        worst = max(
+            (abs(float(row["parts_sum"] or 0) - float(row["section_g_total"] or 0)) for row in rows),
+            default=0.0,
+        )
+        results.append(
+            CheckResult(
+                name=f"Section I/G 恒等式 {period}",
+                passed=bool(rows) and worst <= 0.05,
+                detail=f"{len(rows)} 行，最大偏差 {worst:,.2f}（未受限五项 + 已受限 vs Section G 合计）",
+            )
+        )
+
+        # 逐桶独立复算：从 silver 明细按同一口径重算未受限各桶，与报表的合并行逐项比。
+        # 拿报表自己的列再套一遍公式只能证明公式抄对了，证明不了桶的划分没错。
+        recomputed = spark.sql(
+            f"""
+            select
+                -- 计入 HQLA 存量的三个等级：未受限 + 剩余期限 30 天以上（窗口内到期的走流入）
+                round(sum(case when hqla_classification = 'LEVEL_1' and not is_encumbered
+                                    and days_to_maturity > 30 then market_value_usd else 0 end), 2) as l1,
+                round(sum(case when hqla_classification = 'LEVEL_2A' and not is_encumbered
+                                    and days_to_maturity > 30 then market_value_usd else 0 end), 2) as l2a,
+                round(sum(case when hqla_classification = 'LEVEL_2B' and not is_encumbered
+                                    and days_to_maturity > 30 then market_value_usd else 0 end), 2) as l2b,
+                -- 未受限但 30 天内到期：被排除在存量之外，单列披露
+                round(sum(case when not is_encumbered and days_to_maturity <= 30
+                               then market_value_usd else 0 end), 2) as near_maturity,
+                round(sum(case when hqla_classification = 'NON_HQLA' and not is_encumbered
+                               then market_value_usd else 0 end), 2) as non_hqla,
+                round(sum(case when is_encumbered then market_value_usd else 0 end), 2) as encumbered
+            from silver.owd_securities
+            where not is_intracompany and cast(report_date as string) = '{period}'
+            """
+        ).collect()[0]
+        report_row = spark.sql(
+            f"""
+            select sec_i_unencumbered_hqla_l1 as l1, sec_i_unencumbered_hqla_l2a as l2a,
+                   sec_i_unencumbered_hqla_l2b as l2b, sec_i_unencumbered_non_hqla as non_hqla,
+                   sec_i_unencumbered_near_maturity as near_maturity, sec_i_encumbered_total as encumbered
+            from {REPORT} where is_consolidated and cast(report_date as string) = '{period}'
+            """
+        ).collect()[0]
+        worst_bucket = 0.0
+        worst_name = ""
+        for column in ("l1", "l2a", "l2b", "non_hqla", "near_maturity", "encumbered"):
+            gap = abs(float(recomputed[column] or 0) - float(report_row[column] or 0))
+            if gap > worst_bucket:
+                worst_bucket, worst_name = gap, column
+        results.append(
+            CheckResult(
+                name=f"非受限各桶独立复算 {period}",
+                passed=worst_bucket <= 0.05,
+                detail=(f"六个桶逐项比对，最大偏差 {worst_bucket:,.2f}" + (f"（{worst_name}）" if worst_name else "")),
+            )
+        )
+    return results
+
+
 def main() -> int:
     """跑 ADS 层全部核对项，任一不通过即以退出码 1 结束。"""
     spark = SparkSession.builder.appName("fr2052a-verify-gold").getOrCreate()
@@ -521,6 +599,8 @@ def main() -> int:
     results.extend(check_intracompany_present(spark))
     results.extend(check_detail_rollup(spark))
     results.extend(check_l2_cap(spark))
+    results.extend(check_section_i_identity(spark))
+
     results.extend(check_inflow_cap(spark))
     results.extend(check_gl_reconciliation(spark))
     results.extend(check_recon_benchmark(spark))

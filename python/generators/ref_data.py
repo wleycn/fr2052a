@@ -454,12 +454,16 @@ VALIDATION_RULE_ROWS = [
     ),
     (
         "VDQ-018",
-        "Inflow capped at 75% of outflow",
+        "Inflow recognition equals min(raw inflow, 75% of outflow)",
         "BUSINESS",
         "ADS",
         "ERROR",
-        "sec_k_total_inflows <= 0.75 * sec_k_total_outflows",
-        "现金流入上限为流出的 75%",
+        # 判据是「认列额算得对不对」，不是「上限有没有被触发」：上限被执行时原始流入本来就
+        # 大于 75%，把那个状态判成 ERROR 等于一触发上限就报错（本演示的短票据入样本后
+        # 立刻复现）。容差 1 分钱是表示精度：金额报两位小数，算式精确值上取整到分会高出
+        # 至多半厘，判据留 1 分容差才不把四舍五入当成违规。
+        "abs(sec_k_total_inflows - least(sec_h_expected_inflow_30d, 0.75 * sec_k_total_outflows)) <= 0.01",
+        "现金流入认列额 = 原始流入与流出的 75% 取小（1 分表示精度容差）",
         True,
     ),
     (

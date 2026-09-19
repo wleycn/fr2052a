@@ -154,8 +154,16 @@ print(sum(1 for topic in topics if topic.get('has_producer')))
     export-pg)
       # 批次号显式传进去：导出作业要用它核对运行上下文（覆盖写前置闸的一条判据），
       # 而包装脚本只透传数据库凭据，不保证 BATCH_ID 会进容器环境。
+      #
+      # 「覆盖已报送期」的开关同样必须转成命令行参数：spark-submit 包装脚本只把白名单里的
+      # 变量透进容器，靠 ALLOW_EXPORT_AFTER_SUBMISSION 环境变量传是传不到的（实测漏过一次：
+      # 重述流程带了变量，容器里看不见，前置闸照样拦）。重述流程的 rebuild 步骤设这个变量。
+      export_extra=()
+      if [ "${ALLOW_EXPORT_AFTER_SUBMISSION:-0}" = "1" ]; then
+        export_extra+=(--allow-after-submission)
+      fi
       bash spark-submit-fr2052a.sh "$APP_DIR/python/exporters/export_gold_to_pg.py" \
-        --batch-id "$BATCH_ID"
+        --batch-id "$BATCH_ID" "${export_extra[@]}"
       ;;
     publish-access)
       # 必须在 export-pg 之前：先施加结构迁移与授权，导出用 truncate=true 保住它们。

@@ -94,7 +94,9 @@ with DAG(
             "EFFECTIVE_DATE={{ params.effective_date }} "
             'RESTATE_REASON="{{ params.reason }}" '
             "REQUESTED_BY={{ params.requested_by }} "
-            f"bash run-daily-pipeline.sh {REBUILD_STEPS}"
+            # 重述是「已报送期内容要变」的正当路径：显式打开导出的越过开关，
+            # 否则前置闸会因为「已报送期内容变了」拦下重述本身（见 export_gold_to_pg.py 第 5 条）
+            f"ALLOW_EXPORT_AFTER_SUBMISSION=1 bash run-daily-pipeline.sh {REBUILD_STEPS}"
         ),
         doc_md="按 RESTATEMENT 原因重跑：建模 → OWD 版本归并 → 质量 → 导出 → 流动性判定",
     )

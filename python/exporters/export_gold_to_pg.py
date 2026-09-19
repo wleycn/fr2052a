@@ -47,15 +47,20 @@ when the new data has a different schema」。实测确认：模型多一列时�
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import re
 import sys
 from typing import Any
 
 from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import functions as F
 
 GOLD_SCHEMA = "gold"
 ADS_SCHEMA = "ads"
+
+# 视为「已报送」的台账状态：这两个状态下库内数据与已报送文件必须保持一致。
+SUBMITTED_STATES = ("SUBMITTED", "ACCEPTED")
 
 TABLES = (
     "ads_fr2052a_report",
@@ -73,6 +78,12 @@ def parse_args() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(description="把 gold 层报送表导出到 PostgreSQL 的 ads 层")
     parser.add_argument("--batch-id", default=os.environ.get("BATCH_ID", ""), help="本批批次号，用于核对运行上下文")
+    parser.add_argument(
+        "--allow-after-submission",
+        action="store_true",
+        default=os.environ.get("ALLOW_EXPORT_AFTER_SUBMISSION", "") not in ("", "0", "false", "False"),
+        help="允许覆盖「已报送且内容已变」的报告期（重述流程用；默认禁止，见 preflight 第 5 条）",
+    )
     args = parser.parse_args()
     if args.batch_id and not re.fullmatch(r"[A-Za-z0-9-]+", args.batch_id):
         parser.error(f"批次号只允许字母、数字与短横线，收到：{args.batch_id!r}")
@@ -117,13 +128,59 @@ def target_columns(spark: SparkSession, url: str, table: str, properties: dict[s
     return spark.read.jdbc(url, f"(SELECT * FROM {table} WHERE 1 = 0) AS probe", properties=properties).columns
 
 
+def _submitted_periods(spark: SparkSession, url: str, properties: dict[str, Any]) -> set[str]:
+    """已报送（SUBMITTED / ACCEPTED）的报告期。报送台账只落在 PG，走 JDBC 读。"""
+    ledger = f"{ADS_SCHEMA}.ads_fr2052a_submission"
+    if target_columns(spark, url, ledger, properties) is None:
+        return set()
+    frame = spark.read.jdbc(
+        url,
+        f"(SELECT DISTINCT report_date, submission_status FROM {ledger}) AS submitted",
+        properties=properties,
+    )
+    return {str(row["report_date"]) for row in frame.collect() if row["submission_status"] in SUBMITTED_STATES}
+
+
+def _content_fingerprint(frame: DataFrame, columns: list[str], period: str) -> str:
+    """按报告期算内容指纹：行序无关（排序后拼接），列序固定（只取两侧共有的列）。
+
+    比的是「库内现值」与「本次要写的值」，不是「有没有报送过」：重跑而数据未变时指纹相同、
+    照常放行；只有内容真的变了才拦 —— 那才是会让库内数据与已报送文件分叉的形态。
+    列取交集而不是 gold 的全部列：库里可能持有后加的迁移列，那不属于内容差异。
+    """
+    rows = frame.filter(F.col("report_date").cast("string") == period).select(*columns).toJSON().collect()
+    return hashlib.sha256("\n".join(sorted(rows)).encode("utf-8")).hexdigest()
+
+
+def _submitted_period_drift(spark: SparkSession, url: str, properties: dict[str, Any], periods: list[str]) -> list[str]:
+    """返回「已报送期里，库内现值与本次要写的值不一致」的「表@报告期」清单（空 = 一致）。"""
+    drifted: list[str] = []
+    for table in TABLES:
+        existing = target_columns(spark, url, f"{ADS_SCHEMA}.{table}", properties)
+        if existing is None:
+            continue  # 库里还没有这张表，谈不上「与已报送内容分叉」
+        gold = spark.table(f"{GOLD_SCHEMA}.{table}")
+        pg = spark.read.jdbc(url, f"(SELECT * FROM {ADS_SCHEMA}.{table}) AS existing", properties=properties)
+        shared = [column for column in gold.columns if column in existing]
+        for period in periods:
+            if _content_fingerprint(gold, shared, period) != _content_fingerprint(pg, shared, period):
+                drifted.append(f"{table}@{period}")
+    return drifted
+
+
 def _scalar(spark: SparkSession, url: str, properties: dict[str, Any], query: str) -> int:
     """跑一条只返回一个整数的查询；走 JDBC 子查询，不把整表拉到驱动端。"""
     frame = spark.read.jdbc(url, f"({query}) AS probe", properties=properties)
     return int(frame.collect()[0][0])
 
 
-def preflight(spark: SparkSession, url: str, properties: dict[str, Any], batch_id: str) -> list[str]:
+def preflight(
+    spark: SparkSession,
+    url: str,
+    properties: dict[str, Any],
+    batch_id: str,
+    allow_after_submission: bool = False,
+) -> list[str]:
     """覆盖写之前的**业务前提**检查；返回未通过的条目（空 = 可以写）。
 
     为什么必须在写之前检：三张表是 `truncate=true` 覆盖写，写错了没有回退路径。
@@ -134,6 +191,13 @@ def preflight(spark: SparkSession, url: str, properties: dict[str, Any], batch_i
       2. 本批的运行上下文缺失或已失败 —— 不知道自己在写哪一批
       3. 对账里有 FAIL 行 —— 报表与总账都没对上，不该进服务层
       4. 报表与对账的报告期集合不一致 —— 只导了一半期
+      5. 已报送报告期的内容变了 —— 库内数据会与已报送文件分叉，且没有回退路径
+
+    第 5 条的判据是「内容指纹变化」而不是「有没有报送过」：本演示的日批本身就是可重跑的，
+    拿「已报送」直接拦会把正常重跑全部挡掉；真正需要拦的是「内容变了还悄悄覆盖」——
+    例如上游修正、口径调整、模型改造之后重跑。真出现内容变化，正确路径是重述流程
+    （restate-capture → rebuild → restate-register），而不是直接覆盖已报送期的数据。
+    重述流程会显式带上 --allow-after-submission（或环境变量 ALLOW_EXPORT_AFTER_SUBMISSION=1）。
 
     检完再写：任一条不过就整批退出非零，**一张表都不碰**。
     """
@@ -190,6 +254,25 @@ def preflight(spark: SparkSession, url: str, properties: dict[str, Any], batch_i
     else:
         print(f"  [OK]   报表与对账的报告期集合一致（{len(report_periods)} 期）")
 
+    # 第 5 条前提：已报送报告期的内容不得变化（判据与理由见 docstring）。
+    if allow_after_submission:
+        print("  [WARN] 已按开关跳过「已报送期内容一致性」检查：确认本次是重述或口径变更")
+    else:
+        submitted = _submitted_periods(spark, url, properties)
+        at_risk = sorted(period for period in report_periods if period in submitted)
+        if not at_risk:
+            print(f"  [OK]   本次报告期都不涉及已报送期（库内已报送 {len(submitted)} 期）")
+        else:
+            drifted = _submitted_period_drift(spark, url, properties, at_risk)
+            if drifted:
+                failures.append(
+                    f"已报送期 {at_risk} 的内容与库内现值不一致（{drifted}）：覆盖写会让库内数据与已报送文件分叉。"
+                    "正确路径是重述流程（restate-capture → rebuild → restate-register）；"
+                    "确需直接覆盖时加 --allow-after-submission 并在报送说明里写明原因"
+                )
+            else:
+                print(f"  [OK]   已报送期 {at_risk} 的内容与库内一致（重跑幂等）")
+
     return failures
 
 
@@ -213,7 +296,8 @@ def main() -> int:
     # 覆盖写是不可逆的：先检业务前提，再动任何一张表。
     # 检查与写入分两段，正是为了让「不合格」表现为「一张表都没改」，而不是「改了一半」。
     print("覆盖写前置检查：")
-    blockers = preflight(spark, url, properties, parse_args().batch_id)
+    args = parse_args()
+    blockers = preflight(spark, url, properties, args.batch_id, args.allow_after_submission)
     if blockers:
         print()
         print("导出未开始，一张表都没写。未通过的前提：")

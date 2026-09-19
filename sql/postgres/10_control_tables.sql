@@ -514,6 +514,42 @@ BEGIN
     END IF;
 END $$;
 
+-- ads_fr2052a_report: 删掉 sec_k_cumulative_30d_gap 列（批次 C7，审计第 14 条）
+--   该列与 sec_k_net_funding_gap 是同一个数（实测两期 6/6 行相等），留着就是两个名字写一件事。
+--   删除而不是改名：改名仍是重复列；真需要时间维度就按到期桶出向量，不是加一个标量列。
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'ads' AND c.relname = 'ads_fr2052a_report'
+          AND a.attname = 'sec_k_cumulative_30d_gap' AND a.attnum > 0 AND NOT a.attisdropped
+    ) THEN
+        ALTER TABLE ads.ads_fr2052a_report DROP COLUMN sec_k_cumulative_30d_gap;
+    END IF;
+END $$;
+
+-- ads_fr2052a_report: 新增 sec_i_unencumbered_near_maturity 列（批次 C7）
+--   30 天内到期的未受限证券市值：按 LCR 口径不计入 HQLA 存量（它们已按 100% 计入 30 天流入），
+--   单列披露，使「未受限各项 + 已受限 = Section G 合计」这条恒等式对得上。
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'ads' AND c.relname = 'ads_fr2052a_report'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_attribute a
+        JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'ads' AND c.relname = 'ads_fr2052a_report'
+          AND a.attname = 'sec_i_unencumbered_near_maturity' AND a.attnum > 0 AND NOT a.attisdropped
+    ) THEN
+        ALTER TABLE ads.ads_fr2052a_report ADD COLUMN sec_i_unencumbered_near_maturity NUMERIC(20, 2);
+    END IF;
+END $$;
+
 -- ads_fr2052a_report: 新增 sec_c_insured_total 列（C4a：受保金额先折算再截断，报表新增受保合计列）
 DO $$
 BEGIN

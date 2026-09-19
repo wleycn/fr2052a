@@ -72,6 +72,15 @@ SECURITY_TYPE_WEIGHTS: dict[str, float] = {
     "EQUITY": 0.04,
     "ABS": 0.03,
 }
+
+# 短期证券（剩余期限 30 天以内）的比例、天数区间与类型（演示假设）。
+# 这批证券是「到期证券市值不得同时进 HQLA 与 30 天流入」这条规则的作用对象：
+# 账上必须有这类证券，规则才是活的、核对项才有非零的桶可验 —— 原来最短到期日 60 天，
+# 整条规则在样本上形同虚设，改了代码也看不出差别。类型限定在国债与机构债：
+# 现实中 30 天以内的持仓就是国库券与机构贴现票据，且它们本身是 HQLA。
+SHORT_DATED_SECURITY_RATIO = 0.15
+SHORT_DATED_DAYS_RANGE = (1, 30)
+SHORT_DATED_SECURITY_TYPES = ("TREASURY", "AGENCY_DEBT")
 PORTFOLIO_CODES = ("HTP", "AFS", "HFT")
 INSTRUMENT_TYPES = ("IRS", "CDS", "FX_FWD", "FX_SWAP", "OPTION", "FUTURES")
 COMMITMENT_TYPES = ("CREDIT_COMMITMENT", "LETTER_OF_CREDIT", "GUARANTEE")
@@ -349,12 +358,22 @@ def generate_securities(ods_dir: Path, ref: ReferenceData, report_date: date, ap
     for index in range(1, VOLUMES["ods_securities"] + 1):
         entity_code, currency = _pick_entity_currency(rng, ref)
         face_amount = round(rng.uniform(100_000, 100_000_000), 2)
+        security_type = weighted_choice(rng, SECURITY_TYPE_WEIGHTS)
+        purchase_date = _business_day_before(rng, report_date, 30, 1200)
+        rating = rng.choice(("AAA", "AA", "A", "BBB"))
+        # 到期日在最后抽：短期票据的比例分支不动上面各字段的取值顺序，
+        # 因此这次改动只改到期日与短期票据的类型，其余字段的样本保持稳定。
+        if rng.random() < SHORT_DATED_SECURITY_RATIO:
+            security_type = rng.choice(SHORT_DATED_SECURITY_TYPES)
+            maturity_date = _business_day_after(rng, report_date, *SHORT_DATED_DAYS_RANGE)
+        else:
+            maturity_date = _business_day_after(rng, report_date, 60, 3650)
 
         business = [
             f"SEC-{_token(rng)}",
             f"US{rng.randint(1000000000, 9999999999)}",
             f"{rng.randint(100000000, 999999999)}",
-            weighted_choice(rng, SECURITY_TYPE_WEIGHTS),
+            security_type,
             rng.choice(PORTFOLIO_CODES),
             rng.choice(ref.counterparties),
             currency,
@@ -362,9 +381,9 @@ def generate_securities(ods_dir: Path, ref: ReferenceData, report_date: date, ap
             round(face_amount * rng.uniform(0.95, 1.05), 2),
             round(face_amount * rng.uniform(0.98, 1.02), 2),
             round(rng.uniform(0.01, 0.08), 6),
-            _business_day_before(rng, report_date, 30, 1200),
-            _business_day_after(rng, report_date, 60, 3650),
-            rng.choice(("AAA", "AA", "A", "BBB")),
+            purchase_date,
+            maturity_date,
+            rating,
             # 质押标记：源系统偶尔缺报状态。空值不等于「未质押」——
             # 折算层按「只有明确 Y 才算受限」处理（见 owd_securities 的口径说明），
             # 缺报本身是数据缺陷，由 VDQ-021 报出来，不靠折算层替源系统猜。
@@ -975,12 +994,21 @@ def generate_parent_securities(ods_dir: Path, ref: ReferenceData, report_date: d
         if currency not in ref.spot_rates:
             currency = "USD"
         face_amount = round(rng.uniform(100_000, 100_000_000 * PARENT_AMOUNT_SCALE), 2)
+        security_type = weighted_choice(rng, SECURITY_TYPE_WEIGHTS)
+        purchase_date = _business_day_before(rng, report_date, 30, 1200)
+        rating = rng.choice(("AAA", "AA", "A", "BBB"))
+        # 与子公司同一口径：一部分是 30 天以内到期的短期票据，理由见 SHORT_DATED_SECURITY_RATIO
+        if rng.random() < SHORT_DATED_SECURITY_RATIO:
+            security_type = rng.choice(SHORT_DATED_SECURITY_TYPES)
+            maturity_date = _business_day_after(rng, report_date, *SHORT_DATED_DAYS_RANGE)
+        else:
+            maturity_date = _business_day_after(rng, report_date, 60, 3650)
 
         business = [
             f"SEC-{_token(rng)}",
             f"US{rng.randint(1000000000, 9999999999)}",
             f"{rng.randint(100000000, 999999999)}",
-            weighted_choice(rng, SECURITY_TYPE_WEIGHTS),
+            security_type,
             rng.choice(PORTFOLIO_CODES),
             rng.choice(external_cps),
             currency,
@@ -988,9 +1016,9 @@ def generate_parent_securities(ods_dir: Path, ref: ReferenceData, report_date: d
             round(face_amount * rng.uniform(0.95, 1.05), 2),
             round(face_amount * rng.uniform(0.98, 1.02), 2),
             round(rng.uniform(0.01, 0.08), 6),
-            _business_day_before(rng, report_date, 30, 1200),
-            _business_day_after(rng, report_date, 60, 3650),
-            rng.choice(("AAA", "AA", "A", "BBB")),
+            purchase_date,
+            maturity_date,
+            rating,
             rng.choice(("Y", "N")),
         ]
         rows.append(

@@ -100,9 +100,14 @@ models:
           rule_id: FR2052A-K-01
 
       - name: sec_k_net_funding_gap
-        description: Section K 净资金缺口 = 认列流入 − 流出
+        description: Section K 净资金缺口 = 认列流入 − 流出（窗口末口径）
         meta:
           rule_id: FR2052A-K-02
+
+      - name: sec_i_unencumbered_near_maturity
+        description: 未受限但剩余期限 30 天以内的证券市值。按 LCR 口径不计入 HQLA 存量（已按 100% 计入 30 天流入），单列披露以保证「Section I 各桶 + 已受限 = Section G 合计」成立
+        meta:
+          rule_id: FR2052A-I-02
 
   - name: ads_fr2052a_detail
     description: 报送明细，支撑报表每一行的回溯核对

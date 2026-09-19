@@ -107,10 +107,21 @@ hqla as (
         round(sum(case when hqla_classification = 'LEVEL_2B' then market_value_usd else 0 end), 2) as l2b_mv,
         round(sum(case when hqla_classification = 'NON_HQLA' then market_value_usd else 0 end), 2) as non_hqla_mv,
         round(sum(market_value_usd), 2) as total_mv,
-        round(sum(case when hqla_classification = 'LEVEL_1' and not is_encumbered then market_value_usd else 0 end), 2) as unencumbered_l1,
-        round(sum(case when hqla_classification = 'LEVEL_2A' and not is_encumbered then market_value_usd else 0 end), 2) as unencumbered_l2a,
-        round(sum(case when hqla_classification = 'LEVEL_2B' and not is_encumbered then market_value_usd else 0 end), 2) as unencumbered_l2b,
+        -- HQLA 存量的到期窗口：剩余期限 30 天以内的证券不计入存量 —— 它们在本窗口内
+        -- 到期变现，已经按 100% 计入 30 天预期流入（见 cashflow 的 security_maturity），
+        -- 两边都算等于同一笔资产被计两次：分子抬高、分母压低，LCR 双向偏离。
+        -- 依据（两份互相独立的权威口径，方向一致）：
+        --   美联储 LCR 最终规则：「this exclusion also includes all HQLA that mature within 30 days」；
+        --   Basel III LCR 及各国实施稿：「Inflows from securities maturing within 30 days not included
+        --   in the stock of HQLA should receive 100% inflow」。
+        round(sum(case when hqla_classification = 'LEVEL_1' and not is_encumbered and days_to_maturity > 30 then market_value_usd else 0 end), 2) as unencumbered_l1,
+        round(sum(case when hqla_classification = 'LEVEL_2A' and not is_encumbered and days_to_maturity > 30 then market_value_usd else 0 end), 2) as unencumbered_l2a,
+        round(sum(case when hqla_classification = 'LEVEL_2B' and not is_encumbered and days_to_maturity > 30 then market_value_usd else 0 end), 2) as unencumbered_l2b,
         round(sum(case when hqla_classification = 'NON_HQLA' and not is_encumbered then market_value_usd else 0 end), 2) as unencumbered_non_hqla,
+        -- 被上面的规则排除在 HQLA 存量之外的那一块：未受限但 30 天内到期。
+        -- 单列披露而不是让它消失：否则「未受限各项 + 已受限 = Section G 合计」这条恒等式
+        -- 就对不上了，读的人会以为少算了钱。
+        round(sum(case when not is_encumbered and days_to_maturity <= 30 then market_value_usd else 0 end), 2) as unencumbered_near_maturity,
         round(sum(case when is_encumbered then market_value_usd else 0 end), 2) as encumbered_total
     from {{ ref('owd_securities') }}
     group by report_date, entity_code, is_intracompany
@@ -247,6 +258,8 @@ entity_level as (
         coalesce(h.unencumbered_l2a, 0) as sec_i_unencumbered_hqla_l2a,
         coalesce(h.unencumbered_l2b, 0) as sec_i_unencumbered_hqla_l2b,
         coalesce(h.unencumbered_non_hqla, 0) as sec_i_unencumbered_non_hqla,
+        -- 30 天内到期、不计入 HQLA 存量（已按流入计入 Section K）的那一块
+        coalesce(h.unencumbered_near_maturity, 0) as sec_i_unencumbered_near_maturity,
         coalesce(h.encumbered_total, 0) as sec_i_encumbered_total,
         -- Section J：或有负债
         coalesce(t.credit_commitments, 0) as sec_j_credit_commitments,
@@ -261,10 +274,12 @@ entity_level as (
             least(coalesce(cf.raw_inflow, 0), 0.75 * coalesce(cf.total_outflow, 0)) - coalesce(cf.total_outflow, 0),
             2
         ) as sec_k_net_funding_gap,
-        round(
-            least(coalesce(cf.raw_inflow, 0), 0.75 * coalesce(cf.total_outflow, 0)) - coalesce(cf.total_outflow, 0),
-            2
-        ) as sec_k_cumulative_30d_gap,
+        -- 有意没有 sec_k_cumulative_30d_gap 这一列（需求文档 [99] 曾列出）。LCR 口径下
+        -- 「30 天累计缺口」与净融资缺口是同一个数：逐桶累计净现金流在这类数据里单调递减，
+        -- 最低点 = 窗口末累计值 = 净缺口。实测两期合并口径 6/6 行两列相等 —— 留两列一个数
+        -- 等于用两个名字写同一件事，且名字会让人以为它回答了另一个问题。见 KNOWN-ISSUE
+        -- #cumulative-gap-column-removed。真需要时间维度的缺口，应当按到期桶出向量（每桶一个
+        -- 累计值），而不是挤成一个标量。
         -- report_date 追加在列尾而不是列首：Iceberg 不支持列重排，
         -- 把新列插在中途会让 create or replace table 直接失败。
         e.report_date,
@@ -349,6 +364,7 @@ entity_standalone as (
         sum(sec_i_unencumbered_hqla_l2a) as sec_i_unencumbered_hqla_l2a,
         sum(sec_i_unencumbered_hqla_l2b) as sec_i_unencumbered_hqla_l2b,
         sum(sec_i_unencumbered_non_hqla) as sec_i_unencumbered_non_hqla,
+        sum(sec_i_unencumbered_near_maturity) as sec_i_unencumbered_near_maturity,
         sum(sec_i_encumbered_total) as sec_i_encumbered_total,
         sum(sec_j_credit_commitments) as sec_j_credit_commitments,
         sum(sec_j_letters_of_credit) as sec_j_letters_of_credit,
@@ -362,10 +378,6 @@ entity_standalone as (
             least(sum(sec_h_expected_inflow_30d), 0.75 * sum(sec_k_total_outflows)) - sum(sec_k_total_outflows),
             2
         ) as sec_k_net_funding_gap,
-        round(
-            least(sum(sec_h_expected_inflow_30d), 0.75 * sum(sec_k_total_outflows)) - sum(sec_k_total_outflows),
-            2
-        ) as sec_k_cumulative_30d_gap,
         report_date
     from entity_level
     group by report_date, entity_code
@@ -429,6 +441,7 @@ consolidated as (
         sum(sec_i_unencumbered_hqla_l2a) as sec_i_unencumbered_hqla_l2a,
         sum(sec_i_unencumbered_hqla_l2b) as sec_i_unencumbered_hqla_l2b,
         sum(sec_i_unencumbered_non_hqla) as sec_i_unencumbered_non_hqla,
+        sum(sec_i_unencumbered_near_maturity) as sec_i_unencumbered_near_maturity,
         sum(sec_i_encumbered_total) as sec_i_encumbered_total,
         sum(sec_j_credit_commitments) as sec_j_credit_commitments,
         sum(sec_j_letters_of_credit) as sec_j_letters_of_credit,
@@ -442,14 +455,10 @@ consolidated as (
             least(sum(sec_h_expected_inflow_30d), 0.75 * sum(sec_k_total_outflows)) - sum(sec_k_total_outflows),
             2
         ) as sec_k_net_funding_gap,
-        round(
-            least(sum(sec_h_expected_inflow_30d), 0.75 * sum(sec_k_total_outflows)) - sum(sec_k_total_outflows),
-            2
-        ) as sec_k_cumulative_30d_gap,
         report_date
     from entity_level
-    where is_intracompany = false
-    group by report_date
+    where entity_level.is_intracompany = false
+    group by entity_level.report_date
 
 ),
 

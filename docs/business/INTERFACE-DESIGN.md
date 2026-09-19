@@ -99,11 +99,18 @@ python lakehouse/load_ref_tables.py <csv_dir>
 ### 3.3 `export_gold_to_pg.py`
 
 ```bash
-python export_gold_to_pg.py
+python export_gold_to_pg.py --batch-id BATCH-20260916-001
 ```
 
-- 配置全部通过环境变量注入（`PG_HOST`, `PG_DB`, `REPORT_DATE` 等）
-- **幂等**：先 `TRUNCATE` 目标表，再批量插入
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `--batch-id` | string | 是 | 本批批次号，用于核对运行上下文；也可由环境变量 `BATCH_ID` 提供 |
+| `--allow-after-submission` | flag | 否 | 允许覆盖「已报送且内容已变」的报告期（重述流程用）；等价环境变量 `ALLOW_EXPORT_AFTER_SUBMISSION=1` |
+
+- 连接信息从环境变量取：`SERVER1_HOST`、`POSTGRES_DB`、`POSTGRES_USER`、`POSTGRES_PASSWORD`
+- **幂等**：`truncate=true` 覆盖写 —— 只换数据，保留表上的授权、触发器与库侧迁移列
+- **写前业务前提**（任一不过即整批失败、一张表都不碰）：gold 无空表 / 本批运行上下文成立 / 对账无 FAIL / 报表与对账的报告期集合一致 / 已报送期的内容未变
+- 「已报送期的内容未变」的判据是**内容指纹**而不是「有没有报送过」：日批本身可重跑，拿「已报送」直接拦会挡掉正常重跑；真出现内容变化（上游修正、口径调整、模型改造后重跑）必须走重述流程，或显式加 `--allow-after-submission` 并在报送说明里写明原因
 
 ### 3.4 `run_dq_rules.py`
 

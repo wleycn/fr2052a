@@ -253,12 +253,26 @@ Level 1 在本演示里由两块组成：
 
 LCR 分子的 L1 取这两块之和，见 `python/alerts/liquidity_monitor.py`。只算证券会把分子系统性压低，LCR 偏低时分不清是资产结构差还是口径漏算。
 
+HQLA 存量还有一道**到期窗口**：剩余期限 30 天以内的证券不计入存量，它们已经按 100% 计入 30 天预期流入。两边都算就是同一笔资产被计两次 —— 分子抬高、分母压低，LCR 双向偏离。依据两份互相独立的权威口径：
+
+- 美联储 LCR 最终规则（Federal Register, 2013）：「this exclusion also includes all HQLA that mature within 30 days」
+- Basel III LCR 及各国实施稿（如 OSFI LAR、FSRA 指南）：「Inflows from securities maturing within 30 days not included in the stock of HQLA should receive 100% inflow」
+
+被排除的那一块不消失：单列在 `sec_i_unencumbered_near_maturity`，并进 Section G 的构成，`Section I/G 恒等式` 因此仍然成立。
+
+演示数据里约两成证券持仓是 30 天以内到期的短期票据（国债与机构债，见生成器的 `SHORT_DATED_SECURITY_RATIO`）。这批持仓专门留着：没有它们，这条规则在样本上无对象可判 —— 全是 60 天以上持仓时，改不改代码结果都一样，规则等于没验证过。
+
+两个口径不要混：Section G 的 `sec_g_hqla_l1_mv` / `l2a` / `l2b` 是**组合按 HQLA 分类的构成**（含已质押与 30 天内到期的证券，回答「我们持有多少合格资产」）；Section I 的 `sec_i_unencumbered_*` 是**可计入存量的部分**（未受限 + 剩余期限 30 天以上，回答「现在能用来扛 30 天流出的有多少」）。LCR 分子取 Section I 与现金，不取 Section G。
+
 ### 3.3 关键约束
 
 | 规则 | 约束 |
 |------|------|
 | 现金流 Cap | 预期流入 ≤ 总流出 × 75%，超出按 75% 截断并记录 WARNING |
 | HQLA 二级资产上限 | Level 2A + Level 2B ≤ 总 HQLA × 40% |
+| HQLA 到期窗口 | 剩余期限 30 天以内的证券不计入 HQLA 存量（改按 100% 流入计入），避免同一笔资产双向计量。排除部分单列 `sec_i_unencumbered_near_maturity` |
+| Section I/G 恒等式 | 未受限五项（L1、L2A、L2B、非 HQLA、30 天内到期）+ 已受限 = Section G 合计。由 `verify_gold.check_section_i_identity` 独立复算，任一项漏算即不平 |
+| 累计缺口不再单列 | 需求文档曾列出 `sec_k_cumulative_30d_gap`，实测它与 `sec_k_net_funding_gap` 是同一个数（逐桶累计净现金流单调递减时，最低点 = 窗口末累计值 = 净缺口；两期 6/6 行相等），因此删除而不是改名或硬凑一个不同算法。真需要时间维度就按到期桶出向量，不是挤成一个标量。见 KNOWN-ISSUE `#cumulative-gap-column-removed` |
 | Operational 存款 | 流出率低于 Non-Operational |
 | 币种转换 | 报告日即期汇率转 USD；汇率表必须覆盖业务数据里出现的全部（报告日, 币种）组合，缺行由 `dbt/tests/assert_fx_covered.sql` 断言失败拦住（折算失败必须出声，不允许静默变 NULL） |
 | 行为假设覆盖 | ODS 存款里出现的每个 (product_category, customer_segment, maturity_bucket) 组合都必须在 ref_behavior_assumptions 里有行。缺行由两道拦住：生成器自检在生成阶段验（`check_behavior_coverage`），`dbt/tests/assert_behavior_covered.sql` 在转换后验。未命中不再静默兜底 10%，缺假设是缺陷 |
@@ -281,7 +295,7 @@ LCR 分子的 L1 取这两块之和，见 `python/alerts/liquidity_monitor.py`�
 | VDQ-013 | ADS | Section 合计 = 行项目合计 | ERROR |
 | VDQ-016 | ODS | T+1 08:00 ET 前加载 | ERROR |
 | VDQ-017 | ADS | L2A + L2B ≤ 总 HQLA 40% | WARNING |
-| VDQ-018 | ADS | 现金流入 cap = 总流出 75% | ERROR |
+| VDQ-018 | ADS | 认列流入 = min(原始流入, 总流出 × 75%)，1 分表示精度容差 | ERROR |
 
 ### 3.5 行为假设派生规则
 

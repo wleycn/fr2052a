@@ -50,7 +50,7 @@
 | Time Travel | Iceberg Time Travel | 按 snapshot 查询历史数据 | "历史查询" |
 | Kafka KRaft | Kafka Raft Consensus | Kafka 无 ZooKeeper 模式 | "Kafka 集群"（模糊）|
 | dbt model | Data Build Tool Transformation Model | dbt 转换模型，SQL 定义数据转换 | "SQL 文件" |
-| 规则引擎 | Rule Engine（`run_dq_rules.py`） | 执行 `ref.ref_validation_rules` 里声明的校验规则，结论落校验日志 | "校验脚本" |
+
 | Airflow DAG | Directed Acyclic Graph | 调度依赖图 | "任务"（缺少依赖语义）|
 | 血缘渲染 | `render_lineage.py` | 用 dbt 元数据与 SQL 解析出表级血缘、列级监管映射 | "血缘工具" |
 | MinIO | 对象存储 | S3 兼容对象存储 | "文件存储" |

@@ -76,7 +76,17 @@ VERSION_COLUMNS = (
 )
 
 # 不参与变更比较的列：它们是入湖/加工元数据，每轮都会变。
-EXCLUDED_FROM_HASH = ("etl_load_timestamp", "etl_batch_id")
+#
+# etl_source_file 也在此列：它的取值是「上游文件名 + 报告日」（见 config.py 的 source_file），
+# 报告日本身已在自然键里，文件名属于冗余元数据。把它算进 row_hash 的后果不是「多报一次变更」，
+# 而是「所有行一起被判定为已变更」—— 换名、重切文件、换批次命名都会让全表版本号狂涨，
+# last_modified_reason 被写成一堆本不存在的 CORRECTION，而审计正是靠这两列。
+#
+# ⚠ 改这个元组 = 改哈希定义：已入库历史表的 row_hash 是按旧定义算的，改完第一次归并
+# 会把全表判定为「已变更」。因此改定义必须同时做一次基线重建
+# （sql/iceberg/oneoff/06_rebuild_owd_history.sql 删历史表 → owd_scd2.py 重建干净基线），
+# 不要直接上线。
+EXCLUDED_FROM_HASH = ("etl_load_timestamp", "etl_batch_id", "etl_source_file")
 
 TABLE_PROPERTIES = (
     "'format-version' = '2', "
@@ -305,6 +315,22 @@ def version_table(spark: SparkSession, table: str, args: argparse.Namespace) -> 
     ).first()["n"]
     if reversed_rows:
         raise ValueError(f"{history} 有 {reversed_rows} 行「失效日早于生效日」，版本区间被算反了，先修数据再继续")
+
+    # 再自检「每键至多一个有效版本」。这条是本作业的前提：下面的 active 连接、以及
+    # 「上一版失效 + 新版生效」的推进方式，都假定一个键只有一个当前版本 —— 出现两个
+    # is_active 行时它们会各自扇出，行数看不出来，版本号与变更原因却已经是错的
+    # （本文件前面记的同类事故就是这个形状：数据行数对，元数据不对）。
+    key_columns = ", ".join(KEY_COLUMNS)
+    duplicate_active = spark.sql(
+        f"SELECT count(*) AS n FROM ("
+        f"SELECT {key_columns} FROM {history} WHERE is_active GROUP BY {key_columns} HAVING count(*) > 1"
+        f") AS duplicated"
+    ).first()["n"]
+    if duplicate_active:
+        raise ValueError(
+            f"{history} 有 {duplicate_active} 个键存在多个有效版本（is_active 为真），"
+            "版本归并的前提被破坏，先修数据再继续"
+        )
     return counts
 
 

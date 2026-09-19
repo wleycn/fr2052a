@@ -79,6 +79,7 @@ dbt `table` 物化整表重建；导出 PostgreSQL 时先清后写并开 `trunca
 | `sec_i_unencumbered_hqla_l2a` |
 | `sec_i_unencumbered_hqla_l2b` |
 | `sec_i_unencumbered_non_hqla` |
+| `sec_i_unencumbered_near_maturity` |
 | `sec_i_encumbered_total` |
 | `sec_j_credit_commitments` |
 | `sec_j_letters_of_credit` |
@@ -88,7 +89,6 @@ dbt `table` 物化整表重建；导出 PostgreSQL 时先清后写并开 `trunca
 | `sec_k_total_inflows` |
 | `sec_k_total_outflows` |
 | `sec_k_net_funding_gap` |
-| `sec_k_cumulative_30d_gap` |
 | `report_date` |
 | `is_consolidated` |
 | `report_id` |

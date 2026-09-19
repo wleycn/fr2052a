@@ -31,9 +31,9 @@
 | `report_date` | DATE NOT NULL | 报告日 |
 | `entity_code` | TEXT NOT NULL | 法人实体编码，ENT001 为集团合并口径 |
 | `is_consolidated` | BOOLEAN NOT NULL DEFAULT FALSE | 是否合并口径 |
-| `hqla_l1_unencumbered_usd` | NUMERIC(20, 2) | 未质押一级资产市值 |
-| `hqla_l2a_unencumbered_usd` | NUMERIC(20, 2) | 未质押二级 A 类资产市值 |
-| `hqla_l2b_unencumbered_usd` | NUMERIC(20, 2) | 未质押二级 B 类资产市值 |
+| `hqla_l1_unencumbered_usd` | NUMERIC(20, 2) | 未质押一级资产市值 + 现金与同业存放（后者按 LCR 口径全额计入，无质押概念） |
+| `hqla_l2a_unencumbered_usd` | NUMERIC(20, 2) | 未质押二级 A 类资产市值。三个等级都只计剩余期限 30 天以上的部分：窗口内到期的走 30 天流入，两边都算就是双向计量 |
+| `hqla_l2b_unencumbered_usd` | NUMERIC(20, 2) | 未质押二级 B 类资产市值（同前，限 30 天以上到期） |
 | `hqla_unencumbered_capped_usd` | NUMERIC(20, 2) | 未质押 HQLA 认列额，二级资产按 40% 截断后计入 |
 | `hqla_encumbered_usd` | NUMERIC(20, 2) | 已质押资产市值，不计入 LCR 分子 |
 | `expected_inflow_30d_usd` | NUMERIC(20, 2) | 30 天预期流入（未加限制） |
