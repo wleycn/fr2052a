@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 # 为 Airflow 准备 Server 1 上的运行前提：元数据库、DAG/日志目录、SSH 私钥。
 #
 # 为什么需要单独的密钥副本：DAG 通过 SSH 触发 Server 2 上的跑批作业，

@@ -1,3 +1,4 @@
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 r"""把 ODS 样本 CSV 重放进 Kafka，模拟各源系统的实时上报。
 
 为什么用 Spark 而不是 Python Kafka 客户端：消费侧本来就要 Spark（Structured Streaming），

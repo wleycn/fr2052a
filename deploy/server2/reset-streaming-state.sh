@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 # 清掉流式作业的「进度」，让它们能从零开始重放。
 #
 # 为什么必须清两样东西，少清一样都白清：

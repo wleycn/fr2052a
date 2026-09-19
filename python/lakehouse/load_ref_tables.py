@@ -1,3 +1,4 @@
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 r"""把 REF 层 CSV 批量加载进 Iceberg 的 ref 命名空间。
 
 REF 是静态字典表，量小、变动少，用整表覆盖写（INSERT OVERWRITE）保证幂等：

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 # 按 config/pipeline_topics.json 建 Kafka 主题。
 #
 # 为什么用脚本而不是手敲：主题名与落点的唯一声明在 JSON 里，

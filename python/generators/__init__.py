@@ -1,3 +1,4 @@
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 """合成数据生成器包。
 
 按 [99] §七 目录结构落在 python/generators/ 下：

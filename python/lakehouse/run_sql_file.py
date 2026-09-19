@@ -1,3 +1,4 @@
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 r"""执行一个 SQL 文件：逐条语句交给 Spark SQL 跑，任一失败即退出非零。
 
 用途：把建表脚本（sql/iceberg/*.sql）应用到数据湖，以及跑临时诊断查询。

@@ -1,3 +1,4 @@
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 """FR 2052a 实时敞口预警 DAG。
 
 与日批的时间尺度不同：日批看的是「昨天结完账的报表」，实时扫描看的是「正在进来的源记录」。

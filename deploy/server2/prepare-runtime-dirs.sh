@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 # 创建 Server 2 上容器需要的宿主侧运行时目录，并把属主改成容器内的运行用户。
 #
 # 为什么需要它：Docker 看到绑定挂载的源目录不存在时会自动创建，但属主是 root，

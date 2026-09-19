@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 # 建 Airflow 连接与变量（幂等，可重复执行）。
 #
 # 为什么要脚本化：连接与变量是编排的配置面，手敲一遍既容易漏，也无法复现。

@@ -1,3 +1,4 @@
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 r"""核对数据湖表结构与生成器产出的 CSV 表头是否逐列一致。
 
 这是一道防漂移的机器闸。CSV 是数据的源头，表结构必须与它对齐；一旦错位，

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 # 在 Server 2 上运行 dbt：注入凭据与环境后调用 venv 里的 dbt。
 #
 # 用法（在 Server 2 的 ~/fr2052a-infra 下执行）：

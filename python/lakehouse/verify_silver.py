@@ -1,3 +1,4 @@
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 """核对 OWD 层：行数不丢不重、汇率折算正确、到期分桶合法。
 
 OWD 是明细标准化的第一层，出错的方式很隐蔽：行数对了但折算率用错、

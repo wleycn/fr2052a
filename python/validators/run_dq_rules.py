@@ -1,3 +1,4 @@
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 r"""数据质量引擎：把 ref 层声明的校验规则逐条执行，结果落审计表。
 
 规则不写在代码里，而是从 `ref.ref_validation_rules` 读 —— 那是规则的唯一定义处。

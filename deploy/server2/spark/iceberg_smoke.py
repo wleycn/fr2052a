@@ -1,3 +1,4 @@
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 """E3 穿透自检：Spark（Server 2）→ Iceberg → MinIO（Server 1）。
 
 验证三件事：

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 # 把 sql/postgres/ 下的建表脚本按文件名顺序应用到 Server 1 的 PostgreSQL。
 #
 # 为什么不在 docker-compose 里挂 /docker-entrypoint-initdb.d：

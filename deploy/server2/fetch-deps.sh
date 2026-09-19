@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 # 下载 Spark 侧所需的第三方二进制依赖到 ./spark/ 下。
 #
 # 为什么不用镜像仓库：Docker 镜像源实测被限速（约 150 KB/s），

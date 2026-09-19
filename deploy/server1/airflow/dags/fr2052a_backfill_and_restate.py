@@ -1,3 +1,4 @@
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 """FR 2052a 回刷与重述 DAG。
 
 与日批的区别（这是本 DAG 存在的理由）：

@@ -1,3 +1,4 @@
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 """FR 2052a GL 对账 DAG。
 
 职责：把总账与报送口径的对账结果取回来，按严重度判定是否放行。

@@ -1,3 +1,4 @@
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 """核对 ADS 报送层：报表内部一致、合并口径正确、监管上限确实生效。
 
 dbt 跑通只说明 SQL 没报错，不说明数字对。这里逐项验算：

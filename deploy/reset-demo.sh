@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 # 一键把演示环境初始化回可复现的基线。
 #
 # 为什么需要它：

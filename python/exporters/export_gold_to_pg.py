@@ -1,3 +1,4 @@
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 r"""把 Iceberg gold 层的报送报表导出到 Server 1 的 PostgreSQL（ADS 服务层）。
 
 为什么需要这一步：架构上 Iceberg 承载数据湖（ref / ODS / OWD / OWS / Gold），

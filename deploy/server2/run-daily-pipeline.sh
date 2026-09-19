@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 # FR 2052a 每日跑批。既可整条跑，也可按环节单跑 —— Airflow DAG 按环节调用同一份编排，
 # 不另写一套 DAG 内的命令，避免编排逻辑出现第二份副本。
 #

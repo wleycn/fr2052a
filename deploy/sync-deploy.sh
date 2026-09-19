@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 # 把 deploy/ 下的部署清单同步到两台服务器，并提供漂移检查。
 #
 # 为什么需要它：

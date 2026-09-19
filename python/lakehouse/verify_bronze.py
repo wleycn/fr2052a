@@ -1,3 +1,4 @@
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 r"""核对 bronze 层行数与样本 CSV 行数是否一致。
 
 入湖是"看得见才敢用"的一步：CSV 有多少行，bronze 就必须有多少行，

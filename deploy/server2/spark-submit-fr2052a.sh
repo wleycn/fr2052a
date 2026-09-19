@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 # 包装 spark-submit：从 .env 注入凭据后把作业提交到 Spark 集群。
 #
 # 为什么需要它：MinIO 与 PostgreSQL 的口令不能写进 spark-defaults.conf

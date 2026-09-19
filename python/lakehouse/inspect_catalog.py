@@ -1,3 +1,4 @@
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 """巡检数据湖目录：列出命名空间与各命名空间下的表。
 
 用途：确认建表结果，以及排查"表建了但列不出来"这类元数据可见性问题。

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 # 把 dev 侧的应用代码与样本数据同步到 Server 2，供 Spark 容器内的作业读取。
 #
 # 为什么需要它：Spark 容器只挂载了 ~/fr2052a-infra 下的目录，dev 侧仓库里的

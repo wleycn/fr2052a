@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 # 在 Server 2 上创建 dbt 运行环境：uv 虚拟环境 + dbt 三件套 + PySpark。
 #
 # 为什么用 Python 3.11：

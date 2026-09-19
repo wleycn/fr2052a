@@ -1,3 +1,4 @@
+# [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 """FR 2052a 每日跑批主链路 DAG。
 
 链条（与 requirements/[99] §2.4 的设计一致，按当前已落地的环节展开）：
