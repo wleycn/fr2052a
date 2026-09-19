@@ -1,0 +1,85 @@
+# 交接单：demo-fr2052a 未决项
+
+- 状态：new ｜ 写下：2026-09-19 ｜ 项目：`/home/hermes/workspace/demo-fr2052a`
+- 相关：`docs/AUDIT-2026-09-17-delegate-review.md`（三路审查 80 条原始记录与逐条处置）
+
+## 结论
+
+**能接着干，仓库是干净的**：工作区无未提交改动，主分支与两个远程一致，CI 绿。
+未决项 13 条里 6 条已给到可直接开工的方案（阻塞列写「无」），其余 7 条等你拍板。
+第一步按「下一步第一步」那一节改名接手，再从阻塞列为「无」的条目里挑一条做。
+
+## 状态快照
+
+```text
+分支        main
+HEAD        01ee262
+上游        ## main...github/main
+未提交改动  0 个文件；无未提交改动
+最近提交
+            01ee262 chore(gate): 把共享门禁接进提交闸
+            729237b docs: 头注写入时机对齐上游模板，并记本次回填
+            142b561 chore: 存量代码文件补 [AI-GENERATED] 头注
+远程        gitee, github（均与本地同 SHA）
+```
+
+本交接单自己随一笔提交入库，所以入库后 HEAD 还会前进一笔，其余状态不变。
+
+## 已完成
+
+- **审计剩余四条收口（批次 C7）**，提交 `e64480f`。四条 = 已报送期内容闸、HQLA 到期窗口、累计缺口列删除、SCD2 哈希改为不含 `etl_source_file`。
+  证据：日批 18 个环节全绿、耗时 229 秒；`verify-ads` 30 项全过；`dq-rules` 中 VDQ-018 转 PASS。
+- **审计处置表第 21 条状态补齐**，提交 `73a6fb4`。该条与「dbt 与 SQL 口径审查」第 18 条是同一缺陷，已按 C5 落地事实回填。
+- **出处头注回填**，提交 `142b561` 与 `729237b`。31 个代码文件补 `[AI-GENERATED]`，31 增 0 删；`compileall` 与 `make lint` 全绿。
+- **共享闸删掉已撤销的 `[AI]` 提交标记判据**，ng 仓提交 `2f67f1d`，探针 10/10。
+- **fr2052a 装共享闸**，提交 `01ee262`。正向：真提交通过两道闸；反向：造凭据探针被拦且 HEAD 未动。
+- **demo-gx 两处旧账登记**，提交 `748b138`（该仓活跃分支 `fix/config-layout-propagation`）。
+- 三条 DQ 违规的根因分析已完成，结论见未决项第 1、12 条与「不要重复做的事」。
+
+## 未决项
+
+| 事项 | 证据 | 建议方案 | 阻塞谁 |
+|---|---|---|---|
+| VDQ-017 二级资产上限两层错 | `dbt/models/marts/ads_fr2052a_report.sql:241-248` 与 `:348-357` 用截断前总额乘 40%；`ads.ads_fr2052a_report` 12 行里 11 行超限，合并口径 09-16 占比 44.56% | 五处一起改：① 模型两处截断改成 `least(二级原始, 2/3 × 一级)`，依据是 Basel LCR30 原文；② 报表新增 `sec_g_hqla_l2_recognized_usd` 列；③ `python/generators/ref_data.py:451` 的判据改成「认列额 = min(原始, 2/3 × 一级)」加 1 分容差；④ `python/lakehouse/verify_gold.py:400` 的 expected 同步改成 2/3 口径；⑤ 刷新 `config/liquidity_thresholds.json` 与验收清单里的 HQLA 证据 | 你（先定改不改） |
+| 独立复核未做 | `docs/rules/ACCEPTANCE-CHECKLIST.md:30` 标 ⬜，签名栏空 | 请一个没参与本轮的执行方跑 5 个关键判据并签名；或登记「本项目不做第三方复核」，把该行降级并在偏离表写理由 | 你 |
+| 放行闸与巡检耗时未取 | `docs/rules/ACCEPTANCE-CHECKLIST.md:57` 标 ⬜ | 在 Server 2 跑 `time bash run-daily-pipeline.sh gate health`，把输出填进证据列 | 无 |
+| 控制表查询计划未跑 | `docs/rules/ACCEPTANCE-CHECKLIST.md:58` 标 ⬜ | 对 `ads.ads_fr2052a_submission`、`ads.ads_fr2052a_validation_log`、`ads.ads_restatement_log` 各跑一条 `EXPLAIN`，计划贴进证据列 | 无 |
+| `requirements/` 归档落点未定 | `docs/business/KNOWN-ISSUE.md:62` 标 ⏳ | 移进 `references/` 并在 `docs/business/PROJECT.md` 登记；若决定保留原址，把理由写进偏离表 | 你 |
+| 监控与 BI 栈未落地 | `docs/business/KNOWN-ISSUE.md:71` 标 ⏳ | 拆成两行写进偏离表：监控由 `python/governance/pipeline_health.py` 直出结论；BI 明确不做。审计第 25 条要的就是这两行 | 你 |
+| 直接在 main 提交与规范冲突 | `docs/business/KNOWN-ISSUE.md:73` 标 ⏳；`AGENTS.md:59` 要求走 feature 分支加 MR | 建议改 `AGENTS.md:59` 为「单人加 agent 的项目直接在 main 提交，出问题靠 revert」，并在偏离表记成已决策。全部历史都已是直接提交，反向改成本高 | 你 |
+| 审计 #19：文档标必填、代码有默认值 | `docs/business/INTERFACE-DESIGN.md:123` 与 `:135-136` 标「是」；`python/validators/run_dq_rules.py:144` 默认 `UNKNOWN`，`python/producers/replay_ods_to_kafka.py:54-55` 有默认目录与配置 | 按代码实况改文档（必填改成否加默认值），不要改代码：跑批脚本正按「可不传」调用 | 无 |
+| 审计 #26：偏离表格式与文件实际不符 | `docs/business/KNOWN-ISSUE.md:52` 要求处置列写 `### #slug` 定义；全文没有这种标题，锚点是坑表首列的 `#kebab-case` | 把该条纪律改成「处置列指向本文件的锚点行」。机器闸只校验真出现过的引用，改文字不用动闸 | 无 |
+| 审计 #29：脚本清单不全 | `docs/business/INTERFACE-DESIGN.md:140-152` 列 8 个；`python/` 下实际 34 个脚本；`MODULE-DESIGN` 里零脚本路径 | 改成「脚本全集见 `python/` 目录树」并按子目录列全，或补一张 script 到用途到退出码的表，只留一处来源 | 无 |
+| E3 遗留的自检表没清 | `iceberg_catalog.iceberg_tables` 里仍有 `bronze.smoke_check` 与 `silver.spark_smoke` | 跑 `python python/lakehouse/run_sql_file.py sql/iceberg/91_drop_smoke_tables.sql`；把该脚本移进 `sql/iceberg/oneoff/`，与同类一次性破坏性脚本同处；build-log 那条遗留标已清 | 无 |
+| Airflow 4 个 DAG 处于暂停 | `airflow.dag` 表：`fr2052a_daily_batch`、`fr2052a_backfill_and_restate`、`fr2052a_realtime_alert`、`fr2052a_submission` 的 `is_paused` 都是 t | 在 `docs/business/PROJECT.md` 写明「演示以脚本驱动跑批，DAG 默认暂停，需要调度演示时先 unpause」；或放开日批与报送两个 DAG | 你 |
+| 报表 Section A 与 D 恒为 NULL | `ads.ads_fr2052a_report` 12 行，两列非空计数都是 0 | 在偏离表补一行：演示数据不含商业票据、联邦基金、其他融资，恒 NULL 表示无数据来源；并在 `docs/tables/ads_fr2052a_report.md` 对应列加注 | 无 |
+
+## 下一步第一步
+
+```bash
+cd /home/hermes/workspace/demo-fr2052a
+git mv todo/20260919-pending-issues.new todo/20260919-pending-issues.doing
+```
+
+改名表示已接手，然后从未决项里挑一条开工：想动代码就从第 1 条（VDQ-017）起，只想清账就从「阻塞谁 = 无」的六条起。
+收尾时把本文件改名 `.done` 并补一节「结果」，不要删除。
+
+## 不要重复做的事
+
+- 别再去核 VDQ-017 是不是「判据读错列」——两层都核过了，数字与行号写在未决项第 1 条里
+- 别把 `.sh` 加进共享闸的扫描后缀，也别给 4 个 docstring 形态的头注补格式：已裁决忽略
+- 别动 `fin-risk` 与 `python/memo-ledger` 的 `CODING-STANDARD` 措辞：已裁决不做跨项目改动
+- 别恢复提交信息里的 `[AI]` 标记：已撤销，闸里那条判据也删了，探针会拦回退
+- 别重跑 C7 的四个反向探针（已报送期闸、HQLA 窗口、SCD2 重复有效版本、VDQ-018）：结论已入提交信息与 `docs/changes/engineering.md`
+- 别把 VDQ-020 的 19 位占位 LEI 与 VDQ-021 的缺报标记当成待修缺陷：两条都已裁决忽略
+
+## 环境与入口
+
+- 开发机：`/home/hermes/workspace/demo-fr2052a`，分支 `main`，远程 `gitee` 与 `github`
+- 两台服务器：Server 1 `192.168.17.22` 跑 PG 18.6 加 MinIO 加 Airflow；Server 2 `192.168.17.24` 跑 Kafka 加 Spark
+- 凭据只在两台服务器的 `~/fr2052a-infra/.env` 里，本文件不写值
+- 日批：`ssh hermes@192.168.17.24 "cd ~/fr2052a-infra && bash run-daily-pipeline.sh"`
+- 静态闸：`make lint`
+- 查库：`ssh hermes@192.168.17.22 "docker exec fr2052a_postgres psql -U fr2052a -d fr2052a_db -c '<SQL>'"`
+- 交接单工具：`~/.hermes/skills/meta/handoff-note/scripts/handoff_scaffold.py` 与 `handoff_check.py`
+- 相关记忆键：`task-20260918-c7-audit-remaining-four`、`task-20260919-gate-fix-and-install`、`lesson-20260919-rule-trigger-vs-stock-debt`、`lesson-20260918-rule-without-scene`（用 `mem_remember.py recall "<键>"` 取全文）
