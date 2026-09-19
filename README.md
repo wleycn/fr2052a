@@ -89,7 +89,7 @@ Airflow 界面在 `http://192.168.17.22:8080`，MinIO 控制台在 `http://192.1
 demo-fr2052a/
 ├── README.md                  # 人类入口（本文）
 ├── AGENTS.md                  # AI 编码约束
-├── requirements/              # 原始需求文档（保留参考）
+├── references/                # 原始需求归档（内容已拆解进 docs/business/）
 ├── docs/
 │   ├── business/              # 工程文档（业务文档七份）
 │   ├── tables/                # 表契约（一表一份）

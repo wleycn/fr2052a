@@ -69,7 +69,7 @@
 |---|---|---|---|
 | 双轨制（Core/Advanced） | 单一技术栈 | Core（PG+dbt+Airflow）+ Advanced（Kafka+Iceberg+Spark）并行 | ✅ 决策：演示需要展示两种架构，见 `[01]架构设计.md` §1.5 |
 | 存储分工（ODS 进 Iceberg 不进 PG） | ODS 通常进 PG | ODS/OWD/OWS 进 Iceberg，仅 ADS 进 PG | ✅ 决策：湖仓一体架构，见 `[04]环境设计.md` §4.3 存储分工 |
-| requirements/ 不落九文档 | 原始需求应归档 | 保留 requirements/ 参考，待收尾阶段处理 | ⏳ 暂缓：09-19 裁决「先放着」，本轮不移不动；收尾时再定移入 references/ 或 archive/ |
+| 原始需求不落九文档 | 原始需求应归档 | 原件存 `references/`，正文已按九文档拆解归位 | ✅ 决策：09-19 裁决移到 `references/`。原件是项目来历的凭据，保留但不作活输入用；正文归 `docs/business/` 各文档 |
 | 报表主键用区位码而非自增序列 | `[99]详细材料.md` 要求 `report_id BIGSERIAL PRIMARY KEY`，子表 `BIGINT` 外键 | 「机构-报表-报告期-口径」四段文本码，由 dbt 模型产出，例 `ENT001-FR2052A-20260916-01` | ✅ 决策：自增号随每轮全量覆盖重编号，撑不起跨批次的重述引用；见 `dbt/models/marts/ads_fr2052a_report.sql` 列注释 |
 | 明细表不带报表身份外键 | `[99]详细材料.md` 要求 `ads_fr2052a_detail.report_id` 引用报表表 | 明细用「报告日 + 实体」定位，不设 report_id 列 | ✅ 决策：明细是一个主体的多行下钻，报表身份由主体唯一确定 |
 | 版本历史放独立表 | 上游未定义版本历史 | `silver.owd_*_history` 与 `ads.ads_fr2052a_report_history`，OWD 物化方式不动 | ✅ 决策：改 OWD 为增量物化要重写 7 个已验证模型；见 `[04]环境设计.md` §4.3 |
@@ -78,7 +78,7 @@
 | 数据质量用自研规则引擎 | `[99]详细材料.md` 指定 Great Expectations | 规则定义已在 `ref.ref_validation_rules`，由 `run_dq_rules.py` 执行 | ✅ 决策：转成 GX suite 等于规则定义存两份，必然漂移 |
 | 血缘用 dbt meta 自渲染 | `[99]详细材料.md` 指定 DataHub | `dbt/models/**/schema.yml` 的 meta 声明 + `render_lineage.py` 渲染 | ✅ 决策：DataHub 部署成本高，演示价值等价 |
 | 机器门禁只落地一半 | 红线要求「能写成 lint、检查脚本或 CI check，就不指望模型读到」 | 代码侧闸已齐（`make lint` + 本地钩子 + CI + **共享门禁**）：头注缺失与悬空引用两项由 `.githooks/pre-commit` 调用的共享门禁承担。曾是机器闸的 `[AI]` 提交标记已按用户决定撤销，共享闸里的这一项也已删除 | ✅ 已补齐：共享门禁接进 `.githooks/pre-commit`（该仓用 `core.hooksPath`，不能直接跑模板的 `install.sh`）|
-| 监控与 BI 栈未落地 | 需求文档提到 Grafana / Prometheus / Superset | 三者都没有部署，巡检由 `pipeline_health.py`、血缘由 `render_lineage.py` 直接输出 | ⏳ 暂缓：09-19 裁决「可以做，但先把现有缺陷处理完」。现状先由脚本直出结论，接栈的评估排在收尾阶段 |
+| 监控与 BI 栈未落地 | 需求文档提到 Grafana / Prometheus / Superset | 三者都没有部署；巡检由 `pipeline_health.py`、血缘由 `render_lineage.py` 直接输出，报表落 PG 后用 `psql` 查 | ✅ 决策：09-19 裁决拆成两条 —— 监控由 `python/governance/pipeline_health.py` 直出结论，不接 Prometheus 与 Grafana；BI 明确不做，演示没有分析型消费方 |
 | 独立复核不做 | 上游要求由未参与编写的一方实跑关键判据后签名 | 单人加 agent 的演示项目没有第三方执行方 | ✅ 决策：不做第三方复核，`ACCEPTANCE-CHECKLIST.md` 第 3 项改为不适用并在证据列写明替代标准；判据本身仍由核对脚本与端到端重跑实核 |
 | docs/rules 允许项目侧手改 | 上游要求四件套由装配器产出，项目侧不得写入项目事实 | 本仓在其上手工补充了目录行与验收证据列 | ✅ 决策：保留手改，不重跑装配。代价是 `rules_assembly.py --check` 恒报不一致，改由本表登记兜底 |
 | 直接在 main 提交 | `AGENTS.md` §4 原要求走 feature 分支再提交 MR | 全部历史都在 main 上直接提交，仓库只有 main 一个分支 | ✅ 决策：把 §4 改成「直接提交 main，出问题靠 revert」；单人加 agent 的项目没有第三方评审人，分支与 MR 只增加动作 |
@@ -98,6 +98,7 @@
 
 - **双轨制**（✅ 决策）——代价：维护两套部署清单；回退：保留 Core 版即可，Advanced 版可下线
 - **存储分工**（✅ 决策）——代价：ODS 不可直接用 PG 查询，需走 Spark/Iceberg CLI；回退：把 ODS 建到 PG 需改 deploy 脚本
+- **原始需求归档位**（✅ 决策）——代价：原件不在九文档体系内，查证来历要另开目录；回退：改回 `requirements/` 并同步 7 处引用（README、PROJECT 的目录树与分层纪律表、PROJECT-STRUCTURE、DEVELOP-FLOW、两处代码 docstring）
 - **报表主键区位码**（✅ 决策）——代价：键比整数长，人工手写易错；回退：业务码加唯一约束，另立整数代理键
 - **明细表不带报表身份外键**（✅ 决策）——代价：查明细要带两个条件；回退：加回 report_id 列并按主体回填
 - **版本历史放独立表**（✅ 决策）——代价：当前快照与历史两条路径各自维护；回退：OWD 改增量物化并合并历史
@@ -110,7 +111,7 @@
 - **提交闸本地优先**（✅ 决策）——代价：本地与 CI 都要维护可用环境，版本口径靠 `Makefile` 单源约束；回退：删掉 `.githooks/`，只留 CI
 - **不建单元测试套件**（✅ 决策）——代价：函数级回归只能靠核对脚本与端到端重跑，粒度偏粗；回退：补 pytest 套件并接进 `make lint`
 - **机器门禁补齐**（✅ 已补）——代价：每次提交多花约两秒，且闸真身住 ng 仓，机器上没有那份克隆时会退化成只跑 lint；回退：把共享门禁那一段从 `.githooks/pre-commit` 里删掉，回到只跑 `make lint`
-- **监控栈缺席**（⏳ 暂缓）——代价：没有历史趋势与告警推送，只有一次性的巡检输出；回退：接入 Prometheus + Grafana（约一张 compose 文件）。09-19 裁决先清缺陷再接，评估排在收尾阶段
+- **监控与 BI 都不接**（✅ 决策）——代价：没有历史趋势与告警推送，只有一次性的巡检输出；看数要自己写 SQL，没有可视化层；回退：接 Prometheus + Grafana（约一张 compose 文件）与 Superset（约一张 compose 文件加一份数据源配置）
 - **独立复核缺席**（✅ 决策）——代价：验收结论没有第三方背书，判据的可信度靠核对脚本的独立性；回退：请一个未参与编写的一方实跑 5 条关键判据并签名
 - **docs/rules 手改**（✅ 决策）——代价：装配校验恒报 4 处不一致，规则层与上游漂移只能靠人工比对；回退：从上游模板侧承载补充内容后重跑装配
 - **变更留痕启用**（✅ 已补）——代价：每次功能与契约变更多写一条四段条目；回退：删除 `docs/changes/` 下的条目文件并恢复 AGENTS §6 的原始措辞

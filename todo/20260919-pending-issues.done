@@ -106,3 +106,5 @@ git mv todo/20260919-pending-issues.new todo/20260919-pending-issues.doing
 2. 报表没有单列「二级资产认列额」列 —— 09-19 裁决**不加列**，改为在表契约与模型列注释里写明派生关系（`认列额 = 认列总额 − 一级市值 = min(原始二级, 一级 × 2/3)`），理由与代价登记在 KNOWN-ISSUE 的 `#l2-recognized-not-split`。此项已闭环。
 
 **补充（09-19 当日第二批）**：提交 `ab9a533` 补掉两处漏网的旧算法描述（`dbt/models/marts/schema.yml` 的列描述、`liquidity_monitor.py` 的模块说明）；随后按上述裁决把派生关系写进表契约与模型注释。这一批只动文档与注释，没动数据，不需要重跑日批。
+
+**补充（09-19 当日第三批）**：第 5 条（`requirements/` 归档落点）与第 6 条（监控与 BI 栈）按用户当日裁决收口 —— 需求原件移到 `references/` 并在 AGENTS §9 项目地图与 PROJECT 登记，监控与 BI 明确定为不接并写进偏离表。审计表里用户手写的 5 条备注经确认均已完成，不再追踪。留痕见 `docs/changes/engineering.md` 的 `raw-requirements-archive` 条目。

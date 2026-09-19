@@ -52,7 +52,7 @@
 
 | 阶段 | 落地命令或产物 |
 |------|----------------|
-| 1 | `requirements/` 下的需求文档，汇总进 `docs/business/PROJECT.md` |
+| 1 | `references/` 下的需求原件，汇总进 `docs/business/PROJECT.md` |
 | 2 | `docs/business/DATA-DESIGN.md`、`MODULE-DESIGN.md`、`INTERFACE-DESIGN.md` |
 | 4 | 改完先 `make lint`；提交经 `.githooks/pre-commit` |
 | 5 | `bash deploy/server2/run-daily-pipeline.sh verify-bronze verify-silver verify-scd2 verify-ads verify-rbac` |

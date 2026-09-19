@@ -111,6 +111,7 @@
 | Python 脚本 | `python/` | 生成器 / Lakehouse / Producer / Consumer / Exporter / Validator |
 | 配置契约 | `config/pipeline_topics.json` | Kafka Topic 配置 |
 | 样本数据 | `sample_data/` | 可重建测试数据（不落 git） |
+| 原始需求归档 | `references/` | 项目启动时的需求原件（内容已拆解进 `docs/business/`） |
 
 ## 10. 技能地图（阶段 → 技能）
 

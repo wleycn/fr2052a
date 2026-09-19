@@ -208,3 +208,10 @@
 - 变更：审计方案曾建议给报表加一列 `sec_g_hqla_l2_recognized_usd`，让「二级资产认了多少」可见。本次裁决不加列，改为在表契约与模型列注释里写明派生关系：`认列额 = 认列总额 − 一级市值 = min(原始二级, 一级 × 2/3)`，并附一个真实数值例子。理由：该值可由两列精确还原（两列都是两位小数，相减不掉精度），行级恒等式已由 VDQ-017 逐行守着；而加列要连带 PG 迁移、导出前置的列比对、报送文件的取列排除清单与表契约四处改动，成本明显高于可读性收益。
 - 验证：`VDQ-017` 的判据逐行核对「认列总额 − 一级」与 `min(原始二级, 一级 × 2/3)`，在 12 行上 PASS；用库里的数核对 GRP001 两个报告期，两列相减与 `min` 结果逐分相等。文档侧无语法与链接问题，`make lint` 全绿。
 - 回滚：删掉表契约的派生关系一节与两处注释即可。若改为加列，按上述四处一起补，并注意迁移必须带同算式回填，否则已报送期的内容指纹会把 NULL 与数值判成不一致，又多走一次重述。
+
+## raw-requirements-archive
+
+- 范围：`requirements/` → `references/`（11 个文件整体改名，内容不变）、`README.md`、`AGENTS.md` §9、`docs/business/{PROJECT,KNOWN-ISSUE}.md`、`docs/rules/{PROJECT-STRUCTURE,DEVELOP-FLOW}.md`、两处代码 docstring（`deploy/server1/airflow/dags/fr2052a_daily_batch.py`、`python/generators/ods_data.py`）
+- 变更：原始需求文档的归档位由 `requirements/` 改为 `references/`。这些文档的内容早在建文档体系时已按九文档拆解归位，留在仓库里是为了保住项目来历的凭据，但目录名 `requirements/` 读起来像一份活的需求输入，与它的实际角色不符；改名后它明确是参考归档。文字侧同步七处：README 与 PROJECT 的目录树、PROJECT 的分层纪律表、PROJECT-STRUCTURE 的目录职责表、DEVELOP-FLOW 阶段 1 的输入路径、两处代码 docstring 的引用路径；`AGENTS.md` §9 项目地图补一行（原先没有这一行，地图答不出「原始需求在哪」）。同一批把「监控与 BI 栈」这条暂缓项按裁决收口：监控由 `python/governance/pipeline_health.py` 直出结论，BI 明确不做，偏离表与代价表随之更新。
+- 验证：`git diff -M --numstat` 显示 11 个文件全部是纯改名（增删各 0 行）；全仓搜索 `requirements/`，活文件里只剩这一条回退说明，历史留痕（审计报告与已关闭的交接单）按「历史记录不重写」保留原措辞；`make lint` 全绿；共享门禁的悬空引用与行尾卫生两项无告警。
+- 回滚：`git mv references requirements`，再把上述七处引用改回去。

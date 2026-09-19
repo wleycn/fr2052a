@@ -25,7 +25,7 @@
 demo-fr2052a/
 ├── README.md                  # 人类入口（必留根）
 ├── AGENTS.md                  # AI 编码约束
-├── requirements/              # 原始需求文档（参考，不落九文档）
+├── references/                # 原始需求归档（参考，不落九文档）
 ├── docs/
 │   ├── business/              # 业务文档（七份）
 │   │   ├── PROJECT.md         # 本文档（工程地图）
@@ -76,7 +76,7 @@ demo-fr2052a/
 
 | 目录 | 职责 | 谁写 |
 |------|------|------|
-| `requirements/` | 原始需求（参考，不落九文档） | 项目启动时产生 |
+| `references/` | 原始需求归档（参考，不落九文档） | 项目启动时产生 |
 | `docs/business/` | 九项核心文档（真源） | 编码前/后同步更新 |
 | `docs/tables/` | 表契约（一表一份：层级 / 粒度 / 主键 / 去重 / 分区 / 金额口径 / PII / 生命周期 / SLA / 依赖 / 质量规则） | 新增或变更表时同步 |
 | `docs/rules/` | 跨项目复用规范 | 架构师制定，全员遵守 |
@@ -111,7 +111,7 @@ demo-fr2052a/
 | Kafka（容器内） | 9092 | 只在 Server 2 的容器网络里可用，广告地址是 `kafka:9092` |
 | Spark Master | 8081 | `curl -I http://192.168.17.24:8081` |
 
-没有独立的元数据平台与监控面板：血缘由 `render_lineage.py` 渲染成 Markdown 报告，巡检由 `pipeline_health.py` 直接输出结论。接监控栈的评估已登记为暂缓，见 `KNOWN-ISSUE.md` 的「监控与 BI 栈未落地」行。
+没有独立的元数据平台与监控面板，这是已决策的范围：血缘由 `render_lineage.py` 渲染成 Markdown 报告，巡检由 `pipeline_health.py` 直接输出结论；BI 不做，报表落 PG 后直接用 `psql` 查。决策与代价见 `KNOWN-ISSUE.md` 的「监控与 BI 栈未落地」行。
 
 Airflow 里的 DAG 默认**暂停**：`fr2052a_daily_batch`、`fr2052a_backfill_and_restate`、`fr2052a_realtime_alert`、`fr2052a_submission` 四个是暂停的，只有 `fr2052a_gl_reconciliation` 是放开的。日常跑批走 Server 2 的 `run-daily-pipeline.sh`，不经过调度器；要演示「由 Airflow 编排」时，先在 Web UI 或 `airflow dags unpause <dag_id>` 放开对应 DAG，再手动触发。
 

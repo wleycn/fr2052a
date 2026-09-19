@@ -1,7 +1,7 @@
 # [AI-GENERATED] model=deepseek-flash date=2026-09-17 reviewed_by=pending
 """FR 2052a 每日跑批主链路 DAG。
 
-链条（与 requirements/[99] §2.4 的设计一致，按当前已落地的环节展开）：
+链条（与 references/[99] §2.4 的设计一致，按当前已落地的环节展开）：
 
     run_context_open → check_source_arrival → load_ref → replay_ods → load_bronze → dbt_run
       → pii_vault → lineage → owd_scd2 → dq_validate → publish_access → export_pg
