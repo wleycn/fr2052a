@@ -23,12 +23,20 @@
 | #export-after-submission-gate | 09-18 | 覆盖写会让库内报表与已报送文件分叉 | 导出是 `truncate=true` 覆盖写；原先的写前检查只看「表结构 + gold 空表 + 运行上下文 + 对账 FAIL + 报告期集合」，不看已报送期的内容有没有变 | ✅ 修法：写前按报告期比对「库内现值 vs 本次要写的值」的内容指纹，已报送期内容变了就拦下并指向重述流程；重述流程显式带 `ALLOW_EXPORT_AFTER_SUBMISSION=1`。**已知边界**：只拦本批要写的那些已报送期，历史期的重写不拦（dbt 从 bronze 确定性重建，真修正应走重述） | 导出环节 | `docs/business/INTERFACE-DESIGN.md` §3.3 |
 | #recon-benchmark-synthetic | 09-18 | GL 对账 Section E 的基准（司库现金头寸）在演示环境里由生成器按 `对账单余额 = 账面 − 在途存款 + 未兑现支票` 倒推得出 | 演示环境没有外部银行对账单数据源，对账单口径只能构造出来 | ✅ 设计取舍：独立度不靠「两个真实系统」保证，而靠三条判据 —— 两个不同口径（账面 vs 对账单）、差额必须被调节项逐项解释、断言 `assert_recon_benchmark_independent` 守住「基准与报送必须不同源」这条前提。真实项目里对账单来自银行，此处不适用 | GL 对账 Section E | `docs/tables/ads_gl_reconciliation.md` |
 | #report-history-reset-exception | 09-18 | `reset_demo.sql` 原先会 `TRUNCATE TABLE ads.ads_fr2052a_report_history`，与该表「历史不可变」的硬性质冲突 | 复位脚本把版本历史表与可变派生表混在同一个 TRUNCATE 清单里 | ✅ 修法：从复位清单移除该表的 TRUNCATE；如需清空走单独人工步骤并在此登记 | 复位脚本 `sql/admin/reset_demo.sql` | — |
+| #hqla-cap-basis | 09-19 | 二级资产的认列上限按「0.40 × 一级与二级之和」计算，12 个报告期里 11 期的二级资产超过真实上限 | 把 Basel LCR30 的「不得超过扣除后的 HQLA 的 40%」当成了扣除前总额的 40%。二级自己也被算进上限基数，算出的上限偏高 | ✅ 修法：上限改成一级资产 × 2/3。dbt 模型的三处认列额计算、`liquidity_monitor.py`、`verify_gold.py` 与 VDQ-017 判据同步改；VDQ-017 的判据由「上限有没有被触发」改成「认列额算得对不对」，与 VDQ-018 用同一条判据。改完 12 行全部落在真实上限内，`verify-ads` 逐期复算与报表数值一致到分；算式写法上又踩到一次小数位陷阱，见 `#spark-decimal-division` | ADS 报表与 LCR 分子 | `docs/changes/engineering.md` 的 hqla-cap-basis 条目 |
+| #section-a-d-empty | 09-19 | 报表的 Section A 五列与 `sec_d_total` 在 12 行里全部为 NULL | 演示样本里没有商业票据、联邦银行基金与其他融资三类业务，生成器不产这些明细；模型按需求保留列位并显式写 NULL | ✅ 设计取舍：保留列位、取值为 NULL 而非 0 —— NULL 表示「本演示不报这一项」，0 表示「报了且金额为零」，两者不能互换。列注释与表契约均已写明 | ADS 报表 Section A 与 D | `docs/tables/ads_fr2052a_report.md` 的字段清单 |
+| #catalog-name-drift | 09-19 | 清理 E3 自检表的脚本报「OK」，但两张表在 PG 的 `iceberg_catalog.iceberg_tables` 里一行没少 | E3 建表时 Iceberg JDBC catalog 的名字是 `spark_catalog`，E4 起改成独立的 `lakehouse`。`DROP TABLE IF EXISTS bronze.smoke_check` 解析到 lakehouse 名下，看不见旧名字下的注册行；Spark 侧已无法再以旧名连接，DROP 这条路走不通 | ✅ 修法：改用 PG 侧 `DELETE FROM iceberg_catalog.iceberg_tables WHERE catalog_name = 'spark_catalog' AND table_name IN ('smoke_check', 'spark_smoke')`，实测删除 2 行；MinIO 上两个目录的 metadata 与数据文件用 `mc rm --recursive` 清掉（桶开了版本控制，删除留 delete marker）；脚本连同原因说明移入 `sql/iceberg/oneoff/`。**经裁决保留的残留**：`spark_catalog` 名下 9 张 ref 表的同类注册行 | Iceberg 目录元数据 | `docs/changes/engineering.md` 的 pending-issues-cleanup 条目 |
+| #spark-decimal-division | 09-19 | 报表认列额比独立复算高出 1,478.06，`verify-ads` 因此报红 | Spark SQL 的 DECIMAL 除法只给 6 位小数：`2.0 / 3` 算成 `0.666667`，在 44 亿的一级资产基数上把上限抬高 1478.06。同一算式在小数上完全看不出来 —— 偏差由基数放大 | ✅ 修法：改成「一级 * 2 / 3」（乘 2 再除以整型 3，Spark 给 13 位小数），dbt 模型三处与 VDQ-017 判据同步改。纪律：DECIMAL 列上的比例运算别用两位小数字面量相除，先乘后整除；分成分级容差的判据挡不住这类 10⁻⁷ 级偏差 | 所有 DECIMAL 比例运算 | `docs/changes/engineering.md` 的 hqla-cap-basis 条目 |
 
 <!-- PROJECT.md 索引行（复制区）：
 - `#pg18-data-dir-change` — PG 18 改了数据目录约定
 - `#spark-minio-endpoint` — Spark 连接 MinIO 必须用 IP，不能用 localhost
 - `#gl-reconciliation-mismatch` — GL 对账需按 Section 汇总后比对
 - `#hqla-cap-not-applied` — HQLA 二级资产 40% 上限需显式截断
+- `#hqla-cap-basis` — HQLA 二级资产上限的基数是扣除后的 HQLA，等价于一级资产的 2/3
+- `#section-a-d-empty` — 报表 Section A 与 D 的 6 列在演示环境恒为 NULL
+- `#catalog-name-drift` — Iceberg catalog 改名后旧注册行还在，清理脚本成了空操作
+- `#spark-decimal-division` — Spark 的 DECIMAL 除法只给 6 位小数，比例运算要先乘后整除
 - `#python314-incompatible` — Python 3.14 不兼容 GE 与 pyspark
 - `#dockerhub-image-removed` — minio/spark 官方镜像已从 Docker Hub 下架
 - `#detail-report-mismatch` — 明细与报表口径不一致（正回购/30天过滤）
@@ -49,7 +57,7 @@
 标准做法是**默认值**，偏离是例外。允许偏离的前提是四条**同时**成立：
 
 1. **逐条登记**：一行一条，四列 = 问题 / 上游要求 / 本项目做法 / 处置。
-2. **处置列指向真实锚点**：写成本文件里已有的 `### #slug` 定义；只写「已说明」不合格。
+2. **处置列指向真实锚点**：写成本文件里已有的锚点行，即首列的 `#kebab-case`；只写「已说明」不合格。
 3. **说明为什么不采用标准做法**：「本项目特殊」这类空理由不合格。
 4. **记代价与回退成本**：在本节末尾的汇总里各写一行。
 
@@ -59,7 +67,7 @@
 |---|---|---|---|
 | 双轨制（Core/Advanced） | 单一技术栈 | Core（PG+dbt+Airflow）+ Advanced（Kafka+Iceberg+Spark）并行 | ✅ 决策：演示需要展示两种架构，见 `[01]架构设计.md` §1.5 |
 | 存储分工（ODS 进 Iceberg 不进 PG） | ODS 通常进 PG | ODS/OWD/OWS 进 Iceberg，仅 ADS 进 PG | ✅ 决策：湖仓一体架构，见 `[04]环境设计.md` §4.3 存储分工 |
-| requirements/ 不落九文档 | 原始需求应归档 | 保留 requirements/ 参考，待收尾阶段处理 | ⏳ 待决策：收尾时移入 references/ 或 archive/ |
+| requirements/ 不落九文档 | 原始需求应归档 | 保留 requirements/ 参考，待收尾阶段处理 | ⏳ 暂缓：09-19 裁决「先放着」，本轮不移不动；收尾时再定移入 references/ 或 archive/ |
 | 报表主键用区位码而非自增序列 | `[99]详细材料.md` 要求 `report_id BIGSERIAL PRIMARY KEY`，子表 `BIGINT` 外键 | 「机构-报表-报告期-口径」四段文本码，由 dbt 模型产出，例 `ENT001-FR2052A-20260916-01` | ✅ 决策：自增号随每轮全量覆盖重编号，撑不起跨批次的重述引用；见 `dbt/models/marts/ads_fr2052a_report.sql` 列注释 |
 | 明细表不带报表身份外键 | `[99]详细材料.md` 要求 `ads_fr2052a_detail.report_id` 引用报表表 | 明细用「报告日 + 实体」定位，不设 report_id 列 | ✅ 决策：明细是一个主体的多行下钻，报表身份由主体唯一确定 |
 | 版本历史放独立表 | 上游未定义版本历史 | `silver.owd_*_history` 与 `ads.ads_fr2052a_report_history`，OWD 物化方式不动 | ✅ 决策：改 OWD 为增量物化要重写 7 个已验证模型；见 `[04]环境设计.md` §4.3 |
@@ -68,9 +76,11 @@
 | 数据质量用自研规则引擎 | `[99]详细材料.md` 指定 Great Expectations | 规则定义已在 `ref.ref_validation_rules`，由 `run_dq_rules.py` 执行 | ✅ 决策：转成 GX suite 等于规则定义存两份，必然漂移 |
 | 血缘用 dbt meta 自渲染 | `[99]详细材料.md` 指定 DataHub | `dbt/models/**/schema.yml` 的 meta 声明 + `render_lineage.py` 渲染 | ✅ 决策：DataHub 部署成本高，演示价值等价 |
 | 机器门禁只落地一半 | 红线要求「能写成 lint、检查脚本或 CI check，就不指望模型读到」 | 代码侧闸已齐（`make lint` + 本地钩子 + CI + **共享门禁**）：头注缺失与悬空引用两项由 `.githooks/pre-commit` 调用的共享门禁承担。曾是机器闸的 `[AI]` 提交标记已按用户决定撤销，共享闸里的这一项也已删除 | ✅ 已补齐：共享门禁接进 `.githooks/pre-commit`（该仓用 `core.hooksPath`，不能直接跑模板的 `install.sh`）|
-| 监控与 BI 栈未落地 | 需求文档提到 Grafana / Prometheus / Superset | 三者都没有部署，巡检由 `pipeline_health.py`、血缘由 `render_lineage.py` 直接输出 | ⏳ 待决策：接监控栈，或明确「演示项目不做面板」并保留现状 |
+| 监控与 BI 栈未落地 | 需求文档提到 Grafana / Prometheus / Superset | 三者都没有部署，巡检由 `pipeline_health.py`、血缘由 `render_lineage.py` 直接输出 | ⏳ 暂缓：09-19 裁决「可以做，但先把现有缺陷处理完」。现状先由脚本直出结论，接栈的评估排在收尾阶段 |
+| 独立复核不做 | 上游要求由未参与编写的一方实跑关键判据后签名 | 单人加 agent 的演示项目没有第三方执行方 | ✅ 决策：不做第三方复核，`ACCEPTANCE-CHECKLIST.md` 第 3 项改为不适用并在证据列写明替代标准；判据本身仍由核对脚本与端到端重跑实核 |
+| docs/rules 允许项目侧手改 | 上游要求四件套由装配器产出，项目侧不得写入项目事实 | 本仓在其上手工补充了目录行与验收证据列 | ✅ 决策：保留手改，不重跑装配。代价是 `rules_assembly.py --check` 恒报不一致，改由本表登记兜底 |
+| 直接在 main 提交 | `AGENTS.md` §4 原要求走 feature 分支再提交 MR | 全部历史都在 main 上直接提交，仓库只有 main 一个分支 | ✅ 决策：把 §4 改成「直接提交 main，出问题靠 revert」；单人加 agent 的项目没有第三方评审人，分支与 MR 只增加动作 |
 | 变更留痕目录为空 | AGENTS 要求功能变更在 `docs/changes/{module}.md` 追加条目 | 已按格式补齐：`docs/changes/engineering.md` 收录 E6 质量闸、E7 审查修复与本次工程变更 | ✅ 已补：条目格式为四段（范围 / 变更 / 验证 / 回滚），见 `docs/changes/engineering.md` 的 `changes-trail-bootstrap` |
-| 直接在 main 提交 | `AGENTS.md` §4 要求走 feature 分支再提交 MR | 全部历史都在 main 上直接提交，仓库只有 main 一个分支 | ⏳ 待决策：单人加 agent 的项目没有第三方评审人，分支与 MR 只增加动作；若保留该红线，须同步改 §4 并写明谁 review |
 | DQ 结果日志按批次先清后写 | 上游未定义日志粒度 | 一行 = 一个批次的一条规则，重跑前由 `clear_dq_batch.py` 清该批次 | ✅ 决策：不清则重跑静默翻倍，「本批次几条 ERROR」随之翻倍 |
 | lint 口径排除 4 类规则 | 上游要求 `ruff check .`、`ruff format .`、`mypy .` 全过 | 配置收在项目根 `pyproject.toml`，排除 `D415`、`N812`、`RUF001`、`RUF002`、`RUF003` | ✅ 决策：前两类与中文写作冲突（`D415` 只认 ASCII 句末标点、`RUF001-003` 把全角标点当歧义字符），`N812` 与 PySpark 的 `functions as F` 写法冲突。逐条理由与命中数写在 `pyproject.toml` 注释里；无命中的 `D401`/`D202` 不排除，继续管事 |
 | 提交闸两道，本地在前 | 上游要求「等待 CI 通过」后合并 | 本地 `.githooks/pre-commit` 跑两道：`make lint` 加共享门禁；推送后 GitHub Actions 跑 `make lint` | ✅ 决策：本地先拦住，省一次往返；CI 兜住没配钩子的克隆。共享门禁的真身住 ng 仓，CI 环境没有那份克隆，所以不进 CI。gitee 只作镜像，没有 runner |
@@ -98,6 +108,8 @@
 - **提交闸本地优先**（✅ 决策）——代价：本地与 CI 都要维护可用环境，版本口径靠 `Makefile` 单源约束；回退：删掉 `.githooks/`，只留 CI
 - **不建单元测试套件**（✅ 决策）——代价：函数级回归只能靠核对脚本与端到端重跑，粒度偏粗；回退：补 pytest 套件并接进 `make lint`
 - **机器门禁补齐**（✅ 已补）——代价：每次提交多花约两秒，且闸真身住 ng 仓，机器上没有那份克隆时会退化成只跑 lint；回退：把共享门禁那一段从 `.githooks/pre-commit` 里删掉，回到只跑 `make lint`
-- **监控栈缺席**（⏳ 待决策）——代价：没有历史趋势与告警推送，只有一次性的巡检输出；回退：接入 Prometheus + Grafana（约一张 compose 文件）
+- **监控栈缺席**（⏳ 暂缓）——代价：没有历史趋势与告警推送，只有一次性的巡检输出；回退：接入 Prometheus + Grafana（约一张 compose 文件）。09-19 裁决先清缺陷再接，评估排在收尾阶段
+- **独立复核缺席**（✅ 决策）——代价：验收结论没有第三方背书，判据的可信度靠核对脚本的独立性；回退：请一个未参与编写的一方实跑 5 条关键判据并签名
+- **docs/rules 手改**（✅ 决策）——代价：装配校验恒报 4 处不一致，规则层与上游漂移只能靠人工比对；回退：从上游模板侧承载补充内容后重跑装配
 - **变更留痕启用**（✅ 已补）——代价：每次功能与契约变更多写一条四段条目；回退：删除 `docs/changes/` 下的条目文件并恢复 AGENTS §6 的原始措辞
-- **直接提交主分支**（⏳ 待决策）——代价：没有分支隔离，出问题只能靠 revert 回退；回退：恢复 feature 分支加 MR 流程，并指定评审人
+- **直接提交主分支**（✅ 决策）——代价：没有分支隔离，出问题只能靠 revert 回退；回退：恢复 feature 分支加 MR 流程，并指定评审人

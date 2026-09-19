@@ -17,14 +17,14 @@ CREATE TABLE IF NOT EXISTS ads.ads_liquidity_metrics (
     hqla_l1_unencumbered_usd NUMERIC(20, 2),         -- 未质押一级资产市值
     hqla_l2a_unencumbered_usd NUMERIC(20, 2),        -- 未质押二级 A 类资产市值
     hqla_l2b_unencumbered_usd NUMERIC(20, 2),        -- 未质押二级 B 类资产市值
-    hqla_unencumbered_capped_usd NUMERIC(20, 2),     -- 未质押 HQLA 认列额，二级资产按 40% 截断后计入
+    hqla_unencumbered_capped_usd NUMERIC(20, 2),     -- 未质押 HQLA 认列额，二级认列额按一级的 2/3 截断后计入
     hqla_encumbered_usd NUMERIC(20, 2),              -- 已质押资产市值，不计入 LCR 分子
     expected_inflow_30d_usd NUMERIC(20, 2),          -- 30 天预期流入（未加限制）
     expected_inflow_capped_usd NUMERIC(20, 2),       -- 30 天认列流入，上限为流出的 75%
     expected_outflow_30d_usd NUMERIC(20, 2),         -- 30 天预期流出
     net_cash_outflow_30d_usd NUMERIC(20, 2),         -- 净现金流出 = 流出 - 认列流入
     lcr_ratio NUMERIC(12, 4),                        -- 流动性覆盖率 = 认列 HQLA / 净现金流出
-    l2_cap_ratio NUMERIC(12, 4),                     -- 二级资产占 HQLA 比例，监管上限 40%
+    l2_cap_ratio NUMERIC(12, 4),                     -- 二级资产占 HQLA 比例，超过 0.4（等价于二级认列额超过一级的 2/3）即说明认列被上限截断
     inflow_cap_ratio NUMERIC(12, 4),                 -- 流入占流出比例，超过 75% 说明认列被上限截断
     regulatory_min_ratio NUMERIC(12, 4),             -- 判定时采用的监管下限，留痕以便回溯口径
     headroom_usd NUMERIC(20, 2),                     -- 距红线余量 = 认列 HQLA - 下限 × 净现金流出

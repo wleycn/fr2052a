@@ -5,7 +5,7 @@ dbt 跑通只说明 SQL 没报错，不说明数字对。这里逐项验算：
   1. 报表实体覆盖 = bronze 存款表的实体集合，且实体集合与 ref 层级表一致
   2. 合并口径 = 各实体口径之和减去集团内往来（逐 Section 验算 + 抵销专项）
   3. 明细合计 = 报表 Section 合计（对应 VDQ-013，排除 is_intracompany 行）
-  4. 二级资产占比 ≤ HQLA 总额的 40%（对应 VDQ-017）
+  4. 二级资产认列额 = min(原始二级市值, 一级市值 × 2/3)（对应 VDQ-017）
   5. 30 天流入 ≤ 流出的 75%（对应 VDQ-018，验证上限确实被应用）
   6. GL 对账逐报告期核对，每个视角都有对账行且无 FAIL
 
@@ -366,7 +366,11 @@ def _check_detail_rollup_for_period(
 
 
 def check_l2_cap(spark: SparkSession) -> list[CheckResult]:
-    """二级资产上限（VDQ-017）：逐报告期验算 HQLA 认列总额是否按 40% 截断。
+    """二级资产上限（VDQ-017）：逐报告期验算 HQLA 认列总额是否按 2/3 × 一级 截断。
+
+    上限的来源是 Basel LCR30：「二级资产不得超过扣除后 HQLA 的 40%」，等价于不超过
+    一级资产的 2/3。按 0.40 * (一级 + 二级) 算会把二级自己也算进基数，上限偏高，
+    认列额随之虚高 —— 这条验算与报表模型必须同时改，否则两边会一起错、验算还是绿的。
 
     这条规则在需求文档里是 WARNING 级 —— 二级资产占比高本身不构成错误，
     真正的错误是认列总额没有按上限截断。因此这里验算计算是否正确，而不是占比是否达标。
@@ -398,16 +402,17 @@ def check_l2_cap(spark: SparkSession) -> list[CheckResult]:
         capped = float(report_row["capped"] or 0)
 
         hqla_before_cap = level_1 + level_2
-        expected = round(level_1 + min(level_2, 0.40 * hqla_before_cap), 2)
+        l2_cap = 2.0 / 3 * level_1
+        expected = round(level_1 + min(level_2, l2_cap), 2)
         ratio = level_2 / hqla_before_cap if hqla_before_cap else 0.0
-        cap_triggered = level_2 > 0.40 * hqla_before_cap
+        cap_triggered = level_2 > l2_cap
 
         results.append(
             CheckResult(
                 name=f"二级资产上限 {period}",
                 passed=abs(capped - expected) <= 0.05,
                 detail=(
-                    f"认列总额 {capped:,.2f}，按 40% 上限应为 {expected:,.2f}；"
+                    f"认列总额 {capped:,.2f}，按 2/3 × 一级 上限应为 {expected:,.2f}；"
                     f"二级资产原始占比 {ratio:.2%}" + ("（上限已截断）" if cap_triggered else "（未触发上限）")
                 ),
             )

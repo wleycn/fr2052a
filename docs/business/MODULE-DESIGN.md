@@ -40,15 +40,17 @@
 
 ### Python CLI 接口
 
+本节只列有显式 CLI 契约的 7 个脚本；脚本全集（34 个）见 `INTERFACE-DESIGN.md` §3.6。
+
 | 命令 | 参数 | 行为 | 退出码 |
 |------|------|------|--------|
-| `generate_sample_data.py` | `--out`（默认 `sample_data/`）、`--report-days`（默认 1，多期样本）、`--gl-break-amount`、`--correct-deposit-record`、`--correct-deposit-amount`、`--inject-missing-fx` | 生成 ref/ods CSV，随后自检（含汇率覆盖与逐期总账平衡自检） | 0 全过 / 1 自检不通过 |
-| `load_ref_tables.py` | 位置参数：ref 目录（默认 `/opt/fr2052a-app/sample_data/ref`）| 覆盖写入 Iceberg 的 ref 命名空间 | 0 / 1 有表失败或目录下无 CSV / 2 目录不存在 |
-| `export_gold_to_pg.py` | `--batch-id`（默认取 `BATCH_ID`）、`--allow-after-submission` | 把 gold 层三张表导出到 PG 的 ads 层，覆盖写；写前检五项业务前提，任一不过即一张表都不写 | 0 / 1 |
-| `run_dq_rules.py` | `--batch-id`（默认 `UNKNOWN`）| 执行规则集并把结论落审计表；ERROR 级规则若因列名不存在跳过部分目标表，覆盖面缩水即判 FAIL | 0 无 ERROR / 1 有 ERROR |
-| `replay_ods_to_kafka.py` | `--data-dir`、`--config`（均有默认）| 重放 ODS 数据到 Kafka | 0 / 1 |
-| `generate_submission.py` | `--report-date`、`--output-dir`、`--receipt-file` | 生成三种格式的报送文件并登记台账；回执被拒退 1 | 0 / 1 |
-| `time_travel.py` | `--table`、`--list-snapshots`、`--diff`、`--trace-key`、`--key-column`、`--columns` | Iceberg 时间旅行审计；参数经白名单校验，非法退 2 | 0 / 1 / 2 |
+| `python/generators/generate_sample_data.py` | `--out`（默认 `sample_data/`）、`--report-days`（默认 1，多期样本）、`--gl-break-amount`、`--correct-deposit-record`、`--correct-deposit-amount`、`--inject-missing-fx` | 生成 ref/ods CSV，随后自检（含汇率覆盖与逐期总账平衡自检） | 0 全过 / 1 自检不通过 |
+| `python/lakehouse/load_ref_tables.py` | 位置参数：ref 目录（默认 `/opt/fr2052a-app/sample_data/ref`）| 覆盖写入 Iceberg 的 ref 命名空间 | 0 / 1 有表失败或目录下无 CSV / 2 目录不存在 |
+| `python/exporters/export_gold_to_pg.py` | `--batch-id`（默认取 `BATCH_ID`）、`--allow-after-submission` | 把 gold 层三张表导出到 PG 的 ads 层，覆盖写；写前检五项业务前提，任一不过即一张表都不写 | 0 / 1 |
+| `python/validators/run_dq_rules.py` | `--batch-id`（默认 `UNKNOWN`）| 执行规则集并把结论落审计表；ERROR 级规则若因列名不存在跳过部分目标表，覆盖面缩水即判 FAIL | 0 无 ERROR / 1 有 ERROR |
+| `python/producers/replay_ods_to_kafka.py` | `--data-dir`、`--config`（均有默认）| 重放 ODS 数据到 Kafka | 0 / 1 |
+| `python/exporters/generate_submission.py` | `--report-date`、`--output-dir`、`--receipt-file` | 生成三种格式的报送文件并登记台账；回执被拒退 1 | 0 / 1 |
+| `python/audit/time_travel.py` | `--table`、`--list-snapshots`、`--diff`、`--trace-key`、`--key-column`、`--columns` | Iceberg 时间旅行审计；参数经白名单校验，非法退 2 | 0 / 1 / 2 |
 
 ### Kafka Topic 契约
 

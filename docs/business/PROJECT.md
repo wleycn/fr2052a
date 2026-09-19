@@ -111,7 +111,9 @@ demo-fr2052a/
 | Kafka（容器内） | 9092 | 只在 Server 2 的容器网络里可用，广告地址是 `kafka:9092` |
 | Spark Master | 8081 | `curl -I http://192.168.17.24:8081` |
 
-没有独立的元数据平台与监控面板：血缘由 `render_lineage.py` 渲染成 Markdown 报告，巡检由 `pipeline_health.py` 直接输出结论。
+没有独立的元数据平台与监控面板：血缘由 `render_lineage.py` 渲染成 Markdown 报告，巡检由 `pipeline_health.py` 直接输出结论。接监控栈的评估已登记为暂缓，见 `KNOWN-ISSUE.md` 的「监控与 BI 栈未落地」行。
+
+Airflow 里的 DAG 默认**暂停**：`fr2052a_daily_batch`、`fr2052a_backfill_and_restate`、`fr2052a_realtime_alert`、`fr2052a_submission` 四个是暂停的，只有 `fr2052a_gl_reconciliation` 是放开的。日常跑批走 Server 2 的 `run-daily-pipeline.sh`，不经过调度器；要演示「由 Airflow 编排」时，先在 Web UI 或 `airflow dags unpause <dag_id>` 放开对应 DAG，再手动触发。
 
 代码质量闸在 dev 机跑：`make lint`（ruff 检查 + 格式检查 + mypy）。执行一次 `git config core.hooksPath .githooks` 后，每次提交前自动跑。
 
@@ -137,6 +139,10 @@ demo-fr2052a/
 - `#spark-minio-endpoint` — Spark 连接 MinIO 必须用 IP，不能用 localhost
 - `#gl-reconciliation-mismatch` — GL 对账需按 Section 汇总后比对
 - `#hqla-cap-not-applied` — HQLA 二级资产 40% 上限需显式截断
+- `#hqla-cap-basis` — HQLA 二级资产上限的基数是扣除后的 HQLA，等价于一级资产的 2/3
+- `#section-a-d-empty` — 报表 Section A 与 D 的 6 列在演示环境恒为 NULL
+- `#catalog-name-drift` — Iceberg catalog 改名后旧注册行还在，清理脚本成了空操作
+- `#spark-decimal-division` — Spark 的 DECIMAL 除法只给 6 位小数，比例运算要先乘后整除
 - `#python314-incompatible` — Python 3.14 不兼容 GE 与 pyspark
 - `#dockerhub-image-removed` — minio/spark 官方镜像已从 Docker Hub 下架
 - `#detail-report-mismatch` — 明细与报表口径不一致（正回购/30天过滤）

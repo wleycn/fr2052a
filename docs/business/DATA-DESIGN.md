@@ -269,7 +269,7 @@ HQLA 存量还有一道**到期窗口**：剩余期限 30 天以内的证券不�
 | 规则 | 约束 |
 |------|------|
 | 现金流 Cap | 预期流入 ≤ 总流出 × 75%，超出按 75% 截断并记录 WARNING |
-| HQLA 二级资产上限 | Level 2A + Level 2B ≤ 总 HQLA × 40% |
+| HQLA 二级资产上限 | Level 2A + Level 2B 的认列额 ≤ 一级资产 × 2/3。这是 Basel LCR30「不得超过扣除后 HQLA 的 40%」的等价式；按 0.40 × (一级 + 二级) 算会把二级自己也算进基数，上限偏高 |
 | HQLA 到期窗口 | 剩余期限 30 天以内的证券不计入 HQLA 存量（改按 100% 流入计入），避免同一笔资产双向计量。排除部分单列 `sec_i_unencumbered_near_maturity` |
 | Section I/G 恒等式 | 未受限五项（L1、L2A、L2B、非 HQLA、30 天内到期）+ 已受限 = Section G 合计。由 `verify_gold.check_section_i_identity` 独立复算，任一项漏算即不平 |
 | 累计缺口不再单列 | 需求文档曾列出 `sec_k_cumulative_30d_gap`，实测它与 `sec_k_net_funding_gap` 是同一个数（逐桶累计净现金流单调递减时，最低点 = 窗口末累计值 = 净缺口；两期 6/6 行相等），因此删除而不是改名或硬凑一个不同算法。真需要时间维度就按到期桶出向量，不是挤成一个标量。见 KNOWN-ISSUE `#cumulative-gap-column-removed` |
@@ -294,7 +294,7 @@ HQLA 存量还有一道**到期窗口**：剩余期限 30 天以内的证券不�
 | VDQ-010 | OWS | 汇总 = SUM 明细 | ERROR |
 | VDQ-013 | ADS | Section 合计 = 行项目合计 | ERROR |
 | VDQ-016 | ODS | T+1 08:00 ET 前加载 | ERROR |
-| VDQ-017 | ADS | L2A + L2B ≤ 总 HQLA 40% | WARNING |
+| VDQ-017 | ADS | 二级资产认列额 = min(原始二级市值, 一级市值 × 2/3)，1 分表示精度容差 | WARNING |
 | VDQ-018 | ADS | 认列流入 = min(原始流入, 总流出 × 75%)，1 分表示精度容差 | ERROR |
 
 ### 3.5 行为假设派生规则

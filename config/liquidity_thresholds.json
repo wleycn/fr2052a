@@ -6,6 +6,7 @@
     "_note": "两条线都按监管口径设置，不为迁就演示数据而下调。本数据集的 LCR 基线远高于两条线（各实体实测约 7.76 至 31.12 倍），因此 LCR 类规则在演示中不会触发 —— 这是事实，不是故障。熔断剧本的实测走 GL 差异与数据质量 ERROR 两条可造的真实异常。"
   },
   "l2_cap_ratio_max": 0.4,
+  "_l2_cap_note": "二级资产占 HQLA 比例的上限。判定基数是扣除二级上限后的 HQLA，等价于「二级认列额 ≤ 一级资产 × 2/3」，与报表模型和 liquidity_monitor 里的算式同源（Basel LCR30）。",
   "inflow_cap_ratio_max": 0.75,
   "large_exposure": {
     "uninsured_deposit_min_usd": 3000000,

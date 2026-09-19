@@ -120,7 +120,7 @@ python validators/run_dq_rules.py --batch-id <id>
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `--batch-id` | string | 是 | ETL 批次号 |
+| `--batch-id` | string | 否 | ETL 批次号，不传时默认 `UNKNOWN`，仅影响审计表的追溯字段 |
 
 **退出码**：`0` = 无 ERROR 级违规（WARNING 级只提示、不阻断），`1` = 有 ERROR 级违规（阻断）
 
@@ -134,21 +134,26 @@ python producers/replay_ods_to_kafka.py --data-dir <dir> --config <json>
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `--data-dir` | path | 是 | ODS CSV 数据目录 |
-| `--config` | path | 是 | Topic 配置文件路径 |
+| `--data-dir` | path | 否 | ODS CSV 数据目录，默认 `/opt/fr2052a-app/sample_data/ods` |
+| `--config` | path | 否 | Topic 配置文件路径，默认 `/opt/fr2052a-app/config/pipeline_topics.json` |
 
-### 3.6 其他脚本
+两个参数都有默认值，跑批脚本按「可不传」调用；默认值指向容器内的挂载路径，所以只在 Server 2 的容器里可用，从别处调用必须显式指定。
 
-| 脚本 | 说明 |
-|------|------|
-| `python/lakehouse/run_sql_file.py` | 执行 Iceberg DDL |
-| `python/lakehouse/verify_bronze.py` | 验证 Bronze 层数据 |
-| `python/lakehouse/verify_silver.py` | 验证 Silver 层数据 |
-| `python/lakehouse/verify_gold.py` | 验证 Gold 层数据 |
-| `python/lakehouse/verify_ods_schema.py` | 验证 ODS 表结构 |
-| `python/exporters/export_gold_to_pg.py` | Gold → PG 导出 |
-| `python/exporters/generate_submission.py` | 报送文件生成（退出码：0 = 全部回执 ACCEPTED，1 = 有回执被拒 REJECTED） |
-| `python/audit/time_travel.py` | Iceberg 时间旅行审计（参数经白名单校验，非法退 2） |
+### 3.6 其余脚本的全集
+
+脚本全集共 34 个 `.py`，在 `python/` 下按子目录归口。**脚本清单只在本文维护一处**，新增脚本时改这里；有 CLI 契约的脚本已在上面 §3.1–3.5 与 `MODULE-DESIGN.md` 的 Python CLI 表里给出参数与退出码，本表不重复。
+
+| 子目录 | 职责 | 脚本 |
+|--------|------|------|
+| `python/alerts/` | 预警与熔断判定 | `liquidity_monitor.py`、`realtime_scanner.py`、`summarize_realtime_alerts.py` |
+| `python/audit/` | Iceberg 时间旅行审计 | `time_travel.py` |
+| `python/consumers/` | Kafka 消费入湖 | `kafka_to_iceberg.py` |
+| `python/exporters/` | gold 导出与报送文件生成 | `export_gold_to_pg.py`、`generate_submission.py` |
+| `python/generators/` | 样本数据生成（固定种子） | `__init__.py`、`config.py`、`ref_data.py`、`ods_data.py`、`generate_sample_data.py` |
+| `python/governance/` | 治理：运行上下文、权限、PII、血缘、巡检 | `run_context.py`、`publish_access.py`、`verify_rbac.py`、`build_pii_vault.py`、`render_lineage.py`、`pipeline_health.py` |
+| `python/lakehouse/` | 入湖、建模、核对、重述、表维护 | `load_ref_tables.py`、`run_sql_file.py`、`owd_scd2.py`、`verify_bronze.py`、`verify_silver.py`、`verify_ods_schema.py`、`verify_gold.py`、`verify_scd2.py`、`restate.py`、`maintain_tables.py`、`inspect_catalog.py` |
+| `python/producers/` | ODS 重放到 Kafka | `replay_ods_to_kafka.py` |
+| `python/validators/` | 质量规则、放行闸、回执核对 | `run_dq_rules.py`、`clear_dq_batch.py`、`check_submission_gate.py`、`verify_submission.py` |
 
 > `verify_*` 系列在核对对象为零时退出 `1`（零命中不算通过）。
 

@@ -101,9 +101,12 @@ def compute_metrics(row: dict[str, Any], regulatory_min: float) -> dict[str, Any
     l2a = number(row["sec_i_unencumbered_hqla_l2a"])
     l2b = number(row["sec_i_unencumbered_hqla_l2b"])
     unencumbered_l2 = l2a + l2b
-    unencumbered_total = l1 + unencumbered_l2
-    # 二级资产认列额不超过「一级 + 二级」合计的 40%
-    hqla_capped = l1 + min(unencumbered_l2, 0.40 * unencumbered_total)
+
+    # 二级资产认列上限 = 未质押一级资产的 2/3。Basel LCR30 的原文是「不得超过扣除后 HQLA 的
+    # 40%」，把它写成 0.40 * (一级 + 二级) 会连二级自己也算进基数，上限偏高。
+    # 算式必须与报表模型 sec_g_hqla_capped_total_usd 一致，否则同一套资产在报表上是一个数、
+    # 在 LCR 分子上是另一个数。
+    hqla_capped = l1 + min(unencumbered_l2, 2.0 / 3 * l1)
 
     inflow_raw = number(row["sec_h_expected_inflow_30d"])
     outflow = number(row["sec_k_total_outflows"])

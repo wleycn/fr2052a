@@ -237,12 +237,18 @@ entity_level as (
         coalesce(h.l2b_mv, 0) as sec_g_hqla_l2b_mv,
         coalesce(h.non_hqla_mv, 0) as sec_g_non_hqla_mv,
         coalesce(h.total_mv, 0) as sec_g_total_mv,
-        -- HQLA 认列总额：一级资产全额，二级资产（2A+2B）按 40% 上限截断
+        -- HQLA 认列总额：一级资产全额，二级资产（2A+2B）按 Basel LCR30 的上限截断。
+        -- LCR30 原文是「二级资产不得超过扣除后的 HQLA 的 40%」，等价于「不超过一级资产的 2/3」。
+        -- 写成 0.40 * (一级 + 二级) 是把基数当成了扣除前的总额，二级自己也被算进上限基数，
+        -- 上限因此偏高：实测 12 个报告期里 11 期的二级资产都超了真实上限。
+        -- 为什么写成「一级 * 2 / 3」而不是「2.0 / 3 * 一级」：Spark SQL 的 DECIMAL 除法只给 6 位小数，
+        -- 2.0 / 3 会算成 0.666667，在 44 亿的一级资产上把上限抬高 1478.06（实测值，verify_gold 抓到的）；
+        -- 乘 2 再除以整数 3，结果保留 13 位小数，误差落到分以下。别把这个顺序改回去。
         round(
             coalesce(h.l1_mv, 0)
             + least(
                 coalesce(h.l2a_mv, 0) + coalesce(h.l2b_mv, 0),
-                0.40 * (coalesce(h.l1_mv, 0) + coalesce(h.l2a_mv, 0) + coalesce(h.l2b_mv, 0))
+                coalesce(h.l1_mv, 0) * 2 / 3
             ),
             2
         ) as sec_g_hqla_capped_total_usd,
@@ -345,12 +351,12 @@ entity_standalone as (
         sum(sec_g_hqla_l2b_mv) as sec_g_hqla_l2b_mv,
         sum(sec_g_non_hqla_mv) as sec_g_non_hqla_mv,
         sum(sec_g_total_mv) as sec_g_total_mv,
-        -- 单体口径的二级资产上限按单体总额重新计算
+        -- 单体口径的二级资产上限按单体一级资产重新计算（一级 × 2/3，理由与小数位陷阱见上方逐实体口径的说明）
         round(
             sum(sec_g_hqla_l1_mv)
             + least(
                 sum(sec_g_hqla_l2a_mv) + sum(sec_g_hqla_l2b_mv),
-                0.40 * (sum(sec_g_hqla_l1_mv) + sum(sec_g_hqla_l2a_mv) + sum(sec_g_hqla_l2b_mv))
+                sum(sec_g_hqla_l1_mv) * 2 / 3
             ),
             2
         ) as sec_g_hqla_capped_total_usd,
@@ -422,12 +428,13 @@ consolidated as (
         sum(sec_g_hqla_l2b_mv) as sec_g_hqla_l2b_mv,
         sum(sec_g_non_hqla_mv) as sec_g_non_hqla_mv,
         sum(sec_g_total_mv) as sec_g_total_mv,
-        -- 合并口径的二级资产上限按合并后的总额重新计算，不能把各实体的认列额相加
+        -- 合并口径的二级资产上限按合并后的一级资产重新计算，不能把各实体的认列额相加，也不能
+        -- 拿各实体的上限相加。上限 = 一级 × 2/3，理由与小数位陷阱见上方逐实体口径的说明。
         round(
             sum(sec_g_hqla_l1_mv)
             + least(
                 sum(sec_g_hqla_l2a_mv) + sum(sec_g_hqla_l2b_mv),
-                0.40 * (sum(sec_g_hqla_l1_mv) + sum(sec_g_hqla_l2a_mv) + sum(sec_g_hqla_l2b_mv))
+                sum(sec_g_hqla_l1_mv) * 2 / 3
             ),
             2
         ) as sec_g_hqla_capped_total_usd,

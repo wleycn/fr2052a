@@ -444,12 +444,20 @@ VALIDATION_RULE_ROWS = [
     ),
     (
         "VDQ-017",
-        "L2A+2B within 40% of HQLA",
+        "L2 recognition equals min(raw L2, two-thirds of L1)",
         "BUSINESS",
         "ADS",
         "WARNING",
-        "(sec_g_hqla_l2a_mv + sec_g_hqla_l2b_mv) <= 0.40 * (sec_g_hqla_l1_mv + sec_g_hqla_l2a_mv + sec_g_hqla_l2b_mv)",
-        "二级资产不得超过 HQLA 总额 40%（按认列额截断，见报表模型）",
+        # 与 VDQ-018 同一口径：判据是「认列额算得对不对」，不是「上限有没有被触发」。
+        # 上限被执行时原始二级本来就大于一级的 2/3，把那个状态判成违规等于一触发上限就报警。
+        # 上限值 = 一级 × 2/3，来自 Basel LCR30「不得超过扣除后 HQLA 的 40%」的等价式。
+        # 写成「一级 * 2 / 3」而不是「2.0 / 3 * 一级」：Spark 的 DECIMAL 除法只给 6 位小数，
+        # 2.0 / 3 会算成 0.666667，几十亿的基数上误差上千元。
+        # 容差 1 分钱是表示精度：认列额报两位小数，算式精确值上取整到分会高出至多半厘。
+        # 字符串按相邻字面量拆行只为过行宽闸，拼接后的 SQL 是一条。
+        "abs((sec_g_hqla_capped_total_usd - sec_g_hqla_l1_mv)"
+        " - least(sec_g_hqla_l2a_mv + sec_g_hqla_l2b_mv, sec_g_hqla_l1_mv * 2 / 3)) <= 0.01",
+        "二级资产认列额 = min(原始二级市值, 一级市值 × 2/3)（1 分表示精度容差）",
         True,
     ),
     (

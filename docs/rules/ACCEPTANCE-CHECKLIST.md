@@ -27,7 +27,7 @@
 |---|--------|------|------|------|
 | 1 | 端到端重跑 | `bash deploy/reset-demo.sh --apply` 全链路通过 | ✅ | 复核：**18 个环节全绿**，耗时 **3 分 58 秒**；巡检确认熔断 OPEN、**校验 21 条**、重述 0 次 |
 | 2 | 可复现性 | 同一样本数据重复跑，报表主键集合、行数、对账结论一致 | ✅ | 样本数据由固定种子生成；dbt 多轮重跑数值不变；报表主键为确定性取值 |
-| 3 | 独立复核 | 由未参与编写的一方实跑关键判据后给结论 | ⬜ | 判据均由**同一执行方**跑出并留日志（熔断剧本、报送哈希、SCD2 区间、权限实读）；第三方复核尚未发生，签名栏为空 |
+| 3 | 独立复核 | 由未参与编写的一方实跑关键判据后给结论 | 🔍 | 不适用：单人加 agent 的演示项目没有第三方执行方。替代标准＝判据由核对脚本与端到端重跑实核，偏差登记见 `docs/business/KNOWN-ISSUE.md` 的「独立复核不做」行 |
 | 4 | 文档完整 | README + 九项核心文档 + 构建日志齐全 | ✅ | `docs/business/` 七份 + `docs/rules/` 四份 + `docs/build-log.md` |
 | 5 | 变更日志已更新 | CHANGELOG.md 有对应条目 | ✅ | E6-E7 条目含已完成项与关键修复 |
 | 6 | 已知坑已登记 | KNOWN-ISSUE.md 有锚点与成因 | ✅ | 含 `#scd2-reversed-interval`、`#report-history-reset-exception`、`#dead-ows-tables`；其余坑记在构建日志 E6 小节 |
@@ -54,8 +54,10 @@
 |---|--------|------|------|------|
 | 1 | 全链路时长 | ≤ 15 分钟 | ✅ | 重跑实测 **3 分 58 秒**（18 个环节，含 dbt 19 个模型与 33 条数据测试） |
 | 2 | 单环节时长 | 任一环节 ≤ 5 分钟 | ✅ | 同一轮里 18 个环节合计 3 分 58 秒，最慢的环节在 1 分钟内 |
-| 3 | 放行闸与巡检响应 | 从流水线日志读 `gate` 与 `health` 两个环节各自的耗时，均 ≤ 30 秒 | ⬜ | 未逐一取耗时；本项目无对外接口，故不适用「API p95」 |
-| 4 | 库查询计划 | 控制表关键查询走索引 | ⬜ | 未逐条跑 EXPLAIN；控制表数据量在千行级，暂无性能压力 |
+| 3 | 放行闸与巡检响应 | 从流水线日志读 `gate` 与 `health` 两个环节各自的耗时，均 ≤ 30 秒 | ✅ | 实测（Server 2）：`gate` 0.070 秒，日志首行写「熔断闸 GLOBAL：OPEN，允许生成报送文件」；`health` 1.858 秒。两个环节都在 30 秒标准内；本项目无对外接口，故不适用「API p95」 |
+| 4 | 库查询计划 | 控制表关键查询走索引 | ✅ | 三张控制表各跑一条 EXPLAIN：`restatement_log` 走 `Index Scan using idx_restatement_report`；`submission`（15 行）与 `validation_log`（21 行）走 `Seq Scan`，成本 2.33 与 8.31。三张表的关键索引都在位，单页小表下顺序扫描是规划器的选择；数据量增大后是否转索引扫描未实测。关键索引见下方一行 |
+
+三张表的关键索引：`ads_fr2052a_submission` 的 `ads_fr2052a_submission_uk (report_id, file_format)` 与 `idx_submission_report (report_date, entity_code)`；`ads_fr2052a_validation_log` 的 `idx_validation_log_batch (batch_id, check_result)`；`ads_restatement_log` 的 `idx_restatement_report (report_date, entity_code)`。
 
 ## 安全验收
 

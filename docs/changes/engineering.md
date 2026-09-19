@@ -180,3 +180,24 @@
 - 同源的共享闸也补了一处：`[AI]` 提交标记那条判据 09-18 已撤销，闸却还在查，agent 会话不带标记会被拦。本次连同上游 8 个素材文件（AGENTS 核心模板中英两份、python `CODING-STANDARD` 中英两份、三个项目类型片段、示例素材）与闸的探针一起改完，重新下发 5 个 profile；`demo-gx` 的英文规范同步（否则它的分层自检报不一致，提交 `9ae2e7a`）。
 - 验证：闸的探针 10/10，含「agent 会话不带 `[AI]` 必须放行」的新反向探针；`make lint` 全绿；本仓库一条真实提交在装闸后通过两道闸入库（提交信息不带标记）；行尾卫生项读全仓受控文件字节，零告警。
 - 回滚：`git revert` 本次提交；共享闸侧回滚 `ng` 仓的 `2f67f1d`。
+
+## hqla-cap-basis
+
+- 范围：`dbt/models/marts/ads_fr2052a_report.sql` 三处认列额计算、`python/alerts/liquidity_monitor.py`、`python/lakehouse/verify_gold.py`、`python/generators/ref_data.py` 的 VDQ-017 规则、`config/liquidity_thresholds.json`、`sql/postgres/10_control_tables.sql` 列注释、`docs/business/{DATA-DESIGN,DOMAIN-LANGUAGE,KNOWN-ISSUE}.md`、`docs/tables/{ads_fr2052a_report,ads_liquidity_metrics}.md`
+- 变更：HQLA 二级资产的认列上限算错了基数。Basel LCR30 的原文是「二级资产不得超过**扣除后**的 HQLA 的 40%」，代码写成 `0.40 * (一级 + 二级)`，把扣除前的总额当成了基数，二级自己也被算进上限里，上限因此偏高。12 个报告期里 11 期的二级资产都超了真实上限。上限改成一级资产 × 2/3，这是同一约束的等价式，只是不引入二级自身。六处一起改：模型里有三处，分别是逐实体、单体现、合并；`liquidity_monitor.py` 的 LCR 分子一处，`verify_gold.py` 的独立复算一处，DQ 规则 VDQ-017 一处。VDQ-017 的判据同时从「上限有没有被触发」改成「认列额算得对不对」，理由与 VDQ-018 相同：上限被执行时原始二级本来就大于上限，把那个状态判成违规等于一触发上限就报警。改算式时又踩到一个陷阱：`2.0 / 3` 在 Spark 的 DECIMAL 运算里只有 6 位小数，等于 0.666667，在 44 亿的一级资产上把上限抬高 1478.06，`verify-ads` 抓到了这个偏差；改成「一级 * 2 / 3」后 Spark 给 13 位小数，误差落到分以下。这条写成注释钉在模型里，防止下一个人改回更「直观」的写法。
+- 验证：① `make lint` 全绿；② 本地重生成样本数据与基线比对，除 `ref_validation_rules.csv` 的 VDQ-017 一行外零差异，证明生成器确定性未受影响；③ Server 2 日批跑到 `verify-ads` 全绿，两条「二级资产上限」由 FAIL 转 PASS，合并行的认列额 7,390,311,958.82 与独立复算逐期一致到分；④ VDQ-017 在审计表里转 PASS，这一批里仅剩 VDQ-020 与 VDQ-021 两条已裁决忽略的 WARNING；⑤ 12 行报表全部落在真实上限内，修正前超限 11 行。
+- 回滚：`git revert` 本条目对应的提交，并把 `sample_data/` 重新生成一遍。回退后 HQLA 认列额回到虚高的数值，`verify-ads` 与 VDQ-017 会重新报出超限。
+
+## pending-issues-cleanup
+
+- 范围：`AGENTS.md` §4、`docs/business/{PROJECT,KNOWN-ISSUE,INTERFACE-DESIGN,MODULE-DESIGN}.md`、`docs/rules/ACCEPTANCE-CHECKLIST.md`、`docs/tables/ads_fr2052a_report.md`、`sql/iceberg/oneoff/91_drop_smoke_tables.sql`
+- 变更：清掉交接单里 13 条未决项中的 7 条，并把 4 项裁决落进文档。**实施类**：验收清单补 `gate` 0.070 秒与 `health` 1.858 秒的实测耗时、补三张控制表的 EXPLAIN 结果；`INTERFACE-DESIGN.md` 把 `run_dq_rules.py` 的 `--batch-id` 与 `replay_ods_to_kafka.py` 的两个参数从「必填」改成「否加默认值」，与代码实况对齐；脚本清单从 8 个改为按子目录列全 34 个，并声明脚本清单只在该处维护；`MODULE-DESIGN.md` 的 CLI 表补上脚本目录路径。**裁决类**：不做第三方独立复核，验收清单第 3 项改为「不适用」并写明替代标准；`AGENTS.md` §4 改成「单人加 agent 的项目直接提交 main，出问题靠 revert」；`PROJECT.md` 写明 4 个 DAG 默认暂停、只有总账对账 DAG 放开；`docs/rules/` 四件套与上游装配不一致一事登记为「允许项目侧手改、不重跑装配」，因为项目侧在其上补过目录行与验收证据列，而装配器的 `--out` 是无条件覆盖。**清理类**：E3 的两张自检表按授权清掉，脚本移入 `oneoff/`。
+- 验证：`gate` 与 `health` 的耗时取自 Server 2 上的 `time` 实测；EXPLAIN 三份计划取自 Server 1 的 PG；脚本数 34 由 `find python -name '*.py'` 核对；两张 smoke 表在 `iceberg_catalog.iceberg_tables` 里由 2 行变 0 行、MinIO 两个目录由有对象变空；`make lint` 全绿。
+- 回滚：`git revert` 本条目对应的提交。`docs/rules/` 的变化也可单独丢弃并重新装配。已清掉的 smoke 表与 MinIO 文件不回滚，重建它们等同于重跑 E3 的穿透自检。
+
+## hqla-cap-restatement
+
+- 范围：`ads.ads_restatement_log` 与 `ads.ads_fr2052a_report_history` 的数据（Server 1 的 PG），不涉及仓库文件
+- 变更：上一条的算式修正改变了 2026-09-16 这一期的报表数值，而该期在报送台账里的状态是 ACCEPTED，导出环节的内容指纹闸因此拦下覆盖写。按闸自己指向的正确路径走重述：先对 6 个报送主体逐个 capture，把重跑前的原报表存进版本历史；再带 `ALLOW_EXPORT_AFTER_SUBMISSION=1` 完成导出；最后逐个 register，关闭旧版本、登记新版本并写重述台账。理由是这属于「修正已报送数字」，不是「数据没变的运维重跑」，两者在项目里是两条不同的路径。
+- 验证：重述台账 6 行，状态 APPLIED，`original_report_id` 指向 v1、`new_report_id` 指向 v2；版本历史 12 行，每个主体的 v1 为 ORIGINAL 且已收口、v2 为 RESTATEMENT 且当前有效；`verify-scd2` 在登记后重跑仍绿；批次上下文收口为 SUCCEEDED。
+- 回滚：重述不可回滚也不应回滚，它是留痕本身。要回到没有重述史的状态只能重建演示基线，即跑 `deploy/reset-demo.sh --apply`。

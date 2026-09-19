@@ -33,6 +33,8 @@ dbt `table` 物化整表重建；导出 PostgreSQL 时先清后写并开 `trunca
 
 ## 字段清单
 
+**恒为 NULL 的列**：Section A 的 5 列（`sec_a_*`）与 `sec_d_total` 在演示环境里没有数据来源 —— 没有商业票据、联邦银行基金与其他融资业务。这 6 列按需求保留列位，取值写 NULL 而不是 0，两者含义不同：NULL 表示「本演示不报这一项」，0 表示「报了，金额为零」。见 KNOWN-ISSUE 的 `#section-a-d-empty`。
+
 | 字段 |
 |---|
 | `entity_code` |
@@ -97,7 +99,7 @@ dbt `table` 物化整表重建；导出 PostgreSQL 时先清后写并开 `trunca
 
 ## 金额单位约定
 
-USD，`DECIMAL(20,2)`（导出时由 Spark 推断）。二级资产已按 40% 上限截断，流入已按流出的 75% 上限认列。
+USD，`DECIMAL(20,2)`（导出时由 Spark 推断）。二级资产的认列额已按一级资产的 2/3 上限截断，流入已按流出的 75% 上限认列。
 
 ## PII 字段与脱敏方式
 
@@ -118,4 +120,13 @@ Iceberg 侧随跑批整表重建；PostgreSQL 侧随导出覆盖写，保留授�
 
 ## 质量规则清单
 
-本层规则共 6 条：`VDQ-013` Section 合计等于行项目、`VDQ-014` 融资总量对资产负债表、`VDQ-015` 期比异动、`VDQ-017` 二级资产不超 HQLA 的 40%、`VDQ-018` 流入认列不超流出的 75%、`VDQ-019` 必备行项目齐备。 另由 `python/lakehouse/verify_gold.py` 在 `verify-ads` 环节核对合并口径、明细回溯与监管上限。
+本层规则共 6 条，逐条如下：
+
+- `VDQ-013`：Section 合计等于行项目
+- `VDQ-014`：融资总量对资产负债表
+- `VDQ-015`：期比异动
+- `VDQ-017`：二级资产认列额等于 min(原始二级市值, 一级市值 × 2/3)
+- `VDQ-018`：流入认列不超流出的 75%
+- `VDQ-019`：必备行项目齐备
+
+另由 `python/lakehouse/verify_gold.py` 在 `verify-ads` 环节核对集团合并数、明细回溯与监管上限。

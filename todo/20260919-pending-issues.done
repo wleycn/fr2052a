@@ -1,6 +1,6 @@
 # 交接单：demo-fr2052a 未决项
 
-- 状态：new ｜ 写下：2026-09-19 ｜ 项目：`/home/hermes/workspace/demo-fr2052a`
+- 状态：done ｜ 写下：2026-09-19 ｜ 项目：`/home/hermes/workspace/demo-fr2052a`
 - 相关：`docs/AUDIT-2026-09-17-delegate-review.md`（三路审查 80 条原始记录与逐条处置）
 
 ## 结论
@@ -82,3 +82,25 @@ git mv todo/20260919-pending-issues.new todo/20260919-pending-issues.doing
 - 查库：`ssh hermes@192.168.17.22 "docker exec fr2052a_postgres psql -U fr2052a -d fr2052a_db -c '<SQL>'"`
 - 交接单工具：`~/.hermes/skills/meta/handoff-note/scripts/handoff_scaffold.py` 与 `handoff_check.py`
 - 相关记忆键：`task-20260918-c7-audit-remaining-four`、`task-20260919-gate-fix-and-install`、`lesson-20260919-rule-trigger-vs-stock-debt`、`lesson-20260918-rule-without-scene`（用 `mem_remember.py recall "<键>"` 取全文）
+
+## 结果
+
+接手方：Cheese（Hermes），2026-09-19。13 条未决项：7 条实施、4 项裁决落地、2 条按裁决暂缓。
+
+先说交接单自己的问题。**计数写反**：结论段说「6 条阻塞列写无」，实测是 7 条标「无」、6 条标「你」。**三处结构性遗漏**：① 第 1 条的改动面比它列的大；② 第 11 条含 `DROP TABLE`，却标成「无阻塞」，按红线仍需人类授权；③ 清单没提 `docs/rules/` 与上游装配已经不一致。
+
+- **第 1 条 VDQ-017（实施，按 2/3 × 一级 口径）**：交接单说模型两处，实测是三处（合并口径那处没列）；还说改五处，实际漏了 `python/alerts/liquidity_monitor.py` 整个文件。六处一起改完。改完 `verify-ads` 的两条「二级资产上限」由 FAIL 转 PASS，12 行报表全部落在真实上限内，VDQ-017 在审计表里转 PASS。
+  - 中途踩坑：`2.0 / 3` 在 Spark 的 DECIMAL 运算里只有 6 位小数，等于 0.666667，在 44 亿基数上把上限抬高 1478.06，被 `verify-ads` 抓出来。改成「一级 * 2 / 3」后一致到分；已写成模型注释与 KNOWN-ISSUE 的 `#spark-decimal-division`。
+  - 交接单方案的 ② 「报表新增 `sec_g_hqla_l2_recognized_usd` 列」**未做**：加列要连带 PG 迁移、导出前置的列比对、表契约与 DATA-DESIGN，属另一批改动；该值现在可由「认列总额 − 一级市值」推出。要做请单独开一条。
+- **第 3、4 条（实施）**：验收清单性能第 3、4 行由 ⬜ 转 ✅。实测 `gate` 0.070 秒、`health` 1.858 秒；三张控制表各一份 EXPLAIN，`restatement_log` 走 `idx_restatement_report`，`submission` 与 `validation_log` 因是单页小表走顺序扫描，索引都在位。
+- **第 8、9、10、13 条（实施）**：`INTERFACE-DESIGN.md` 的必填列按代码改成「否加默认值」；偏离表的锚点措辞改成「指向本文件的锚点行」；脚本清单由 8 个改为按子目录列全 34 个，并声明这是脚本集合的唯一落点；Section A/D 恒 NULL 登记进 KNOWN-ISSUE 并在表契约加注。
+- **第 2、5、6、7、12 条（按裁决落地）**：不做第三方独立复核，验收清单第 3 项改为「不适用」并写明替代标准；`requirements/` 暂缓不移；监控与 BI 暂缓，先把现有缺陷清完；`AGENTS.md` §4 改成「单人加 agent 的项目直接提交 main，出问题靠 revert」；`PROJECT.md` 写明 4 个 DAG 默认暂停、只有总账对账 DAG 放开。
+- **第 11 条（实施，含授权）**：执行时发现原脚本是**空操作** —— 两张表注册在旧的 `spark_catalog` 名下，当前 catalog 叫 `lakehouse`，`DROP TABLE IF EXISTS` 看不见它们。改用 PG 侧 `DELETE` 清掉 2 行注册行；MinIO 两个目录的文件按裁决一并清；9 张 ref 旧注册行按裁决保留。脚本连同原因说明移入 `sql/iceberg/oneoff/`。见 `#catalog-name-drift`。
+- **新发现**：`docs/rules/` 四件套与上游装配对不上（`rules_assembly.py --check` 4/4 FAIL），因为项目侧在其上手工补过目录行与验收证据列，而装配器 `--out` 是无条件覆盖。按裁决登记为「允许项目侧手改、不重跑装配」。
+- **重述（口径修正的必然后果）**：2026-09-16 这一期在报送台账里是 ACCEPTED，口径修正改变了它的数值，导出闸按设计拦下覆盖写。按裁决走重述流程：6 个主体逐个 capture → 带 `ALLOW_EXPORT_AFTER_SUBMISSION=1` 完成导出 → 逐个 register。重述台账 6 行 APPLIED，版本历史 12 行，v1 为 ORIGINAL 且已收口、v2 为 RESTATEMENT 且当前有效；`verify-scd2` 登记后重跑仍绿；批次上下文 SUCCEEDED。
+- **留痕**：`docs/changes/engineering.md` 新增三条 —— `hqla-cap-basis`、`pending-issues-cleanup`、`hqla-cap-restatement`。
+
+**做完这条交接单仍未闭环的两件事**
+
+1. 报送台账里 2026-09-16 的文件哈希还是旧的那一版，**没有重跑报送环节刷台账**。要让台账与库内数值重新一致，得跑 `fr2052a_submission` 的 gate 与 submission 两个环节，那是新一轮对外动作，未自决。在此之前，再一次整链跑批仍会在 `export-pg` 被同一道闸拦下，属预期行为。
+2. 报表没有单列「二级资产认列额」列，理由见上。
