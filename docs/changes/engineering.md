@@ -239,3 +239,15 @@
 - 验证：Server 1 抓 Server 2 的 9100，`grep -c '^fr2052a_'` 得 15；Prometheus 目标 `health=up` 且无 lastError，查 `fr2052a_dq_errors` 得 0；6 条告警规则全部加载；Grafana `/api/health` 正常（11.5.1），数据源 `fr2052a-prometheus` 经代理查询成功，面板 `fr2052a-health` 按 uid 取到（HTTP 200）；Server 2 的 cron 在 13:55:03 实跑过一次（指标文件时间戳与日志一致）。`make lint` 全绿（41 个文件）。
 - 回滚：Server 1 与 Server 2 各在 `~/fr2052a-infra/monitoring` 跑一次 `docker compose down`，删掉 Server 2 的 cron 那一行，`git revert` 本条目对应的提交。镜像与数据卷可留（下次直接起）也可删。
 - 一处工具链冲突（按 AGENTS §0 登记）：提交门禁的排版判据要求「docstring 后空一行」（阻断级），ruff 的 D202 要求「docstring 后不得有空行」。函数体紧接 docstring 时两条无法同时满足，本轮在 `deploy/server2/health_json_to_prom.py` 上被卡住。处理：按门禁的形态写（保留空行），并在该文件用 `# ruff: noqa: D202` 关掉冲突项、写明原因。根治要在 ng 仓放宽门禁那条判据（只对「docstring 后接嵌套 def/class 或块尾」要求空行），属共享工具链改动，未在本仓动。
+
+## doc-consistency-remediation-20260919
+
+- 范围：`AGENTS.md`、`README.md`、`docs/rules/` 四件套、`docs/business/` 七份、`docs/tables/` 25 份契约、`docs/CRON-DESIGN.md`（新增）、`docs/build-log.md`、`docs/AUDIT-2026-09-17-delegate-review.md`、`deploy/server2/` 的 `crontab.example`（新增）、`run-daily-pipeline.sh` 与 `setup-venv.sh`、`config/pipeline_topics.json` 与 `config/liquidity_thresholds.json`、`sql/postgres/10_control_tables.sql` 与 `sql/postgres/20_security.sql`、`dbt/models/marts/schema.yml` 与 `dbt/models/marts/ads_fr2052a_report.sql`、`python/lakehouse/maintain_tables.py`
+- 变更：一轮「文档 ↔ 项目」核对之后的整改。核对方式是 11 路只读子代理分片查（表契约 56 份拆四路、业务文档、接口与术语、规则与留痕、改动面），再逐条亲验高严重度指控，核出 30 条高严重度与 40 余条中严重度偏差。整改分五类。
+  - ① 编造型：INTERFACE 的 Kafka 主题一节原先为 11 个主题各抄一份字段表，其中 `txn_type`、`amount`、`deal_type`、`notional` 等字段全仓代码里不存在。改成主题清单归 `config/pipeline_topics.json` 单源，载荷写明「投递的就是目标表的行」，只保留输出主题 `fr2052a_alerts` 的两个写入方与各自载荷。表契约侧按实现补正 6 份 ODS 的 PII 列、15 份 OWD 的 `is_intracompany`、衍生品历史表的两个 mtm 列与 `stg_fx_rates` 的规则归属。
+  - ② 数字类：Python 文件数 41、巡检 9 项、表结构 17/17、ruff 五个排除规则的命中数改实测值、可选环节 28 与默认序列 19。
+  - ③ 数值规则类：`ENT001` 与 `GRP001` 的合并行实体码（表契约、`schema.yml`、控制表 DDL、模型注释四处）、`audit_data_lineage` 改 52/36、`ref_validation_rules` 改 21 条、`fr2052a_pii_map` 的 `source_object` 改成实现写入的 `landing.{table}`。
+  - ④ 引用类：README 的 `--help` 改 `--list`、AGENTS 引用的章节号改标题名、修 3 处死链、补 6 条缺失的坑索引、`BUILD-LOG E6.2` 死引用改成实际出处。
+  - ⑤ 决策落地：偏离纪律第 2 条改成「有对应坑表条目才写锚点」，并写明本项目锚点形态与门禁该判据只到告警级；`CHANGELOG.md` 定为里程碑制，验收判据改到 `docs/changes/`；归档文档加「状态以 KNOWN-ISSUE 为准」总注；审计台账第三节重排成四列表并清掉 JSON 残片；建 `docs/CRON-DESIGN.md` 与 `deploy/server2/crontab.example`，让调度有单一说明；快照维护进日批（新增 `maintain-tables-apply` 环节，脚本命名空间补 `gold`）；`setup-venv.sh` 把 dbt 三件套与 pyspark 版本全部 pin；新增两个坑锚点 `#audit-access-log-no-writer` 与 `#read-audit-gap`。
+- 验证：`make lint` 全绿（41 个文件）；共享门禁通过且写作卫生告警清零（历史留痕不改）；日批整链实跑 **19 个环节全绿、耗时 4 分 52 秒**；`maintain-tables-apply` 实测处理 **42 张表**（ref 9 + bronze 8 + silver 22 + gold 3），逐表设置保留策略并执行小文件合并，过期环节因全部快照都在 7 天窗口内而未删任何快照；`verify-ads` 与 `verify-rbac` 等核对环节在整链内通过；`sync-deploy.sh --check` 无漂移；残留扫描显示旧值只剩在 `docs/changes/` 与 `docs/AUDIT-2026-09-17` 的历史条目里（按「历史不重写」保留）。
+- 回滚：`git revert` 本批三次提交（文档侧 `c3a3572`、契约与运维侧 `c6881be`、写作卫生 `d7f110b`）。日批要不自动过期快照，从 `run-daily-pipeline.sh` 的 `STEPS` 里删掉 `maintain-tables-apply` 一行即可，演练环节 `maintain-tables` 保留。dbt 版本 pin 要回退就删掉版本号。文档改动无数据面影响。
