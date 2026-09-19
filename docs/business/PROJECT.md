@@ -143,6 +143,7 @@ Airflow 里的 DAG 默认**暂停**：`fr2052a_daily_batch`、`fr2052a_backfill_
 - `#section-a-d-empty` — 报表 Section A 与 D 的 6 列在演示环境恒为 NULL
 - `#catalog-name-drift` — Iceberg catalog 改名后旧注册行还在，清理脚本成了空操作
 - `#spark-decimal-division` — Spark 的 DECIMAL 除法只给 6 位小数，比例运算要先乘后整除
+- `#l2-recognized-not-split` — 二级资产认列额不单列，按「认列总额 − 一级市值」取
 - `#python314-incompatible` — Python 3.14 不兼容 GE 与 pyspark
 - `#dockerhub-image-removed` — minio/spark 官方镜像已从 Docker Hub 下架
 - `#detail-report-mismatch` — 明细与报表口径不一致（正回购/30天过滤）

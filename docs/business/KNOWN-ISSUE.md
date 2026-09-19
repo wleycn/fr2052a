@@ -27,6 +27,7 @@
 | #section-a-d-empty | 09-19 | 报表的 Section A 五列与 `sec_d_total` 在 12 行里全部为 NULL | 演示样本里没有商业票据、联邦银行基金与其他融资三类业务，生成器不产这些明细；模型按需求保留列位并显式写 NULL | ✅ 设计取舍：保留列位、取值为 NULL 而非 0 —— NULL 表示「本演示不报这一项」，0 表示「报了且金额为零」，两者不能互换。列注释与表契约均已写明 | ADS 报表 Section A 与 D | `docs/tables/ads_fr2052a_report.md` 的字段清单 |
 | #catalog-name-drift | 09-19 | 清理 E3 自检表的脚本报「OK」，但两张表在 PG 的 `iceberg_catalog.iceberg_tables` 里一行没少 | E3 建表时 Iceberg JDBC catalog 的名字是 `spark_catalog`，E4 起改成独立的 `lakehouse`。`DROP TABLE IF EXISTS bronze.smoke_check` 解析到 lakehouse 名下，看不见旧名字下的注册行；Spark 侧已无法再以旧名连接，DROP 这条路走不通 | ✅ 修法：改用 PG 侧 `DELETE FROM iceberg_catalog.iceberg_tables WHERE catalog_name = 'spark_catalog' AND table_name IN ('smoke_check', 'spark_smoke')`，实测删除 2 行；MinIO 上两个目录的 metadata 与数据文件用 `mc rm --recursive` 清掉（桶开了版本控制，删除留 delete marker）；脚本连同原因说明移入 `sql/iceberg/oneoff/`。**经裁决保留的残留**：`spark_catalog` 名下 9 张 ref 表的同类注册行 | Iceberg 目录元数据 | `docs/changes/engineering.md` 的 pending-issues-cleanup 条目 |
 | #spark-decimal-division | 09-19 | 报表认列额比独立复算高出 1,478.06，`verify-ads` 因此报红 | Spark SQL 的 DECIMAL 除法只给 6 位小数：`2.0 / 3` 算成 `0.666667`，在 44 亿的一级资产基数上把上限抬高 1478.06。同一算式在小数上完全看不出来 —— 偏差由基数放大 | ✅ 修法：改成「一级 * 2 / 3」（乘 2 再除以整型 3，Spark 给 13 位小数），dbt 模型三处与 VDQ-017 判据同步改。纪律：DECIMAL 列上的比例运算别用两位小数字面量相除，先乘后整除；分成分级容差的判据挡不住这类 10⁻⁷ 级偏差 | 所有 DECIMAL 比例运算 | `docs/changes/engineering.md` 的 hqla-cap-basis 条目 |
+| #l2-recognized-not-split | 09-19 | 报表不单列「二级资产认列额」，读者看不到二级实际认了多少 | 审计方案曾建议新增 `sec_g_hqla_l2_recognized_usd` 列 | ✅ 决策：不加列，改在表契约与模型列注释里写明派生关系（`认列额 = 认列总额 − 一级市值 = min(原始二级, 一级 × 2/3)`）。理由：该值可由两列精确还原（两位小数相减），行级恒等式已由 VDQ-017 逐行守着，加列要连带 PG 迁移、导出列比对、报送文件的取列排除清单与表契约，成本明显高于收益。代价：Section G 的呈现与流入侧不对称，且减法把语义藏在算式里；回退：按上述四处一起补列 | ADS 报表 Section G | `docs/tables/ads_fr2052a_report.md` 的派生关系一节 |
 
 <!-- PROJECT.md 索引行（复制区）：
 - `#pg18-data-dir-change` — PG 18 改了数据目录约定
@@ -37,6 +38,7 @@
 - `#section-a-d-empty` — 报表 Section A 与 D 的 6 列在演示环境恒为 NULL
 - `#catalog-name-drift` — Iceberg catalog 改名后旧注册行还在，清理脚本成了空操作
 - `#spark-decimal-division` — Spark 的 DECIMAL 除法只给 6 位小数，比例运算要先乘后整除
+- `#l2-recognized-not-split` — 二级资产认列额不单列，按「认列总额 − 一级市值」取
 - `#python314-incompatible` — Python 3.14 不兼容 GE 与 pyspark
 - `#dockerhub-image-removed` — minio/spark 官方镜像已从 Docker Hub 下架
 - `#detail-report-mismatch` — 明细与报表口径不一致（正回购/30天过滤）

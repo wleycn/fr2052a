@@ -244,6 +244,9 @@ entity_level as (
         -- 为什么写成「一级 * 2 / 3」而不是「2.0 / 3 * 一级」：Spark SQL 的 DECIMAL 除法只给 6 位小数，
         -- 2.0 / 3 会算成 0.666667，在 44 亿的一级资产上把上限抬高 1478.06（实测值，verify_gold 抓到的）；
         -- 乘 2 再除以整数 3，结果保留 13 位小数，误差落到分以下。别把这个顺序改回去。
+        -- 二级资产认列额不单列成列，按「本列 − 一级市值」取值即可，两列都是两位小数，相减精确到分。
+        -- 不单列的理由与派生关系写在 docs/tables/ads_fr2052a_report.md 与 KNOWN-ISSUE 的
+        -- #l2-recognized-not-split；行级恒等式由 VDQ-017 逐行守着。
         round(
             coalesce(h.l1_mv, 0)
             + least(
