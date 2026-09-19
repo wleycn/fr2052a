@@ -23,7 +23,7 @@ import sys
 
 from pyspark.sql import SparkSession
 
-NAMESPACES = ("ref", "bronze", "silver")
+NAMESPACES = ("ref", "bronze", "silver", "gold")
 RETENTION_DAYS = 7
 MIN_SNAPSHOTS_TO_KEEP = 10
 METADATA_PREVIOUS_VERSIONS_MAX = 20

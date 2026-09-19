@@ -40,10 +40,13 @@ echo "创建虚拟环境"
 "$UV" venv --python "$PYTHON_VERSION" "$BASE_DIR/venv"
 
 echo "安装依赖"
+# 版本全部 pin：pyspark 与 Spark 容器（apache/spark:3.5.9）必须同版，
+# dbt 三件套 pin 到实测版本，否则重建环境会装到别的版本、编译结果跟着变。
+# 版本口径与 docs/business/PROJECT.md 的技术栈表一致；升级要三处一起改。
 VIRTUAL_ENV="$BASE_DIR/venv" "$UV" pip install \
-  dbt-core \
-  dbt-postgres \
-  dbt-spark \
+  "dbt-core==1.12.5" \
+  "dbt-postgres==1.11.0" \
+  "dbt-spark==1.11.0" \
   "pyspark==3.5.9"
 
 echo "安装完成，版本如下"

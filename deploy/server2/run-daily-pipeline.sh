@@ -61,6 +61,7 @@ STEPS=(
   verify-scd2
   verify-ads
   verify-rbac
+  maintain-tables-apply
   run-context-close
 )
 
@@ -90,6 +91,7 @@ declare -A STEP_DESC=(
   [health]="跑批健康巡检：熔断/质量/报送/Kafka 滞后/连接/磁盘"
   [time-travel]="时间旅行：列出 Iceberg 快照（审计用）"
   [maintain-tables]="表维护：快照保留与文件合并（默认演练）"
+  [maintain-tables-apply]="表维护（日批环节）：按声明的保留策略真过期快照并合并小文件"
   [verify-bronze]="核对 bronze：与样本 CSV 行数比对"
   [verify-silver]="核对 OWD：行数、分桶、折算逐行重算"
   [verify-scd2]="核对版本历史：END_DATE 为空 ⇔ 当前有效、版本号连续、无重复"
@@ -264,6 +266,11 @@ print(sum(1 for topic in topics if topic.get('has_producer')))
       # 默认演练，--apply 才真做；过期快照不可逆，见脚本头部说明。
       bash spark-submit-fr2052a.sh "$APP_DIR/python/lakehouse/maintain_tables.py" \
         ${MAINTAIN_APPLY:+--apply}
+      ;;
+    maintain-tables-apply)
+      # 日批环节：按脚本里声明的策略（快照保留 7 天且至少 10 个）过期快照并合并小文件。
+      # 授权口径见 docs/business/KNOWN-ISSUE.md 的「日批自动过期 Iceberg 快照」行。
+      bash spark-submit-fr2052a.sh "$APP_DIR/python/lakehouse/maintain_tables.py" --apply
       ;;
     verify-bronze)
       bash spark-submit-fr2052a.sh "$APP_DIR/python/lakehouse/verify_bronze.py" \

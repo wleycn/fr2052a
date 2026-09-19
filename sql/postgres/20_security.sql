@@ -91,7 +91,7 @@ GRANT auditor TO CURRENT_USER;
 --      a) 对 PII 对照表的写入留痕（含谁改的、改了什么）
 --      b) 审计表本身的写入留痕由业务代码负责（见 python/governance/render_lineage.py）
 --    读取级留痕需要 pgaudit 扩展或语句日志，本演示未部署 —— 这是缺口，
---    已记在 docs/business/KNOWN-ISSUE.md，不假装覆盖。
+--    已记在 docs/business/KNOWN-ISSUE.md 的 #read-audit-gap，不假装覆盖。
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION secure.log_pii_map_change() RETURNS trigger AS $fn$
 BEGIN

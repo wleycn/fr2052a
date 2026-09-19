@@ -179,14 +179,15 @@ entities as (
 
     -- 所有业务表里出现的 (report_date, entity_code, is_intracompany) 组合。
     -- 不只用 deposits：一个实体可能只有贷款没有存款，只用 deposits 会丢行。
-    -- cash 与 cashflow 没有 is_intracompany，它们的标记恒为 false。
     select distinct report_date, entity_code, is_intracompany from {{ ref('owd_deposits') }}
     union select distinct report_date, entity_code, is_intracompany from {{ ref('owd_loans') }}
     union select distinct report_date, entity_code, is_intracompany from {{ ref('owd_secured_financing') }}
     union select distinct report_date, entity_code, is_intracompany from {{ ref('owd_securities') }}
     union select distinct report_date, entity_code, is_intracompany from {{ ref('owd_derivatives') }}
     union select distinct report_date, entity_code, is_intracompany from {{ ref('owd_off_bs') }}
-    -- cash 与 cashflow 的行也作为 is_intracompany = false 的键
+    -- 两张汇总表并入实体键：ows_cash_position 没有 is_intracompany 列，恒按 false；
+    -- ows_cashflow_projection 有该列（它自己按该列分组），并入键集合时同样取 false，
+    -- 集团内往来的组合由上面六张业务表覆盖，这里只保证实体与报告日的组合不漏。
     union select distinct report_date, entity_code, cast(false as boolean) as is_intracompany from {{ ref('ows_cash_position') }}
     union select distinct report_date, entity_code, cast(false as boolean) as is_intracompany from {{ ref('ows_cashflow_projection') }}
 

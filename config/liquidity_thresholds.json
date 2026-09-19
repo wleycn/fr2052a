@@ -1,5 +1,5 @@
 {
-  "_comment": "流动性预警与报送熔断的唯一阈值声明。liquidity_monitor.py（判定）与 check_submission_gate.py（放行）都读这一份，避免两处各写一套数。",
+  "_comment": "流动性预警与报送熔断的唯一阈值声明。liquidity_monitor.py（判定）与 check_submission_gate.py（放行）都读这一份，避免两处各写一套数。l2_cap_ratio_max 的基数是扣除二级上限后的 HQLA，等价于「二级认列额 ≤ 一级资产 × 2/3」。",
   "lcr": {
     "regulatory_min": 1.0,
     "internal_warning_min": 1.1,

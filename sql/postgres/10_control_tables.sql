@@ -12,7 +12,7 @@
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ads.ads_liquidity_metrics (
     report_date DATE NOT NULL,                       -- 报告日
-    entity_code TEXT NOT NULL,                       -- 法人实体编码，ENT001 为集团合并口径
+    entity_code TEXT NOT NULL,                       -- 法人实体编码；单体为 ENT001 至 ENT005，集团合并行用保留码 GRP001
     is_consolidated BOOLEAN NOT NULL DEFAULT FALSE,  -- 是否合并口径
     hqla_l1_unencumbered_usd NUMERIC(20, 2),         -- 未质押一级资产市值
     hqla_l2a_unencumbered_usd NUMERIC(20, 2),        -- 未质押二级 A 类资产市值

@@ -3,8 +3,8 @@ version: 2
 models:
   - name: ads_fr2052a_report
     description: >
-      FR 2052a 报送报表：按 Section A–K 装配行项目金额。每个法人实体一行
-      （is_consolidated = false），外加一行集团合并口径（ENT001，is_consolidated = true）。
+      FR 2052a 报送报表：按 Section A–K 装配行项目金额。每个法人主体一行
+      （is_consolidated = false），外加一行集团合并口径（GRP001，is_consolidated = true）。
     meta:
       owner: Treasury Liquidity Team
       regulatory_reference: FR 2052a Instructions
@@ -26,7 +26,7 @@ models:
           rule_id: FR2052A-GEN-00
 
       - name: entity_code
-        description: 法人实体编码，ENT001 为集团合并口径
+        description: 法人实体编码；单体为 ENT001 至 ENT005，集团合并行用保留码 GRP001
         tests:
           - not_null
         meta:

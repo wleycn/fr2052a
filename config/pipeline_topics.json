@@ -1,5 +1,5 @@
 {
-  "_comment": "Kafka 主题与数据湖落点的唯一声明。建主题脚本、重放生产者、入湖消费者都读这一份，避免三处各写一份名字。",
+  "_comment": "Kafka 主题与数据湖落点的唯一声明。建主题脚本、重放生产者、入湖消费者都读这一份，避免三处各写一份名字。`has_producer` 指该主题有**源系统**生产者、数据落 bronze（因此与 bronze 的 ODS 表对应）；本项目流水线自己产出的输出主题（如 fr2052a_alerts）标 false，不代表没有生产者，它的写入方是 liquidity_monitor.py 与 realtime_scanner.py。",
   "kafka": {
     "bootstrap_servers_internal": "kafka:9092",
     "bootstrap_servers_external": "192.168.17.24:9094",
