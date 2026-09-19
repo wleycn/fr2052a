@@ -110,3 +110,12 @@ git mv todo/20260919-pending-issues.new todo/20260919-pending-issues.doing
 **补充（09-19 当日第三批）**：第 5 条（`requirements/` 归档落点）与第 6 条（监控与 BI 栈）按用户当日裁决收口 —— 需求原件移到 `references/` 并在 AGENTS §9 项目地图与 PROJECT 登记，监控与 BI 明确定为不接并写进偏离表。审计表里用户手写的 5 条备注经确认均已完成，不再追踪。留痕见 `docs/changes/engineering.md` 的 `raw-requirements-archive` 条目。
 
 **补充（09-19 当日第四批）**：三件事按裁决落地 —— ① `check_l2_cap` 扩到逐口径，实体单体行的认列额也有了独立复算且不通过就阻断（核对项 30 → 40）；② `spark_catalog` 名下 9 行旧注册行清掉，删后只剩 `lakehouse` 42 行；③ 审计报告的 80 条全部回填处置结论，最后 8 条滞后项收口。留痕见 `docs/changes/engineering.md` 的 `audit-ledger-closeout` 条目。
+
+**收口（09-19 当日第五批）**：上面「仍未闭环的两件事」现已全部闭环，本单关闭。
+
+1. 报送台账的哈希不一致已修：按裁决重跑 `gate` 与 `submission` 刷新台账，`verify-submission` 从磁盘重算文件哈希后与台账逐条比对通过；3 行退役身份按裁决清理。收口时再查一次库：2026-09-16 的台账是 18 行、6 个报送主体、6 个 `report_id`，与记录一致。证据见 `docs/changes/engineering.md` 的 `submission-ledger-refresh`。
+2. 二级资产认列额不单列列：09-19 已裁决不加列，改为在表契约与模型列注释里写明派生关系，已闭环。
+3. 本单关闭之后的后续工作（不在 13 项之内）：一轮「文档 ↔ 项目」一致性核对与表契约整改，分四批推进 —— 全量核对与第一轮整改、契约规则清单与三处相邻偏差、21 份契约的金额类型断言与司库契约两处、29 份契约的事实与依赖与归因与结构四类、以及收尾的两项裁决落地与同源套话复查。留痕见 `docs/changes/engineering.md` 的 `doc-consistency-remediation-20260919`、`doc-consistency-remediation-20260919-补充`、`table-contract-type-claims`、`table-contract-dependency-claims`、`pg-service-tables-and-empty-type-column`、`upsert-claim-class-sweep` 六条。
+
+关闭判定：`handoff_check.py` 通过（状态 done，退出码 0）；本文件不再有未决项。后续开工请另起一份交接单，不要把新事项追加到这里。
+
