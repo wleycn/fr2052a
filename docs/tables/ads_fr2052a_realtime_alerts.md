@@ -18,7 +18,7 @@
 
 ## 去重方式
 
-按业务键 upsert；按批次累积的表先清本批次再追加，重跑不翻倍。
+只追加，不 upsert。事件流水一行一笔，由 `realtime_scanner.py` 以 Spark JDBC 的追加模式写入。
 
 ## 分区
 

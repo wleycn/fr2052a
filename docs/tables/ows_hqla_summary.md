@@ -64,4 +64,4 @@ Iceberg v2 表，快照保留 7 天或至少 10 个（`python/lakehouse/maintain
 
 ## 质量规则清单
 
-本层**没有独立的校验环节**：全仓 `python/`、`dbt/` 中 0 处引用 `silver.ows*`，`python/validators/run_dq_rules.py` 的 `RULE_TARGETS` 也不含任何 OWS 表。`ref.ref_validation_rules` 里标 `apply_layer = OWS` 的 3 条（`VDQ-010` 汇总等于明细求和、`VDQ-011` 非受限不超总量、`VDQ-012` 质押不超市值）在 `run_dq_rules.py` 归入 `CROSS_TABLE_RULES`，只标注「由核对脚本 `python/lakehouse/verify_gold.py` 覆盖」，而该复算是报表级的（输入取自 `silver.owd_*` 明细与 `gold` 报表）。本表当前无消费者（见「上下游依赖」），也不在任何复算的输入里 —— 它自身的正确性没有任何校验覆盖。
+本层**没有独立的校验环节**：全仓 `python/` 中 0 处引用本表，`dbt/` 中也没有模型引用本表，`python/validators/run_dq_rules.py` 的 `RULE_TARGETS` 也不含任何 OWS 表。`ref.ref_validation_rules` 里标 `apply_layer = OWS` 的 3 条（`VDQ-010` 汇总等于明细求和、`VDQ-011` 非受限不超总量、`VDQ-012` 质押不超市值）在 `run_dq_rules.py` 归入 `CROSS_TABLE_RULES`，只标注「由核对脚本 `python/lakehouse/verify_gold.py` 覆盖」，而该复算是报表级的（输入取自 `silver.owd_*` 明细与 `gold` 报表）。本表当前无消费者（见「上下游依赖」），也不在任何复算的输入里 —— 它自身的正确性没有任何校验覆盖。

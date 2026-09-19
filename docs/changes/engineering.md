@@ -291,4 +291,14 @@
 - 验证：活表列注释用 `DESCRIBE bronze.ods_deposits` 回读确认；§2.4 每行的写入方逐个 `grep` 到脚本行；重排后 `grep -l "| 字段 | 类型 |" docs/tables/*.md` 只剩 PG 侧契约（它们的类型列有值）；`make lint` 全绿；共享门禁通过。
 - 回滚：`git revert` 本条目对应的提交。列注释要退回，用 `ALTER TABLE ... COMMENT` 改回原文；`#dangling-ref-source` 的登记与 §2.4 都是文档内容，删除即可。
 
+## upsert-claim-class-sweep
+
+- 范围：`docs/tables/` 的 6 份 PG 侧契约（`ads_restatement_log`、`ads_fr2052a_report_history`、`ads_fr2052a_realtime_alerts`、`ads_fr2052a_validation_log`、`fr2052a_pii_map`、`audit_access_log`）与 3 份 OWS 契约，共 9 份
+- 变更：改完之后做了一次类级复查，把同一句话在别处的残留一并清掉。
+  - ① **「按业务键 upsert」在 9 份契约里是共有套话**，逐表核写入语句后只有 5 份为真（`ads_liquidity_metrics`、`ads_circuit_breaker`、`ads_fr2052a_alerts`、`ads_fr2052a_submission`、`audit_data_lineage` 的代码里确有 `ON CONFLICT ... DO UPDATE`）。改掉 5 处：`ads_restatement_log`、`ads_fr2052a_report_history`、`ads_fr2052a_realtime_alerts` 都是只追加（`restate.py` 与 `realtime_scanner.py` 只做 INSERT，后者走 Spark JDBC 追加模式）；`fr2052a_pii_map` 是幂等插入（`ON CONFLICT ... DO NOTHING`，冲突忽略、不覆盖已有映射）；`ads_fr2052a_validation_log` 是按批次先清后写（`clear_dq_batch.py` 清该批次旧行后追加）；`audit_access_log` 改为「不适用，当前无写入方」。
+  - ② **OWS 三份把「本表无消费者」写成了对整族的断言**（`ows_collateral_summary`、`ows_funding_summary`、`ows_hqla_summary` 写「全仓 `python/`、`dbt/` 中 0 处引用 `silver.ows*`」），而族里另两张表被 `ads_fr2052a_report.sql` 引用。改成「本表」为主体，结论（本表无消费者、无校验覆盖）不变。
+- 验证：逐表回读写入语句（`liquidity_monitor.py`、`restate.py`、`generate_submission.py`、`render_lineage.py`、`build_pii_vault.py`、`realtime_scanner.py`、`run_dq_rules.py` 与 `clear_dq_batch.py`）；改后 `grep -rl "按业务键 upsert" docs/tables/` 只剩代码确为 upsert 的 5 份；日批整链实跑 **19 个环节全绿**（批次 `BATCH-20260916-001`）；`make lint` 全绿；共享门禁通过。
+- 回滚：`git revert` 本条目对应的提交。纯文档改动，无数据面与产物影响。
+
+
 

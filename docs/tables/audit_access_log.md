@@ -18,7 +18,7 @@
 
 ## 去重方式
 
-按业务键 upsert；按批次累积的表先清本批次再追加，重跑不翻倍。
+不适用：本表当前没有写入方（见 `docs/business/KNOWN-ISSUE.md` 的 `#audit-access-log-no-writer`），表恒为空。
 
 ## 分区
 

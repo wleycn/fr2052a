@@ -18,7 +18,7 @@
 
 ## 去重方式
 
-按业务键 upsert；按批次累积的表先清本批次再追加，重跑不翻倍。
+幂等插入，不覆盖。`build_pii_vault.py` 用 `INSERT ... ON CONFLICT (pii_token, source_object, pii_column) DO NOTHING`，同一 token 与来源重复出现时忽略，重跑不翻倍，已有映射也不会被改写。
 
 ## 分区
 
