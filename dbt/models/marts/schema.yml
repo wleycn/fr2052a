@@ -82,7 +82,8 @@ models:
 
       - name: sec_g_hqla_capped_total_usd
         description: >
-          HQLA 认列总额 = 一级全额 + 二级资产（2A+2B）按 40% 上限截断后的部分。
+          HQLA 认列总额 = 一级全额 + 二级资产（2A+2B）按上限截断后的部分。
+          上限 = 一级资产 × 2/3，即 Basel LCR30「不得超过扣除后 HQLA 的 40%」的等价式。
           截断是监管计算，不是数据清洗，故结果独立成列而不是覆盖原始市值。
         meta:
           regulatory_reference: FR 2052a Instructions Page 45
