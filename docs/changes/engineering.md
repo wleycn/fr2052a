@@ -171,3 +171,12 @@
 - 验证：`compileall` 退出 0；`make lint` 全绿（40 个文件）；`git diff --numstat` 显示这 31 个文件 **31 增、0 删**，是纯增行；出处闸在 agent 模式下对 32 个暂存文件判「门禁通过」；按同一判据复算，缺头注文件为 0。
 - 备注（三处已知边界）：① 4 个生成器文件（`config.py`、`ref_data.py`、`ods_data.py`、`generate_sample_data.py`）的头注写在模块 docstring 的末行，不是顶部注释；它们在闸的 20 行扫描窗口内，判据接受，但形态与其余文件不同，本次未动。② 闸的 `SRC_SUFFIX` 只含 `.py/.js/.ts/.vue/.java`，不含 `.sh`；本次给 14 个 `.sh` 补头注是按规则文本里的「代码文件」做的，闸暂不覆盖它们。③ 上游模板（`project-doc-system` 的 AGENTS 核心模板与 CODING-STANDARD，中英两层）已同步改好并下发 5 个 profile；`demo-gx` 的英文层规范文件同步更新，否则它的分层自检会报「项目与上游装配不一致」。
 - 回滚：`git revert` 本次提交，回滚即删行。
+
+## pre-commit-gate-adoption
+
+- 范围：`.githooks/pre-commit`、`AGENTS.md` 第 5 节、`docs/business/KNOWN-ISSUE.md`；共享闸真身在另仓 `ng/tools/pre_commit_gate.py`（提交 `2f67f1d`）。
+- 变更：把共享门禁接进本仓库的提交闸。原来钩子只跑 `make lint`，AGENTS 里两处「机器门禁会…」的声明没有实现（头注缺失告警、悬空引用检查）。接上之后这些项落地：出处头注缺失、AGENTS 项目地图的悬空路径与锚点、凭据与禁入文件、大文件、行尾卫生、写作卫生、注释卫生、提交信息非空。
+- 两处适配：① 本仓库用 `core.hooksPath=.githooks`，模板的 `install.sh` 写 `.git/hooks/` 会被 git 忽略，所以把模板的 `pre-commit.sh` 合成进 `.githooks/pre-commit`；② 闸真身住 ng 仓，缺失时退化为只跑 lint 并出声，免得在没装 ng 的机器上谁都提交不了。
+- 同源的共享闸也补了一处：`[AI]` 提交标记那条判据 09-18 已撤销，闸却还在查，agent 会话不带标记会被拦。本次连同上游 8 个素材文件（AGENTS 核心模板中英两份、python `CODING-STANDARD` 中英两份、三个项目类型片段、示例素材）与闸的探针一起改完，重新下发 5 个 profile；`demo-gx` 的英文规范同步（否则它的分层自检报不一致，提交 `9ae2e7a`）。
+- 验证：闸的探针 10/10，含「agent 会话不带 `[AI]` 必须放行」的新反向探针；`make lint` 全绿；本仓库一条真实提交在装闸后通过两道闸入库（提交信息不带标记）；行尾卫生项读全仓受控文件字节，零告警。
+- 回滚：`git revert` 本次提交；共享闸侧回滚 `ng` 仓的 `2f67f1d`。

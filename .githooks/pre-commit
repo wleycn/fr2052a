@@ -1,11 +1,16 @@
 #!/usr/bin/env sh
-# 提交前闸：lint 不过就不让提交。
+# [AI-GENERATED] model=deepseek-flash date=2026-09-19 reviewed_by=pending
+# 提交前闸：两道 —— 本仓库的 lint，加共享门禁（凭据 / 禁入文件 / 大文件 / 行尾卫生 /
+# 写作卫生 / 注释卫生 / AGENTS 完整性 / 出处头注）。
 #
 # 启用（每个克隆各做一次）：git config core.hooksPath .githooks
 # 确知后果时跳过：git commit --no-verify
 #
 # 放在版本库里而不是 .git/hooks/，是为了让闸跟代码一起走：新克隆只要执行上面那条
 # 命令就能拿到同一套规则，不依赖口头约定。
+#
+# 共享门禁真身住 ng 仓（`PRE_COMMIT_GATE` 可覆盖路径）。真身缺失时只跑 lint 并出声，
+# 不拦死 —— 免得在没装 ng 的机器上谁都提交不了。
 set -e
 
 if ! make -s lint; then
@@ -13,3 +18,12 @@ if ! make -s lint; then
     echo "提交被拦下：上面的 lint 结果要先修掉（可自动修的先跑 make lint-fix）。"
     exit 1
 fi
+
+GATE="${PRE_COMMIT_GATE:-$HOME/workspace/ng/tools/pre_commit_gate.py}"
+ROOT="$(git rev-parse --show-toplevel)"
+
+if [ -f "$GATE" ]; then
+    exec python3 "$GATE" --repo "$ROOT" "$@"
+fi
+
+echo "[gate] 未找到共享门禁真身: $GATE —— 本次只跑了 lint" >&2
