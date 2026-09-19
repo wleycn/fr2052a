@@ -46,7 +46,11 @@ dbt `table` 物化，每次运行整表重建：先建后换，不留半成品�
 
 ## 金额单位约定
 
-USD，`DECIMAL(18,2)`。折算通过 join `stg_fx_rates`（键为 `currency_code` 且 `rate_date = report_date`）完成，把三个原币金额列折成 USD。
+USD。金额列一律为 `decimal` 类型，小数位固定 2 位；整数位精度由 Spark 按源类型推断。本表不保留原币列与汇率列，只存折美元后的金额。
+
+折算通过 join `stg_fx_rates` 完成，连接键是 `currency_code` 与 `rate_date = report_date`。参与折算的是上游 `bronze.ods_treasury_cash_position` 的三个原币金额列：`balance_amount`、`in_transit_deposits_amount`、`outstanding_checks_amount`。
+
+三列各自的折算结果落在本表的 `balance_usd`、`in_transit_deposits_usd`、`outstanding_checks_usd`，算法是乘 `spot_rate` 后四舍五入到 2 位小数。核对折算须回到上游读原币金额。
 
 ## PII 字段与脱敏方式
 

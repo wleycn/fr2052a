@@ -60,7 +60,7 @@ dbt `table` 物化，每次运行整表重建：先建后换，不留半成品�
 
 ## 金额单位约定
 
-USD，`DECIMAL(18,2)`。保留 `*_lc` 原币列与 `exchange_rate` 用于核对折算。
+USD。金额列一律为 `decimal` 类型，小数位固定 2 位；整数位精度由 Spark 按源类型推断。保留 `*_lc` 原币列与 `exchange_rate` 用于核对折算。
 
 ## PII 字段与脱敏方式
 

@@ -62,7 +62,7 @@ dbt `table` 物化，每次运行整表重建：先建后换，不留半成品�
 
 ## 金额单位约定
 
-USD，`DECIMAL(18,2)`。本表没有 `*_lc` 原币列，也没有汇率列：`facility_amount_usd`、`outstanding_usd`、`undrawn_usd` 都由 `currency_code` 对应汇率折成 USD，汇率只在折算时使用。
+USD。金额列一律为 `decimal` 类型，小数位固定 2 位；整数位精度由 Spark 按源类型推断。本表没有 `*_lc` 原币列，也没有汇率列：`facility_amount_usd`、`outstanding_usd`、`undrawn_usd` 都由 `currency_code` 对应汇率折成 USD，汇率只在折算时使用。
 
 ## PII 字段与脱敏方式
 

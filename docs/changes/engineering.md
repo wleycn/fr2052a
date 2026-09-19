@@ -258,3 +258,14 @@
 - 变更：主批之外又核出两类偏差，一并修掉。① **规则清单张冠李戴**：OWD 契约的「质量规则清单」是把一张表的规则抄到另一张表上，7 份出现了本表不存在的规则（总账挂着利率与回购抵押品验收、存款挂着授信验收），8 份都挂着 `VDQ-020`（它只落 `ref.ref_counterparty`）。按 `run_dq_rules.py` 的 `RULE_TARGETS` 逐表重算，改写 8 份：存款 4 条、贷款 4 条、证券与衍生品与表外各 2 条、担保融资 3 条、总账与司库现金头寸各 1 条，并写明跨表规则由核对脚本覆盖、`VDQ-017` 至 `VDQ-021` 不落本表。② **三处相邻偏差**：`ows_cashflow_projection.md` 的上游写成 `owd_off_bs`（模型从不读它）且漏了 `owd_secured_financing` 与 `owd_securities`，改成模型真实的 4 张上游；`audit_data_lineage.md` 称列级映射来自 `ref.ref_regulatory_mapping`，而 `render_lineage.py` 实际从 dbt manifest 的列级 meta 读（`rule_id`、`regulatory_reference`、`haircut_rate`、`owner`），改成如实描述；`dbt/models/staging/schema.yml` 的头部注释把 `pii_source` 说成「bronze 层」，改成落地层的 ODS 表并给出取值形态。
 - 验证：独立脚本按 `RULE_TARGETS` 展开真值后与 8 份契约的规则编号求差集，逐表一致（脚本对 8 份报出的 `VDQ-009` 至 `VDQ-015`、`VDQ-017` 至 `VDQ-021` 是「文中明确写了不落本表」的引用，不是新的张冠李戴）；ODS 契约同时复核，8 份写 `VDQ-001`、`VDQ-002`、`VDQ-016`（证券表另有 `VDQ-021`）与实现一致 —— `VDQ-001` 由引擎在 `ALL_BRONZE` 上单独执行，属正确列举；`make lint` 全绿；共享门禁通过；app 树同步到 Server 2。
 - 回滚：`git revert` 本条目对应的提交。文档与 schema.yml 注释改动无数据面影响；`schema.yml` 的注释变更不参与 dbt 解析，不影响模型产物。
+
+## table-contract-type-claims
+
+- 范围：`docs/tables/` 的 21 份契约（16 份 OWD，含 8 份历史表；5 份 OWS）
+- 变更：三处。
+  - ① **金额类型断言与实库不符**：21 份的「金额单位约定」原先统一写「USD，`DECIMAL(18,2)`」。到 Server 2 对 16 张 silver 表逐张 `DESCRIBE`，实测金额列一律为 `decimal(...,2)`，整数位精度从 20 位到 38 位不等，没有一张是 18,2（例：`owd_treasury_cash_position` 是 `decimal(32,2)`，`owd_deposits` 是 `decimal(28,2)`，`owd_gl_entries` 是 `decimal(22,2)`）。改成「金额列一律为 `decimal` 类型，小数位固定 2 位；整数位精度由 Spark 按源类型推断」，不再写死一个会被推断结果推翻的具体数值。
+  - ② **司库现金头寸契约里的三列没点名**：「把三个原币金额列折成 USD」中的这三列不在本表字段清单里，它们住在上游 ODS 表。改成点名上游 `bronze.ods_treasury_cash_position` 的 `balance_amount`、`in_transit_deposits_amount`、`outstanding_checks_amount`，写明各自的折算结果落在本表的哪一列、连接键与算法，并补一句本表不保留原币列与汇率列。
+  - ③ **司库现金头寸历史契约的 `row_hash` 排除列写错**：原文称排除 `etl_load_timestamp` 与 `etl_batch_id` 两列，`python/lakehouse/owd_scd2.py` 的 `EXCLUDED_FROM_HASH` 实为三列（多一个 `etl_source_file`），而本层模型既无 `etl_load_timestamp` 也无 `etl_source_file`，对本表实际只有 `etl_batch_id` 一列生效。改成如实描述并指向源码常量。
+- 验证：`grep -rn "DECIMAL(18,2)" docs/ sql/ dbt/` 残留 0；实测类型取自 Server 2 的 `DESCRIBE`（16 张 silver 表 + 3 张 gold 表，gold 三张的金额列同为 `decimal(...,2)`，精度 20 至 38）；`row_hash` 排除清单回读 `owd_scd2.py:89` 与 `TABLE_PROPERTIES` 确认；`make lint` 全绿；共享门禁通过。
+- 回滚：`git revert` 本条目对应的提交。纯文档改动，无数据面与产物影响。
+

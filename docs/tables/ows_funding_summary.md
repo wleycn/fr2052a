@@ -40,7 +40,7 @@ dbt `table` 物化，每次运行整表重建：先建后换，不留半成品�
 
 ## 金额单位约定
 
-USD，`DECIMAL(18,2)`。本层不保留原币列，也没有汇率列：五个 OWS 模型的最终投影里 `*_lc` 与 `exchange_rate` 均为 0 列 —— 折算在 staging 层完成（`dbt/models/staging/owd_deposits.sql` 保留 `principal_amount_lc`、`accrued_interest_lc` 与 `exchange_rate` 供核对），本层所有金额已是 USD。
+USD。金额列一律为 `decimal` 类型，小数位固定 2 位；整数位精度由 Spark 按源类型推断。本层不保留原币列，也没有汇率列：五个 OWS 模型的最终投影里 `*_lc` 与 `exchange_rate` 均为 0 列 —— 折算在 staging 层完成（`dbt/models/staging/owd_deposits.sql` 保留 `principal_amount_lc`、`accrued_interest_lc` 与 `exchange_rate` 供核对），本层所有金额已是 USD。
 
 ## PII 字段与脱敏方式
 

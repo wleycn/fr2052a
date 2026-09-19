@@ -62,7 +62,7 @@ dbt `table` 物化，每次运行整表重建：先建后换，不留半成品�
 
 ## 金额单位约定
 
-USD，`DECIMAL(18,2)`。本表没有 `*_lc` 原币列：名义本金与抵押品按 `currency_code` 的汇率折 USD，盯市价值按 `mtm_currency` 折算，所用币种与汇率已落成 `mtm_currency`、`mtm_exchange_rate` 两列，折算过程可逐行核对。
+USD。金额列一律为 `decimal` 类型，小数位固定 2 位；整数位精度由 Spark 按源类型推断。本表没有 `*_lc` 原币列：名义本金与抵押品按 `currency_code` 的汇率折 USD，盯市价值按 `mtm_currency` 折算，所用币种与汇率已落成 `mtm_currency`、`mtm_exchange_rate` 两列，折算过程可逐行核对。
 
 ## PII 字段与脱敏方式
 

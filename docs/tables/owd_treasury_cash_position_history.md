@@ -52,7 +52,7 @@ Silver（版本历史，Iceberg `silver` 命名空间）
 
 ## 金额单位约定
 
-USD，`DECIMAL(18,2)`。金额列继承自基表，折算在 OWD 层已完成。
+USD。金额列一律为 `decimal` 类型，小数位固定 2 位；整数位精度由 Spark 按源类型推断。金额列继承自基表，折算在 OWD 层已完成。
 
 ## PII 字段与脱敏方式
 
@@ -60,7 +60,7 @@ USD，`DECIMAL(18,2)`。金额列继承自基表，折算在 OWD 层已完成。
 
 ## 生命周期
 
-Iceberg v2 表，`format-version = 2`，快照保留 7 天且至少保留 10 个，元数据文件随提交清理（`python/lakehouse/maintain_tables.py`）。小文件合并走 `rewrite_data_files`。不设额外数据保留期：整表重建即最新状态，历史由版本历史表或审计表承担。版本区间按处理时间推进（`--effective-date`，日批取报告日次日），不按报告日；`end_date` 为空 ⇔ 当前有效版本；`is_active` 是 `end_date` 的冗余列，两者必须一致。`row_hash` 参与变更比较的列 = 除 `etl_load_timestamp`、`etl_batch_id` 之外的全部列（按当前实现）。一次性重建脚本：`sql/iceberg/oneoff/06_rebuild_owd_history.sql`（内含本表的 DROP 语句；一次性脚本，常规跑批路径不得引用）。
+Iceberg v2 表，`format-version = 2`，快照保留 7 天且至少保留 10 个，元数据文件随提交清理（`python/lakehouse/maintain_tables.py`）。小文件合并走 `rewrite_data_files`。不设额外数据保留期：整表重建即最新状态，历史由版本历史表或审计表承担。版本区间按处理时间推进（`--effective-date`，日批取报告日次日），不按报告日；`end_date` 为空 ⇔ 当前有效版本；`is_active` 是 `end_date` 的冗余列，两者必须一致。`row_hash` 参与变更比较的列 = 除 `etl_batch_id` 外的全部列（按当前实现）。哈希的排除清单见 `python/lakehouse/owd_scd2.py` 的 `EXCLUDED_FROM_HASH`：其中 `etl_load_timestamp` 与 `etl_source_file` 本层模型不含，对本表不生效。一次性重建脚本：`sql/iceberg/oneoff/06_rebuild_owd_history.sql`（内含本表的 DROP 语句；一次性脚本，常规跑批路径不得引用）。
 
 ## 新鲜度 SLA 与 owner
 

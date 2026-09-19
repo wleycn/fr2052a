@@ -65,7 +65,7 @@ dbt `table` 物化，每次运行整表重建：先建后换，不留半成品�
 
 ## 金额单位约定
 
-USD，`DECIMAL(18,2)`。保留 `cash_amount_lc` 与 `collateral_mv_lc` 两个原币列用于核对折算；汇率不落列，折算结果即 `cash_amount_usd` 与 `collateral_mv_usd`。
+USD。金额列一律为 `decimal` 类型，小数位固定 2 位；整数位精度由 Spark 按源类型推断。保留 `cash_amount_lc` 与 `collateral_mv_lc` 两个原币列用于核对折算；汇率不落列，折算结果即 `cash_amount_usd` 与 `collateral_mv_usd`。
 
 ## PII 字段与脱敏方式
 
