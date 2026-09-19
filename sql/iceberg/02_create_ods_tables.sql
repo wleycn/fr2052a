@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS bronze.ods_deposits (
     open_date DATE COMMENT '开户日期',
     maturity_date DATE COMMENT '到期日期，活期为空',
     branch_code STRING COMMENT '机构代码',
-    customer_type_raw STRING COMMENT '客户类型原始值：IND/CORP/GOV/FI',
+    customer_type_raw STRING COMMENT '客户类型原始值：IND/CORP/GOV/FI；集团内配对腿为 AFFIL',
     insured_flag STRING COMMENT '是否受保存款 Y/N',
     event_time TIMESTAMP COMMENT '源系统事件时间',
     etl_batch_id STRING COMMENT 'ETL 批次号',

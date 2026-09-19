@@ -28,46 +28,46 @@ Silver（版本历史，Iceberg `silver` 命名空间）
 
 ## 字段清单
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `source_system` |  |  |
-| `source_record_id` |  |  |
-| `report_date` |  |  |
-| `entity_code` |  |  |
-| `financing_id` |  |  |
-| `counterparty_id` |  |  |
-| `counterparty_name` |  |  |
-| `counterparty_type` |  |  |
-| `counterparty_country` |  |  |
-| `transaction_type` |  |  |
-| `currency_code` |  |  |
-| `cash_amount_lc` |  |  |
-| `cash_amount_usd` |  |  |
-| `collateral_mv_lc` |  |  |
-| `collateral_mv_usd` |  |  |
-| `haircut_pct` |  |  |
-| `net_exposure_usd` |  |  |
-| `interest_rate` |  |  |
-| `collateral_isin` |  |  |
-| `collateral_type` |  |  |
-| `collateral_hqla_level` |  |  |
-| `deal_start_date` |  |  |
-| `deal_end_date` |  |  |
-| `days_to_maturity` |  |  |
-| `maturity_bucket` |  |  |
-| `is_open_ended` |  |  |
-| `is_intracompany` | BOOLEAN | 集团内往来标记：交易对手类型为 `AFFILIATE` 时 true，其余（含 NULL）为 false，由 `is_affiliate_counterparty` 宏判定。 |
-| `master_agreement_type` |  |  |
-| `netting_agreement_id` |  |  |
-| `is_nettable` |  |  |
-| `event_time` |  |  |
-| `etl_batch_id` |  |  |
-| `begin_date` |  | 版本列 |
-| `end_date` |  | 版本列 |
-| `is_active` |  | 版本列 |
-| `last_modified_reason` |  | 版本列 |
-| `record_version` |  | 版本列 |
-| `row_hash` |  | 版本列 |
+| 字段 | 说明 |
+| --- | --- |
+| `source_system` |  |
+| `source_record_id` |  |
+| `report_date` |  |
+| `entity_code` |  |
+| `financing_id` |  |
+| `counterparty_id` |  |
+| `counterparty_name` |  |
+| `counterparty_type` |  |
+| `counterparty_country` |  |
+| `transaction_type` |  |
+| `currency_code` |  |
+| `cash_amount_lc` |  |
+| `cash_amount_usd` |  |
+| `collateral_mv_lc` |  |
+| `collateral_mv_usd` |  |
+| `haircut_pct` |  |
+| `net_exposure_usd` |  |
+| `interest_rate` |  |
+| `collateral_isin` |  |
+| `collateral_type` |  |
+| `collateral_hqla_level` |  |
+| `deal_start_date` |  |
+| `deal_end_date` |  |
+| `days_to_maturity` |  |
+| `maturity_bucket` |  |
+| `is_open_ended` |  |
+| `is_intracompany` | 集团内往来标记：交易对手类型为 `AFFILIATE` 时 true，其余（含 NULL）为 false，由 `is_affiliate_counterparty` 宏判定。 |
+| `master_agreement_type` |  |
+| `netting_agreement_id` |  |
+| `is_nettable` |  |
+| `event_time` |  |
+| `etl_batch_id` |  |
+| `begin_date` | 版本列 |
+| `end_date` | 版本列 |
+| `is_active` | 版本列 |
+| `last_modified_reason` | 版本列 |
+| `record_version` | 版本列 |
+| `row_hash` | 版本列 |
 
 ## 金额单位约定
 

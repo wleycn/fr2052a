@@ -169,3 +169,4 @@ Airflow 里的 DAG 默认**暂停**：`fr2052a_daily_batch`、`fr2052a_backfill_
 - `#monitoring-stack-scope` — 监控接 Prometheus 与 Grafana，指标来自巡检脚本，不推送
 - `#audit-access-log-no-writer` — 读取审计表当前没有写入方
 - `#read-audit-gap` — 读取级留痕未部署（pgaudit / 语句日志）
+- `#dangling-ref-source` — `ref_regulatory_mapping` 声明为数据源但全仓无读取方

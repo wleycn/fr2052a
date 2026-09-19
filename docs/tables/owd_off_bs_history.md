@@ -28,32 +28,32 @@ Silver（版本历史，Iceberg `silver` 命名空间）
 
 ## 字段清单
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `source_system` |  |  |
-| `source_record_id` |  |  |
-| `report_date` |  |  |
-| `entity_code` |  |  |
-| `commitment_id` |  |  |
-| `counterparty_id` |  |  |
-| `counterparty_name` |  |  |
-| `counterparty_type` |  |  |
-| `commitment_type` |  |  |
-| `facility_amount_usd` |  |  |
-| `undrawn_amount_usd` |  |  |
-| `currency_code` |  |  |
-| `maturity_date` |  |  |
-| `days_to_maturity` |  |  |
-| `maturity_bucket` |  |  |
-| `is_intracompany` | BOOLEAN | 集团内往来标记：交易对手类型为 `AFFILIATE` 时 true，其余（含 NULL）为 false，由 `is_affiliate_counterparty` 宏判定。 |
-| `event_time` |  |  |
-| `etl_batch_id` |  |  |
-| `begin_date` |  | 版本列 |
-| `end_date` |  | 版本列 |
-| `is_active` |  | 版本列 |
-| `last_modified_reason` |  | 版本列 |
-| `record_version` |  | 版本列 |
-| `row_hash` |  | 版本列 |
+| 字段 | 说明 |
+| --- | --- |
+| `source_system` |  |
+| `source_record_id` |  |
+| `report_date` |  |
+| `entity_code` |  |
+| `commitment_id` |  |
+| `counterparty_id` |  |
+| `counterparty_name` |  |
+| `counterparty_type` |  |
+| `commitment_type` |  |
+| `facility_amount_usd` |  |
+| `undrawn_amount_usd` |  |
+| `currency_code` |  |
+| `maturity_date` |  |
+| `days_to_maturity` |  |
+| `maturity_bucket` |  |
+| `is_intracompany` | 集团内往来标记：交易对手类型为 `AFFILIATE` 时 true，其余（含 NULL）为 false，由 `is_affiliate_counterparty` 宏判定。 |
+| `event_time` |  |
+| `etl_batch_id` |  |
+| `begin_date` | 版本列 |
+| `end_date` | 版本列 |
+| `is_active` | 版本列 |
+| `last_modified_reason` | 版本列 |
+| `record_version` | 版本列 |
+| `row_hash` | 版本列 |
 
 ## 金额单位约定
 

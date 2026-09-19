@@ -28,26 +28,26 @@ Silver（版本历史，Iceberg `silver` 命名空间）
 
 ## 字段清单
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `source_system` |  |  |
-| `source_record_id` |  |  |
-| `report_date` |  |  |
-| `entity_code` |  |  |
-| `gl_account_id` |  |  |
-| `account_name` |  |  |
-| `debit_balance` |  |  |
-| `credit_balance` |  |  |
-| `currency_code` |  |  |
-| `net_balance_usd` |  |  |
-| `balance_side` |  |  |
-| `etl_batch_id` |  |  |
-| `begin_date` |  | 版本列 |
-| `end_date` |  | 版本列 |
-| `is_active` |  | 版本列 |
-| `last_modified_reason` |  | 版本列 |
-| `record_version` |  | 版本列 |
-| `row_hash` |  | 版本列 |
+| 字段 | 说明 |
+| --- | --- |
+| `source_system` |  |
+| `source_record_id` |  |
+| `report_date` |  |
+| `entity_code` |  |
+| `gl_account_id` |  |
+| `account_name` |  |
+| `debit_balance` |  |
+| `credit_balance` |  |
+| `currency_code` |  |
+| `net_balance_usd` |  |
+| `balance_side` |  |
+| `etl_batch_id` |  |
+| `begin_date` | 版本列 |
+| `end_date` | 版本列 |
+| `is_active` | 版本列 |
+| `last_modified_reason` | 版本列 |
+| `record_version` | 版本列 |
+| `row_hash` | 版本列 |
 
 ## 金额单位约定
 

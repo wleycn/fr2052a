@@ -280,4 +280,15 @@
 - 验证：改动脚本先断言每处命中唯一再落盘（36 处一次通过）；对手方构成用 Spark 查 `bronze.ods_*` 与 `ref.ref_counterparty` 关联后的分组计数；上游真值用 dbt 语法抽取模型 `ref` 后与契约逐项求差；写入方与环节序列读 `deploy/server2/run-daily-pipeline.sh` 的 `STEPS` 数组与四个 DAG 的文档串；`airflow.dag` 的暂停状态实查；`make lint` 全绿；共享门禁通过。
 - 回滚：`git revert` 本条目对应的提交。纯文档改动，无数据面与产物影响。
 
+## pg-service-tables-and-empty-type-column
+
+- 范围：`docs/tables/` 的 8 份 OWD 历史契约、`docs/business/DATA-DESIGN.md`、`docs/business/KNOWN-ISSUE.md`、`docs/business/PROJECT.md`、`sql/iceberg/02_create_ods_tables.sql`
+- 变更：四项拍板之后的落地。
+  - ① 8 份 OWD 历史契约的字段清单去掉空的「类型」列（99 至 114 个格子全空）。类型由 Spark 按源类型推断，写进文档就是给漂移留口子 —— 本轮 21 份契约写死 `DECIMAL(18,2)` 的错就出在这个思路上。保留「说明」列，承载 6 个版本列的标注与 4 条列语义说明。PG 侧契约的类型列不动：它们来自 DDL，是声明式的。
+  - ② `ods_deposits` 的 `customer_type_raw` 列注释补上 `AFFIL`，DDL 与活表同步：先改 `sql/iceberg/02_create_ods_tables.sql`，再对活表执行 `ALTER TABLE bronze.ods_deposits ALTER COLUMN customer_type_raw COMMENT ...`，回读 `DESCRIBE` 确认生效。
+  - ③ `ref.ref_regulatory_mapping` 在 `dbt/models/sources.yml` 里声明为数据源却没有读取方（预警阈值实际来自 `config/liquidity_thresholds.json`），登记为 `#dangling-ref-source`，按坑表纪律在 `PROJECT.md` 补索引行。
+  - ④ `DATA-DESIGN.md` 新增 §2.4「PG 侧服务表」：13 张服务表逐张给出写入方、写入时机与数据来源，解决「这些表不在 dbt 模型图里、上下游只能读代码」的问题。同时更正 §2.3 里「控制与审计（PG）」那行的「按业务键 upsert」—— 与契约里的同一处假断言同源（`audit_change_log` 实为只追加）。
+- 验证：活表列注释用 `DESCRIBE bronze.ods_deposits` 回读确认；§2.4 每行的写入方逐个 `grep` 到脚本行；重排后 `grep -l "| 字段 | 类型 |" docs/tables/*.md` 只剩 PG 侧契约（它们的类型列有值）；`make lint` 全绿；共享门禁通过。
+- 回滚：`git revert` 本条目对应的提交。列注释要退回，用 `ALTER TABLE ... COMMENT` 改回原文；`#dangling-ref-source` 的登记与 §2.4 都是文档内容，删除即可。
+
 

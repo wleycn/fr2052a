@@ -216,7 +216,32 @@ CREATE TABLE ads.ads_fr2052a_alerts (
 | Silver 版本历史 | `owd_scd2.py` | 重述登记与审计 | 全表重算，同一主键的版本号连续 |
 | Gold（Iceberg） | dbt marts 模型 | 导出作业 | 整表重建 |
 | ADS（PG） | `export_gold_to_pg.py` | 报送、预警、对账 | 先清后写，写时开 `truncate=true` 以保留表上的授权与触发器 |
-| 控制与审计（PG） | 各环节脚本 | 放行闸、巡检、审计 | 按业务键 upsert；按批次累积的表先清本批次再追加 |
+| 控制与审计（PG） | 见 §2.4 与各表契约 | 放行闸、巡检、审计 | 逐表不同：`audit.audit_change_log` 只追加（唯一写入方是 PII 对照表的变更触发器），没有 upsert；按批次累积的表先清本批次再追加；`audit.audit_access_log` 当前无写入方 |
+
+### 2.4 PG 侧服务表
+
+湖仓四层（Ref / Bronze / Silver / Gold）之外，服务层另有 13 张 PostgreSQL 表。它们不在 dbt 的模型图里，
+上游与写入方只能从代码读出，因此在这里集中列一次。
+
+| 表 | 写入方 | 写入时机 | 数据来源 |
+|----|--------|----------|----------|
+| `ads.ads_fr2052a_report` | `export_gold_to_pg.py` | 日批 `export-pg` 环节 | `gold.ads_fr2052a_report` |
+| `ads.ads_fr2052a_detail` | `export_gold_to_pg.py` | 日批 `export-pg` 环节 | `gold.ads_fr2052a_detail` |
+| `ads.ads_gl_reconciliation` | `export_gold_to_pg.py` | 日批 `export-pg` 环节 | `gold.ads_gl_reconciliation` |
+| `ads.ads_fr2052a_validation_log` | `run_dq_rules.py` | 日批 `dq-rules` 环节 | 规则引擎逐条判定结果 |
+| `ads.ads_pipeline_run_context` | `run_context.py` | 日批 `run-context-open` 与 `run-context-close` | 批次元数据 |
+| `ads.ads_liquidity_metrics` | `liquidity_monitor.py` | 日批 `liquidity-monitor` 环节 | 报表、对账差异、校验日志 |
+| `ads.ads_fr2052a_alerts` | `liquidity_monitor.py` | 日批 `liquidity-monitor` 环节 | 指标判定（同一规则重复命中只累加次数） |
+| `ads.ads_circuit_breaker` | `liquidity_monitor.py` | 日批 `liquidity-monitor` 环节 | 指标判定（GLOBAL 熔断状态） |
+| `ads.ads_fr2052a_submission` | `generate_submission.py` | `fr2052a_submission` DAG 的 `submission` | 报表 |
+| `ads.ads_fr2052a_submission_audit` | `generate_submission.py` | `fr2052a_submission` DAG 的 `submission` | 报送回执 |
+| `ads.ads_fr2052a_report_history` | `restate.py` | `fr2052a_backfill_and_restate` DAG 的 `restate-capture` | 重述前的报文 |
+| `ads.ads_restatement_log` | `restate.py` | `fr2052a_backfill_and_restate` DAG 的 `restate-capture` | 重述登记 |
+| `ads.ads_fr2052a_realtime_alerts` | `realtime_scanner.py` | `fr2052a_realtime_alert` DAG 的 `realtime-scan` | 核心存款主题（Spark JDBC 追加写） |
+
+后四行的写入环节都不在 `fr2052a_daily_batch` 的 19 环节序列里，各 DAG 与周期见
+[CRON-DESIGN.md](../CRON-DESIGN.md)。`audit` 三张表与 `secure.fr2052a_pii_map` 的写入方见各自契约。
+
 
 ## §3 业务规则
 

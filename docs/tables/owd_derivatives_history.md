@@ -28,43 +28,43 @@ Silver（版本历史，Iceberg `silver` 命名空间）
 
 ## 字段清单
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `source_system` |  |  |
-| `source_record_id` |  |  |
-| `report_date` |  |  |
-| `entity_code` |  |  |
-| `derivative_id` |  |  |
-| `counterparty_id` |  |  |
-| `counterparty_type` |  |  |
-| `counterparty_country` |  |  |
-| `instrument_type` |  |  |
-| `product_class` |  |  |
-| `notional_usd` |  |  |
-| `currency_code` |  |  |
-| `currency_pair` |  |  |
-| `trade_date` |  |  |
-| `maturity_date` |  |  |
-| `days_to_maturity` |  |  |
-| `maturity_bucket` |  |  |
-| `is_intracompany` | BOOLEAN | 集团内往来标记：交易对手类型为 `AFFILIATE` 时 true，其余（含 NULL）为 false，由 `is_affiliate_counterparty` 宏判定。 |
-| `mtm_value_usd` |  |  |
-| `mtm_currency` | STRING | 盯市价值币种（ODS 声明）；盯市折算所用汇率按此币种取。 |
-| `mtm_exchange_rate` | DECIMAL(18,8) | 折算 `mtm_value_usd` 所用的 `mtm_currency` 对 USD 汇率（`stg_fx_rates.spot_rate`）。 |
-| `is_central_cleared` |  |  |
-| `csa_agreement_id` |  |  |
-| `is_bilateral_netted` |  |  |
-| `collateral_posted_usd` |  |  |
-| `collateral_received_usd` |  |  |
-| `net_exposure_usd` |  |  |
-| `event_time` |  |  |
-| `etl_batch_id` |  |  |
-| `begin_date` |  | 版本列 |
-| `end_date` |  | 版本列 |
-| `is_active` |  | 版本列 |
-| `last_modified_reason` |  | 版本列 |
-| `record_version` |  | 版本列 |
-| `row_hash` |  | 版本列 |
+| 字段 | 说明 |
+| --- | --- |
+| `source_system` |  |
+| `source_record_id` |  |
+| `report_date` |  |
+| `entity_code` |  |
+| `derivative_id` |  |
+| `counterparty_id` |  |
+| `counterparty_type` |  |
+| `counterparty_country` |  |
+| `instrument_type` |  |
+| `product_class` |  |
+| `notional_usd` |  |
+| `currency_code` |  |
+| `currency_pair` |  |
+| `trade_date` |  |
+| `maturity_date` |  |
+| `days_to_maturity` |  |
+| `maturity_bucket` |  |
+| `is_intracompany` | 集团内往来标记：交易对手类型为 `AFFILIATE` 时 true，其余（含 NULL）为 false，由 `is_affiliate_counterparty` 宏判定。 |
+| `mtm_value_usd` |  |
+| `mtm_currency` | 盯市价值币种（ODS 声明）；盯市折算所用汇率按此币种取。 |
+| `mtm_exchange_rate` | 折算 `mtm_value_usd` 所用的 `mtm_currency` 对 USD 汇率（`stg_fx_rates.spot_rate`）。 |
+| `is_central_cleared` |  |
+| `csa_agreement_id` |  |
+| `is_bilateral_netted` |  |
+| `collateral_posted_usd` |  |
+| `collateral_received_usd` |  |
+| `net_exposure_usd` |  |
+| `event_time` |  |
+| `etl_batch_id` |  |
+| `begin_date` | 版本列 |
+| `end_date` | 版本列 |
+| `is_active` | 版本列 |
+| `last_modified_reason` | 版本列 |
+| `record_version` | 版本列 |
+| `row_hash` | 版本列 |
 
 ## 金额单位约定
 

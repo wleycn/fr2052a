@@ -28,41 +28,41 @@ Silver（版本历史，Iceberg `silver` 命名空间）
 
 ## 字段清单
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `source_system` |  |  |
-| `source_record_id` |  |  |
-| `report_date` |  |  |
-| `entity_code` |  |  |
-| `deposit_id` |  |  |
-| `customer_id` |  |  |
-| `customer_segment` |  |  |
-| `customer_type` |  |  |
-| `product_category` |  |  |
-| `deposit_type` |  |  |
-| `currency_code` |  |  |
-| `principal_amount_lc` |  |  |
-| `principal_amount_usd` |  |  |
-| `accrued_interest_lc` |  |  |
-| `accrued_interest_usd` |  |  |
-| `exchange_rate` |  |  |
-| `interest_rate` |  |  |
-| `open_date` |  |  |
-| `maturity_date` |  |  |
-| `days_to_maturity` |  |  |
-| `maturity_bucket` |  |  |
-| `is_insured` |  |  |
-| `insured_amount_usd` |  |  |
-| `branch_code` |  |  |
-| `is_intracompany` | BOOLEAN | 集团内往来标记：交易对手类型为 `AFFILIATE` 时 true，其余（含 NULL）为 false，由 `is_affiliate_counterparty` 宏判定。 |
-| `event_time` |  |  |
-| `etl_batch_id` |  |  |
-| `begin_date` |  | 版本列 |
-| `end_date` |  | 版本列 |
-| `is_active` |  | 版本列 |
-| `last_modified_reason` |  | 版本列 |
-| `record_version` |  | 版本列 |
-| `row_hash` |  | 版本列 |
+| 字段 | 说明 |
+| --- | --- |
+| `source_system` |  |
+| `source_record_id` |  |
+| `report_date` |  |
+| `entity_code` |  |
+| `deposit_id` |  |
+| `customer_id` |  |
+| `customer_segment` |  |
+| `customer_type` |  |
+| `product_category` |  |
+| `deposit_type` |  |
+| `currency_code` |  |
+| `principal_amount_lc` |  |
+| `principal_amount_usd` |  |
+| `accrued_interest_lc` |  |
+| `accrued_interest_usd` |  |
+| `exchange_rate` |  |
+| `interest_rate` |  |
+| `open_date` |  |
+| `maturity_date` |  |
+| `days_to_maturity` |  |
+| `maturity_bucket` |  |
+| `is_insured` |  |
+| `insured_amount_usd` |  |
+| `branch_code` |  |
+| `is_intracompany` | 集团内往来标记：交易对手类型为 `AFFILIATE` 时 true，其余（含 NULL）为 false，由 `is_affiliate_counterparty` 宏判定。 |
+| `event_time` |  |
+| `etl_batch_id` |  |
+| `begin_date` | 版本列 |
+| `end_date` | 版本列 |
+| `is_active` | 版本列 |
+| `last_modified_reason` | 版本列 |
+| `record_version` | 版本列 |
+| `row_hash` | 版本列 |
 
 ## 金额单位约定
 
