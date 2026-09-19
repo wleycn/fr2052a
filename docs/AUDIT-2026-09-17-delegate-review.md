@@ -81,7 +81,7 @@ DAG 只写 `pipeline_command("check-source")`。正负两向都实跑过：正�
 | 18 | 低 | 明细回溯核对把 NULL 与 0 合并，两侧都为 0 时空集也算通过 | ✅ 已修（批次 B1）：删掉 `or 0` 兜底，命中零行、明细合计 NULL、报表侧 NULL 各自显式 FAIL。实测：正常跑 5 个 Section 全部给出真实数字；突变探针把 Section B 的行项目过滤条件写成不存在的值 → FAIL「过滤条件未命中明细表」退 1（旧实现会因 `or 0` 报 PASS） | |
 | 19 | 低 | 巡检用 min(submission_status) 代表整批报送状态，REJECTED 会被 ACCEPTED 掩盖 | ✅ 已修（批次 B1）：改按状态分别计数 + `string_agg`，被拒文件写进巡检 findings。实测 A/B：台账里造 1 行 REJECTED 后，旧口径 `min()` 仍给 ACCEPTED，新口径给 `ACCEPTED/REJECTED` 并报「有 1 个文件回执被拒」；还原后台账回到 15 行 ACCEPTED | |
 | 20 | 低 | bronze 层 DDL 注释与入湖实现不符（etl_load_timestamp 的语义已改成数据时间线） | ✅ 已修（批次 B1）：DDL 注释改为「按报告日 +1 天的 02:00 派生」，DAG 里 publish_access 的说明从 `DROP + CREATE` 改为 `truncate=true` 覆盖写（两处过时口径全仓清零） | |
-| 21 | 低 | 衍生品盯市按交易币种折算，mtm_currency 字段被忽略（两条链路同源同错，无判据可发现） | ⬜ 待你定（证据已核，未动） | |
+| 21 | 低 | 衍生品盯市按交易币种折算，mtm_currency 字段被忽略（两条链路同源同错，无判据可发现） | ✅ 已修（批次 C5，与「二、dbt 与 SQL 口径审查」第 18 条同一缺陷）：dbt 侧 `owd_derivatives` 的汇率 join 改用 ODS 声明的 `mtm_currency`，并把币种与所用汇率输出成列；生成器侧总账倒推改用按币种列折算的 `_amount_usd_by`；历史表补两列走一次性迁移 `sql/iceberg/09_owd_derivatives_history_add_mtm_currency.sql`。样本里 320 行衍生品的交易币种与盯市币种有 146 行不同（多币种交易对折成 USD 盯市），旧口径会把这部分盯市值按交易币种二次折算约 1/0.0067~1/1.08；改后两侧同口径，任一链路单独回退会被 GL 对账 H 项（1500）抓出 | |
 | 22 | 低 | DAG 与文档的链条描述漂移：漏项、缺项、各说一套 | ✅ 已修：docstring 链条补 publish_access / owd_scd2 / verify_rbac / verify_scd2 | |
 
 <details><summary>展开：一、应用代码审查 的逐条证据与建议</summary>
