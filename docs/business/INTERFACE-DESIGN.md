@@ -159,11 +159,11 @@ python producers/replay_ods_to_kafka.py --data-dir <dir> --config <json>
 
 ## 4. Kafka Topic 契约
 
-主题清单的**唯一声明来源**是 `config/pipeline_topics.json`：它含内网与外网地址、分区数、源系统、落点表与生产者标志。建主题脚本、重放生产者与入湖消费者都读这一份。
+主题清单的**唯一声明来源**是 `config/pipeline_topics.json`：它含内网与外网地址、分区数、源系统、目标表与生产者标志。建主题脚本、重放生产者与入湖消费者都读这一份。
 
-载荷的统一约定是「**投递的就是落点表的行**」：`python/producers/replay_ods_to_kafka.py` 用 `to_json(struct(整行列))` 把整行序列化成消息 value，key 取主键；消费者 `python/consumers/kafka_to_iceberg.py` 反序列化后 MERGE 进落点表。因此**每个主题的字段清单不在本节重复**，看落点表契约即可（`docs/tables/{表名}.md`）。
+载荷的统一约定是「**投递的就是目标表的行**」：`python/producers/replay_ods_to_kafka.py` 用 `to_json(struct(整行列))` 把整行序列化成消息 value，key 取主键；消费者 `python/consumers/kafka_to_iceberg.py` 反序列化后 MERGE 进目标表。因此**每个主题的字段清单不在本节重复**，看目标表的契约即可（`docs/tables/{表名}.md`）。
 
-| 主题 | 源系统 | 落点表（字段见该表契约） | 有源系统生产者 |
+| 主题 | 源系统 | 目标表（字段见该表契约） | 有源系统生产者 |
 |------|--------|--------------------------|----------------|
 | `core_banking_txns` | `CORE_BANKING` | `bronze.ods_deposits` | 是 |
 | `loan_book` | `LOAN_SYS` | `bronze.ods_loans` | 是 |
@@ -179,7 +179,7 @@ python producers/replay_ods_to_kafka.py --data-dir <dir> --config <json>
 
 ### 4.1 输出主题 `fr2052a_alerts` 的载荷
 
-这个主题不与落点表对应。它有两个写入方，载荷都是 JSON 但形状不同，订阅方按 `alert_code` 是否存在来区分：
+这个主题不与目标表对应。它有两个写入方，载荷都是 JSON 但形状不同，订阅方按 `alert_code` 是否存在来区分：
 
 | 写入方 | 载荷字段 | 说明 |
 |--------|----------|------|

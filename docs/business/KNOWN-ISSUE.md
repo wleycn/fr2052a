@@ -11,7 +11,7 @@
 | #pg18-data-dir-change | 09-16 | PG 18 启动失败，日志报 `there appears to be PostgreSQL data in /var/lib/postgresql/data (unused mount/volume)` | `postgres:18-alpine` 的 `PGDATA` 变为 `/var/lib/postgresql/18/docker`，镜像的 `VOLUME` 声明在 `/var/lib/postgresql`。按 17 及以前习惯把卷挂在 `/var/lib/postgresql/data` 会被判定为废弃挂载并拒绝启动 | ✅ 修法：卷改挂 `/var/lib/postgresql`。重建数据卷时必须沿用此路径 | Server 1 部署 | BUILD-LOG E1 |
 | #spark-minio-endpoint | 09-16 | Spark 连接 MinIO 失败，报 connection refused | Spark 中必须用 `192.168.17.22:9000`，不能用 `localhost`（跨容器网络）| ✅ 修正 Spark catalog config 中的 endpoint | Server 2 Spark 配置 | BUILD-LOG E3 |
 | #gl-reconciliation-mismatch | 09-16 | GL 对账 8 项全 FAIL | ① 按单科目比 Section 合计（应汇总后再比）② 按实体匹配集团口径（应去掉实体匹配）③ 总账原本独立随机数，与业务明细无关 | ✅ 修法：按 Section 汇总总账后再比；总账由业务明细倒推（资产科目取自各业务表，权益作轧差项） | GL 对账模块 | BUILD-LOG E4.1 |
-| #hqla-cap-not-applied | 09-16 | 报表未应用 HQLA 二级资产上限，二级资产占比 83.66% | 原样报出，未做监管计算截断 | ✅ 补 `sec_g_hqla_capped_total_usd` = 一级全额 + 二级按上限截断；上限的基数口径后来在 09-19 修正，见 `#hqla-cap-basis` | ADS 报表计算 | BUILD-LOG E4.1 |
+| #hqla-cap-not-applied | 09-16 | 报表未应用 HQLA 二级资产上限，二级资产占比 83.66% | 原样报出，未做监管计算截断 | ✅ 补 `sec_g_hqla_capped_total_usd` = 一级全额 + 二级按上限截断；上限的基数算法后来在 09-19 修正，见 `#hqla-cap-basis` | ADS 报表计算 | BUILD-LOG E4.1 |
 | #python314-incompatible | 09-16 | Python 3.14.4 装不上 Great Expectations 与 pyspark | GE 要求 `>=3.10,<3.14`；pyspark 3.5.0 不支持 3.14 | ✅ 在服务器上用 uv 装独立 Python 3.12 venv | Server 2 环境 | BUILD-LOG E0 |
 | #dockerhub-image-removed | 09-16 | `minio/minio` 与 `bitnami/spark` 从 Docker Hub 下架 | 镜像源失效 | ✅ MinIO 改走 `quay.io/minio/minio`；Spark 改用官方 `apache/spark` | Server 1/2 部署 | BUILD-LOG E0 |
 | #detail-report-mismatch | 09-16 | Section B 明细与报表口径不一致，差 25 亿；Section F 明细 13 亿 vs 报表 0 | 明细把正回购与逆回购混在一起，报表只算正回购；明细没按 30 天过滤 | ✅ 明细按 `line_item` 拆开，30 天过滤下沉到明细 | OWD/OWS 模型 | BUILD-LOG E4.1 |
@@ -98,7 +98,7 @@
 | lint 口径排除 4 类规则 | 上游要求 `ruff check .`、`ruff format .`、`mypy .` 全过 | 配置收在项目根 `pyproject.toml`，排除 `D415`、`N812`、`RUF001`、`RUF002`、`RUF003` | ✅ 决策：前两类与中文写作冲突（`D415` 只认 ASCII 句末标点、`RUF001-003` 把全角标点当歧义字符），`N812` 与 PySpark 的 `functions as F` 写法冲突。逐条理由与命中数写在 `pyproject.toml` 注释里；无命中的 `D401`/`D202` 不排除，继续管事 |
 | 提交闸两道，本地在前 | 上游要求「等待 CI 通过」后合并 | 本地 `.githooks/pre-commit` 跑两道：`make lint` 加共享门禁；推送后 GitHub Actions 跑 `make lint` | ✅ 决策：本地先拦住，省一次往返；CI 兜住没配钩子的克隆。共享门禁的真身住 ng 仓，CI 环境没有那份克隆，所以不进 CI。gitee 只作镜像，没有 runner |
 | 不建单元测试套件 | 上游要求覆盖率 ≥ 80% | 未建 pytest 套件，判据改为数据层核对脚本全绿加端到端重跑 | ✅ 决策：本项目的风险在数据与编排，不在函数分支；核对脚本要能区分「零命中」与「读不到」 |
-| CHANGELOG 只记里程碑 | 上游模板要求变更日志逐条记录 | `CHANGELOG.md` 只写里程碑（阶段级），逐笔功能与契约变更落 `docs/changes/{module}.md` | ✅ 决策：项目已有 `docs/changes/` 承担逐笔留痕，两处都写必然互相漂；口径写在 `CHANGELOG.md` 顶部，验收清单的判据随之改成看 `docs/changes/` |
+| CHANGELOG 只记里程碑 | 上游模板要求变更日志逐条记录 | `CHANGELOG.md` 只写里程碑（阶段级），逐笔功能与契约变更落 `docs/changes/{module}.md` | ✅ 决策：项目已有 `docs/changes/` 承担逐笔留痕，两处都写必然互相漂；规则写在 `CHANGELOG.md` 顶部，验收清单的判据随之改成看 `docs/changes/` |
 | 日批自动过期 Iceberg 快照 | 红线 7 要求破坏性操作须人类显式授权；红线 9 要求每张表有快照保留与压缩策略 | 在日批末尾加一步 `maintain-tables --apply`；策略为保留 7 天且至少 10 个快照，命名空间含 `ref`、`bronze`、`silver`、`gold` | ✅ 决策（09-19）：把这条登记为**常设授权** —— 授权范围就是 `python/lakehouse/maintain_tables.py` 里声明的策略与命名空间，改该文件等于改授权范围；超出策略的删除仍需人工 |
 
 **适用边界**（条件条目为什么不在表里、本项目实际取了哪条路）：

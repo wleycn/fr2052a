@@ -28,7 +28,7 @@
 | 宏名 | 参数 | 返回 | 用途 |
 |------|------|------|------|
 | `maturity_bucket` | `days_expr` | `VARCHAR`（`O/N`、`1-7D`……）| 到期分桶 |
-| `behavioral_bucket` | `product_category_expr, days_expr` | `VARCHAR`（`O/N`、`1-7D`……）| 行为口径分桶：无到期日的活期与储蓄恒归 `O/N`，有到期日的按剩余天数归桶 |
+| `behavioral_bucket` | `product_category_expr, days_expr` | `VARCHAR`（`O/N`、`1-7D`……）| 按行为分类分桶：无到期日的活期与储蓄恒归 `O/N`，有到期日的按剩余天数归桶 |
 | `hqla_level` | `security_type_expr, rating_expr` | `LEVEL_1` / `LEVEL_2A` / `LEVEL_2B` / `NON_HQLA` | HQLA 分类 |
 | `hqla_haircut` | `hqla_level_expr` | 折扣率（小数）| 按分级给折扣 |
 | `customer_segment` | `customer_type_expr` | `VARCHAR` | 客户细分归一（含 `AFFIL` → `AFFILIATE`） |

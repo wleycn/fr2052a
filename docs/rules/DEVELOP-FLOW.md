@@ -68,7 +68,7 @@
 3. 提交并推送到两个远程（`gitee` 与 `github`）
 4. 推送后由 GitHub Actions 再跑一遍 `lint`，红了当场修
 
-改动涉及契约与口径时，按 `docs/rules/ACCEPTANCE-CHECKLIST.md` 实核一遍，并把结论写进 `docs/changes/{module}.md` 的条目。
+改动涉及契约与数值规则时，按 `docs/rules/ACCEPTANCE-CHECKLIST.md` 实核一遍，并把结论写进 `docs/changes/{module}.md` 的条目。
 
 ## 回滚策略
 

@@ -1,6 +1,6 @@
 # CHANGELOG.md — 变更记录
 
-> **口径**：本文件只记里程碑（阶段级）；逐笔功能与契约变更记在 `docs/changes/{module}.md`。
+> **说明**：本文件只记里程碑（阶段级）；逐笔功能与契约变更记在 `docs/changes/{module}.md`。
 > 每个坑的详细成因与修法见 [KNOWN-ISSUE.md](KNOWN-ISSUE.md)，完整过程见 [docs/build-log.md](../build-log.md)。
 
 ## 未发布

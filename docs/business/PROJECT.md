@@ -20,7 +20,7 @@
 | 监控 | Prometheus + Grafana（指标来自巡检脚本的 `--json` 输出，Server 2 采集、Server 1 出面板） | Prometheus 2.55.1 / Grafana 11.5.1 |
 | 代码质量闸 | ruff（检查 + 格式化）+ mypy，配置在项目根 `pyproject.toml` | ruff 0.14.4 / mypy 1.18.2 |
 
-版本口径：表里的版本是**实测值**。可核的 pin 在 `deploy/server1/.env.example`（Airflow 与 MinIO 镜像）与 `deploy/server2/setup-venv.sh`（dbt 三件套与 PySpark）；PostgreSQL 镜像只 pin 到主版本 `postgres:18-alpine`，补丁版本由镜像发布方决定。
+版本来源：表里的版本是**实测值**。可核的 pin 在 `deploy/server1/.env.example`（Airflow 与 MinIO 镜像）与 `deploy/server2/setup-venv.sh`（dbt 三件套与 PySpark）；PostgreSQL 镜像只 pin 到主版本 `postgres:18-alpine`，补丁版本由镜像发布方决定。
 
 ## 目录分层
 
@@ -44,7 +44,7 @@ demo-fr2052a/
 │   │   ├── CODING-STANDARD.md
 │   │   ├── DEVELOP-FLOW.md
 │   │   └── ACCEPTANCE-CHECKLIST.md
-│   ├── CRON-DESIGN.md         # 定时任务说明（DAG 调度与服务器 cron 的单一落点）
+│   ├── CRON-DESIGN.md         # 定时任务说明（DAG 调度与服务器 cron 的单一说明）
 │   ├── changes/               # 变更留痕（逐笔，每模块一份）
 │   └── build-log.md           # 构建日志（逐阶段记录）
 ├── deploy/
@@ -148,7 +148,7 @@ Airflow 里的 DAG 默认**暂停**：`fr2052a_daily_batch`、`fr2052a_backfill_
 - `#pg18-data-dir-change` — PG 18 改了数据目录约定
 - `#spark-minio-endpoint` — Spark 连接 MinIO 必须用 IP，不能用 localhost
 - `#gl-reconciliation-mismatch` — GL 对账需按 Section 汇总后比对
-- `#hqla-cap-not-applied` — HQLA 二级资产上限需显式截断（基数口径见 `#hqla-cap-basis`）
+- `#hqla-cap-not-applied` — HQLA 二级资产上限需显式截断（基数的算法见 `#hqla-cap-basis`）
 - `#hqla-cap-basis` — HQLA 二级资产上限的基数是扣除后的 HQLA，等价于一级资产的 2/3
 - `#section-a-d-empty` — 报表 Section A 与 D 的 6 列在演示环境恒为 NULL
 - `#catalog-name-drift` — Iceberg catalog 改名后旧注册行还在，清理脚本成了空操作

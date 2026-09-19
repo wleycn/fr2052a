@@ -60,7 +60,7 @@ Bronze（源系统接入，Iceberg `bronze` 命名空间）
 
 ## PII 字段与脱敏方式
 
-本表无 PII 列，无需脱敏：列清单里的标识是 `trade_id`（交易编号）与 `counterparty_id`（交易对手编号），后者是机构编码 —— 本演示的衍生品账簿只与金融机构往来，标识的是机构不是个人，属商业机密而非个人数据，故有意保留明文（脱敏边界声明见 `dbt/models/staging/schema.yml`）。
+本表无 PII 列，无需脱敏。列清单里的标识是 `trade_id`（交易编号）与 `counterparty_id`（交易对手编号）。后者是机构编码。本演示的衍生品账簿只与金融机构往来，标识的是机构而不是个人，属于商业机密而不是个人数据，因此有意保留明文。脱敏边界声明见 `dbt/models/staging/schema.yml`。
 
 ## 生命周期
 
