@@ -104,6 +104,7 @@
 | 业务文档 | `docs/business/` | 项目说明 / 模块 / 数据 / 接口 / 术语 / 变更 / 已知问题 |
 | 偏离登记处 | `docs/business/KNOWN-ISSUE.md` | 已知坑 / 设计决策 / 与上游规范不一致处的逐条登记（禁止无登记降标准） |
 | 变更留痕 | `docs/changes/{module}.md` | 功能与契约变更的按模块条目（范围 / 变更 / 验证 / 回滚）；E0–E7 的构建过程另见 `docs/build-log.md` |
+| 交接单 | `todo/` | 会话接力：一份一次交接，`<YYYYMMDD>-<主题>.<状态>`，状态迁移用 `git mv` 改名，`.done` 留档不删 |
 | 部署清单 | `deploy/` | Server 1/2 部署脚本与配置 |
 | SQL DDL | `sql/iceberg/` | Iceberg 表定义（真源） |
 | dbt 项目 | `dbt/` | 模型 / 宏 / 配置 |
