@@ -13,20 +13,19 @@
 
 ```text
 分支        main
-HEAD        01ee262
+HEAD        4b4b7bc（写下时值；本文件后续还会随提交前进，以 git log 为准）
 上游        ## main...github/main
 未提交改动  0 个文件；无未提交改动
 最近提交
+            4b4b7bc docs(agents): 项目地图补 todo/ 交接单目录
+            90cbfce docs: 新增 todo/ 交接单目录与首份交接单
             01ee262 chore(gate): 把共享门禁接进提交闸
-            729237b docs: 头注写入时机对齐上游模板，并记本次回填
-            142b561 chore: 存量代码文件补 [AI-GENERATED] 头注
 远程        gitee, github（均与本地同 SHA）
 ```
 
-本交接单自己随一笔提交入库，所以入库后 HEAD 还会前进一笔，其余状态不变。
-
 ## 已完成
 
+- **AGENTS.md §9 项目地图补交接单目录**，提交 `4b4b7bc`。上一笔把交接单落在项目根 `todo/`、`docs/rules/PROJECT-STRUCTURE.md` 的目录职责表已登记，AGENTS 地图漏了这一行，两处对不上；补上后地图里能查到交接单放哪。
 - **审计剩余四条收口（批次 C7）**，提交 `e64480f`。四条 = 已报送期内容闸、HQLA 到期窗口、累计缺口列删除、SCD2 哈希改为不含 `etl_source_file`。
   证据：日批 18 个环节全绿、耗时 229 秒；`verify-ads` 30 项全过；`dq-rules` 中 VDQ-018 转 PASS。
 - **审计处置表第 21 条状态补齐**，提交 `73a6fb4`。该条与「dbt 与 SQL 口径审查」第 18 条是同一缺陷，已按 C5 落地事实回填。
