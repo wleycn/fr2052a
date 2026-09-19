@@ -128,7 +128,7 @@ Iceberg 侧随跑批整表重建；PostgreSQL 侧随导出覆盖写，保留授�
 
 ## 上下游依赖
 
-- **上游**：`silver.ows_cash_position`、`ows_cashflow_projection` 与各 `owd_*` 明细（存款、有担保融资、贷款、证券、衍生品、表外、总账）。`ows_hqla_summary`、`ows_collateral_summary`、`ows_funding_summary` 三张 OWS 表无消费者，已登记待下线。
+- **上游**：`silver.ows_cash_position`、`ows_cashflow_projection` 与各 `owd_*` 明细（存款、有担保融资、贷款、证券、衍生品、表外）。`ows_hqla_summary`、`ows_collateral_summary`、`ows_funding_summary` 三张 OWS 表无消费者，已登记待下线。
 - **下游**：报送文件生成 `python/exporters/generate_submission.py`、放行闸 `python/validators/check_submission_gate.py`、报表版本历史 `ads.ads_fr2052a_report_history`。
 
 ## 质量规则清单

@@ -269,3 +269,15 @@
 - 验证：`grep -rn "DECIMAL(18,2)" docs/ sql/ dbt/` 残留 0；实测类型取自 Server 2 的 `DESCRIBE`（16 张 silver 表 + 3 张 gold 表，gold 三张的金额列同为 `decimal(...,2)`，精度 20 至 38）；`row_hash` 排除清单回读 `owd_scd2.py:89` 与 `TABLE_PROPERTIES` 确认；`make lint` 全绿；共享门禁通过。
 - 回滚：`git revert` 本条目对应的提交。纯文档改动，无数据面与产物影响。
 
+## table-contract-dependency-claims
+
+- 范围：`docs/tables/` 的 29 份契约（ODS 4、OWS 2、ADS 8、ref 6、audit 2、OWD 历史 7）
+- 变更：一轮「逐小节特化度」核对之后的整改，分四类。
+  - ① **事实类**。三份 ODS 契约称账本「只与金融机构往来」，实测对手方取全部机构类型：回购表 420 行里公司客户 116 行加主权 105 行共 221 行，占 53%；衍生品 52%、表外 51%。改成如实列出五类机构并写明不含自然人，结论（无 PII）不变。`ods_deposits` 的 `customer_type_raw` 枚举漏了集团内配对腿的 `AFFIL`，`ref_counterparty` 的类型枚举漏了 `AFFILIATE`。三份 ODS 的「脱敏边界声明见 `dbt/models/staging/schema.yml`」指向的文件里没有这三张表的条目，改成指向各表 PII 小节与明文唯一落点 `secure.fr2052a_pii_map`。
+  - ② **依赖类**。`ads_fr2052a_report` 的上游去掉总账（模型 8 处 `ref` 里没有 `owd_gl_entries`）；`ads_gl_reconciliation` 的上游去掉报表（Section G / I 的非现金基准由本模型自算）；`ads_liquidity_metrics` 的上下游按 `python/alerts/liquidity_monitor.py` 改写（读报表、对账与校验日志，写熔断表与预警表，不再声称被巡检读）；`ads_fr2052a_alerts` 的阈值来源从 `ref.ref_regulatory_mapping` 改成 `config/liquidity_thresholds.json`（该 ref 表在 `dbt/models/sources.yml` 声明过但全仓无读取方）；两份 OWS 契约的「全仓 0 处引用 `silver.ows*`」改掉（`ads_fr2052a_report.sql` 引用 `ows_cash_position` 与 `ows_cashflow_projection` 各两处）。
+  - ③ **归因类**。四张表把写入环节挂在日批上，而这些环节都不在 `fr2052a_daily_batch` 的 19 环节序列里：`ads_fr2052a_submission` 与 `ads_fr2052a_submission_audit` 归 `fr2052a_submission` DAG 的 `submission`、`ads_fr2052a_report_history` 归 `fr2052a_backfill_and_restate` 的 `restate-capture`、`ads_fr2052a_realtime_alerts` 归 `fr2052a_realtime_alert` 的 `realtime-scan`。暂停状态不在契约里维护，由 `docs/CRON-DESIGN.md` 指向的查询看现状。
+  - ④ **结构类**。6 份 ref 契约写着「或一个主键在有效期内的一个版本」，但这 6 张表没有 `effective_date` 与 `expiry_date` 列（有此两列的只有 `ref_entity_hierarchy`、`ref_regulatory_mapping`、`ref_behavior_assumptions` 三张）；`audit_change_log` 的「按业务键 upsert」实为只追加，唯一写入方是 PII 对照表的变更触发器，同时删掉并不存在的「环节脚本」上游；`audit_access_log` 的「按环节写入」「随访问累积」改成无写入方、表恒为空，并指向已登记的 `#audit-access-log-no-writer`；7 份 OWD 历史契约补齐版本区间基准（按处理时间推进、失效日 = 生效日 − 1 且不早于本版本生效日）与建表属性（`format-version = 2`、元数据文件清理）。
+- 验证：改动脚本先断言每处命中唯一再落盘（36 处一次通过）；对手方构成用 Spark 查 `bronze.ods_*` 与 `ref.ref_counterparty` 关联后的分组计数；上游真值用 dbt 语法抽取模型 `ref` 后与契约逐项求差；写入方与环节序列读 `deploy/server2/run-daily-pipeline.sh` 的 `STEPS` 数组与四个 DAG 的文档串；`airflow.dag` 的暂停状态实查；`make lint` 全绿；共享门禁通过。
+- 回滚：`git revert` 本条目对应的提交。纯文档改动，无数据面与产物影响。
+
+

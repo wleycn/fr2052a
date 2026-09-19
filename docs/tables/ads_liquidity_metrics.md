@@ -65,8 +65,8 @@ PostgreSQL 常驻表，按环节写入或覆盖；无快照与压缩策略。
 
 ## 上下游依赖
 
-- **上游**：报表 Section G / I / F 与 `silver.ows_*` 汇总。
-- **下游**：熔断表 `ads.ads_circuit_breaker`、预警表 `ads.ads_fr2052a_alerts`、巡检 `python/governance/pipeline_health.py`。
+- **上游**：`ads.ads_fr2052a_report`（报表 G / I / F 各节）与 `ads.ads_gl_reconciliation`、`ads.ads_fr2052a_validation_log`（对账差异与 DQ 的 ERROR 级失败）。
+- **下游**：熔断表 `ads.ads_circuit_breaker`、预警表 `ads.ads_fr2052a_alerts`。
 
 ## 质量规则清单
 

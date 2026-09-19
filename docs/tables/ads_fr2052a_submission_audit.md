@@ -52,7 +52,7 @@ PostgreSQL 常驻表，只追加不覆盖。复位时由 `sql/admin/reset_demo.s
 
 ## 新鲜度 SLA 与 owner
 
-日批 `submission` 环节每次生成报送文件时写一行。owner：仓库维护者。
+`fr2052a_submission` DAG 的 `submission` 环节每次生成报送文件时写一行；该环节不在 `fr2052a_daily_batch` 的环节序列里。owner：仓库维护者。
 
 ## 上下游依赖
 

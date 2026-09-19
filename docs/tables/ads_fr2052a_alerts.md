@@ -61,7 +61,7 @@ PostgreSQL 常驻表，按环节写入或覆盖；无快照与压缩策略。
 
 ## 上下游依赖
 
-- **上游**：`ads.ads_liquidity_metrics` 与 `ref.ref_regulatory_mapping` 的阈值。
+- **上游**：`ads.ads_liquidity_metrics`。判定阈值来自 `config/liquidity_thresholds.json`（`python/alerts/liquidity_monitor.py` 的 `--config` 传入）。
 - **下游**：放行闸 `python/validators/check_submission_gate.py` 与熔断表。
 
 ## 质量规则清单

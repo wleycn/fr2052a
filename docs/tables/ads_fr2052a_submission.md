@@ -56,7 +56,7 @@ PostgreSQL 常驻表，按业务键 upsert 覆盖当前状态；无快照与压�
 
 ## 新鲜度 SLA 与 owner
 
-日批 `submission` 环节产出文件后写台账；报送截止为 T+1 08:00。owner：仓库维护者。
+由 `fr2052a_submission` DAG 的 `submission` 环节产出文件后写入台账；该环节不在 `fr2052a_daily_batch` 的环节序列里。报送截止为 T+1 08:00。owner：仓库维护者。
 
 ## 上下游依赖
 

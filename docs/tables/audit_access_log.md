@@ -22,7 +22,7 @@
 
 ## 分区
 
-无。PostgreSQL 表，按环节写入或覆盖；不涉及分区裁剪。
+无。PostgreSQL 表，当前没有写入方，表恒为空（见 `docs/business/KNOWN-ISSUE.md` 的 `#audit-access-log-no-writer`）。
 
 ## 字段清单
 
@@ -46,11 +46,11 @@
 
 ## 生命周期
 
-PostgreSQL 常驻表，按环节写入或覆盖；无快照与压缩策略。
+PostgreSQL 常驻表，当前无写入方；无快照与压缩策略。
 
 ## 新鲜度 SLA 与 owner
 
-随访问累积。owner：仓库维护者。
+当前恒为空（没有写入方）。owner：仓库维护者。
 
 ## 上下游依赖
 

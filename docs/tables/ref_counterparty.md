@@ -10,7 +10,7 @@ Ref（引用数据，Iceberg `ref` 命名空间）
 
 ## 粒度
 
-一行 = 一个业务主键，或一个主键在有效期内的一个版本。
+一行 = 一个业务主键（本表无有效期列，不做版本化）。
 
 ## 业务主键
 
@@ -31,7 +31,7 @@ Ref（引用数据，Iceberg `ref` 命名空间）
 | `counterparty_id` | STRING | 交易对手编号 |
 | `counterparty_name` | STRING | 交易对手名称 |
 | `lei_code` | STRING | LEI 代码 |
-| `counterparty_type` | STRING | 交易对手类型：BANK/BROKER/CORPORATE/SOVEREIGN/CENTRAL_BANK |
+| `counterparty_type` | STRING | 交易对手类型：BANK/BROKER/CORPORATE/SOVEREIGN/CENTRAL_BANK/AFFILIATE |
 | `country_code` | STRING | 国家/地区代码 |
 | `credit_rating` | STRING | 信用评级 |
 | `industry_code` | STRING | 行业代码 |

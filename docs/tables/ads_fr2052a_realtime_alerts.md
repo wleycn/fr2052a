@@ -54,7 +54,7 @@ PostgreSQL 常驻表，按环节写入或覆盖；无快照与压缩策略。
 
 ## 新鲜度 SLA 与 owner
 
-日批 `realtime-scan` 环节消费核心存款主题后写入，非实时流。owner：仓库维护者。
+`fr2052a_realtime_alert` DAG 的 `realtime-scan` 环节消费核心存款主题后写入，非实时流；该环节不在 `fr2052a_daily_batch` 的环节序列里。owner：仓库维护者。
 
 ## 上下游依赖
 

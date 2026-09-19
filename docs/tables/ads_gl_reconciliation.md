@@ -70,7 +70,7 @@ USD，`DECIMAL(20,2)`。基准侧按 Section 汇总后与报送金额比，不�
 
 ## 上下游依赖
 
-- **上游**：`silver.owd_gl_entries`（非现金 Section 的基准）、`silver.owd_treasury_cash_position`（Section E 的基准与调节项）、报表 `gold.ads_fr2052a_report`。
+- **上游**：`silver.owd_gl_entries`（非现金 Section 的基准）、`silver.owd_treasury_cash_position`（Section E 的基准与调节项）。Section G / I 的非现金基准由本模型自算，不读报表。
 - **下游**：GL 对账 DAG `fr2052a_gl_reconciliation`、放行闸与熔断判定。
 
 ## 质量规则清单

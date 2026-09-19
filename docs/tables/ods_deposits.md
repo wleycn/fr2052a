@@ -46,7 +46,7 @@ Bronze（源系统接入，Iceberg `bronze` 命名空间）
 | `open_date` | DATE | 开户日期 |
 | `maturity_date` | DATE | 到期日期，活期为空 |
 | `branch_code` | STRING | 机构代码 |
-| `customer_type_raw` | STRING | 客户类型原始值：IND/CORP/GOV/FI |
+| `customer_type_raw` | STRING | 客户类型原始值：IND/CORP/GOV/FI；集团内配对腿为 AFFIL |
 | `insured_flag` | STRING | 是否受保存款 Y/N |
 | `event_time` | TIMESTAMP | 源系统事件时间 |
 | `etl_batch_id` | STRING | ETL 批次号 |

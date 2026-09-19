@@ -76,7 +76,7 @@ USD。金额列一律为 `decimal` 类型，小数位固定 2 位；整数位精
 
 ## 生命周期
 
-Iceberg v2 表，快照保留 7 天或至少 10 个（`python/lakehouse/maintain_tables.py`）。小文件合并走 `rewrite_data_files`。不设额外数据保留期：整表重建即最新状态，历史由版本历史表或审计表承担。 版本区间用 `begin_date` / `end_date` 表示，**当前有效版本的 `end_date` 为空**；`is_active` 是 `end_date` 的冗余列，两者必须一致。
+Iceberg v2 表，`format-version = 2`，快照保留 7 天且至少保留 10 个，元数据文件随提交清理（建表属性见 `python/lakehouse/owd_scd2.py` 的 `TABLE_PROPERTIES`，`python/lakehouse/maintain_tables.py` 每轮重申）。小文件合并走 `rewrite_data_files`。不设额外数据保留期：每轮整表重算版本行，历史都留在本表里。版本区间按处理时间推进（`--effective-date`，日批取报告日次日），不按报告日；失效日 = 生效日 − 1，且不早于本版本生效日；`end_date` 为空 ⇔ 当前有效版本；`is_active` 是 `end_date` 的冗余列，两者必须一致。 版本区间用 `begin_date` / `end_date` 表示，**当前有效版本的 `end_date` 为空**；`is_active` 是 `end_date` 的冗余列，两者必须一致。
 
 ## 新鲜度 SLA 与 owner
 

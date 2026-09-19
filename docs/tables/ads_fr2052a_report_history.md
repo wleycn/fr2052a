@@ -55,7 +55,7 @@ PostgreSQL 常驻表，按环节写入或覆盖；无快照与压缩策略。
 
 ## 新鲜度 SLA 与 owner
 
-日批 `restate-capture` 环节写入。owner：仓库维护者。
+`fr2052a_backfill_and_restate` DAG 的 `restate-capture` 环节写入；该环节不在 `fr2052a_daily_batch` 的环节序列里。owner：仓库维护者。
 
 ## 上下游依赖
 
