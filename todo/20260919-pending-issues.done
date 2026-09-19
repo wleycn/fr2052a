@@ -108,3 +108,5 @@ git mv todo/20260919-pending-issues.new todo/20260919-pending-issues.doing
 **补充（09-19 当日第二批）**：提交 `ab9a533` 补掉两处漏网的旧算法描述（`dbt/models/marts/schema.yml` 的列描述、`liquidity_monitor.py` 的模块说明）；随后按上述裁决把派生关系写进表契约与模型注释。这一批只动文档与注释，没动数据，不需要重跑日批。
 
 **补充（09-19 当日第三批）**：第 5 条（`requirements/` 归档落点）与第 6 条（监控与 BI 栈）按用户当日裁决收口 —— 需求原件移到 `references/` 并在 AGENTS §9 项目地图与 PROJECT 登记，监控与 BI 明确定为不接并写进偏离表。审计表里用户手写的 5 条备注经确认均已完成，不再追踪。留痕见 `docs/changes/engineering.md` 的 `raw-requirements-archive` 条目。
+
+**补充（09-19 当日第四批）**：三件事按裁决落地 —— ① `check_l2_cap` 扩到逐口径，实体单体行的认列额也有了独立复算且不通过就阻断（核对项 30 → 40）；② `spark_catalog` 名下 9 行旧注册行清掉，删后只剩 `lakehouse` 42 行；③ 审计报告的 80 条全部回填处置结论，最后 8 条滞后项收口。留痕见 `docs/changes/engineering.md` 的 `audit-ledger-closeout` 条目。

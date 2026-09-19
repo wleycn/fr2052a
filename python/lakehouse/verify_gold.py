@@ -5,7 +5,7 @@ dbt 跑通只说明 SQL 没报错，不说明数字对。这里逐项验算：
   1. 报表实体覆盖 = bronze 存款表的实体集合，且实体集合与 ref 层级表一致
   2. 合并口径 = 各实体口径之和减去集团内往来（逐 Section 验算 + 抵销专项）
   3. 明细合计 = 报表 Section 合计（对应 VDQ-013，排除 is_intracompany 行）
-  4. 二级资产认列额 = min(原始二级市值, 一级市值 × 2/3)（对应 VDQ-017）
+  4. 二级资产认列额 = min(原始二级市值, 一级市值 × 2/3)（对应 VDQ-017，合并行与实体单体行都核）
   5. 30 天流入 ≤ 流出的 75%（对应 VDQ-018，验证上限确实被应用）
   6. GL 对账逐报告期核对，每个视角都有对账行且无 FAIL
 
@@ -366,7 +366,7 @@ def _check_detail_rollup_for_period(
 
 
 def check_l2_cap(spark: SparkSession) -> list[CheckResult]:
-    """二级资产上限（VDQ-017）：逐报告期验算 HQLA 认列总额是否按 2/3 × 一级 截断。
+    """二级资产上限（VDQ-017）：逐报告期、逐口径验算 HQLA 认列总额是否按 2/3 × 一级 截断。
 
     上限的来源是 Basel LCR30：「二级资产不得超过扣除后 HQLA 的 40%」，等价于不超过
     一级资产的 2/3。按 0.40 * (一级 + 二级) 算会把二级自己也算进基数，上限偏高，
@@ -375,12 +375,34 @@ def check_l2_cap(spark: SparkSession) -> list[CheckResult]:
     这条规则在需求文档里是 WARNING 级 —— 二级资产占比高本身不构成错误，
     真正的错误是认列总额没有按上限截断。因此这里验算计算是否正确，而不是占比是否达标。
 
+    **合并行与法人实体单体行都要核**，因为模型对这两个口径的输入范围不同：
+      - 合并行抵销集团内往来（只取 is_intracompany = false 的行），上限按抵销后的一级重算
+      - 实体单体行不抵销（两种标记的行都算），上限按该实体的一级重算
+    只核合并行会漏掉实体级：那边的认列额是模型单独算的一遍，公式抄错不会反映到合并行上。
+
     输入必须独立：L1 / L2A / L2B 的市值从 silver 明细独立算出（`owd_securities` 按
-    `hqla_classification` 汇总，合并口径只取非集团内行），不读报表自己的 `sec_g_*` 列 ——
-    拿被校验方算好的输入再套一遍同一个公式，只能证明「公式抄对了」，证明不了输入没写歪。
+    `hqla_classification` 汇总），不读报表自己的 `sec_g_*` 列 —— 拿被校验方算好的输入再
+    套一遍同一个公式，只能证明「公式抄对了」，证明不了输入没写歪。
     """
     results: list[CheckResult] = []
-    for period in report_periods(spark):
+    scopes = spark.sql(
+        f"""
+        select cast(report_date as string) as period, entity_code, is_consolidated
+        from {REPORT}
+        order by period, is_consolidated desc, entity_code
+        """
+    ).collect()
+    for scope_row in scopes:
+        period = str(scope_row["period"])
+        entity_code = str(scope_row["entity_code"])
+        if bool(scope_row["is_consolidated"]):
+            scope = "合并"
+            detail_filter = "not is_intracompany"
+            report_filter = "is_consolidated"
+        else:
+            scope = entity_code
+            detail_filter = f"entity_code = '{entity_code}'"
+            report_filter = f"not is_consolidated and entity_code = '{entity_code}'"
         detail = spark.sql(
             f"""
             select
@@ -388,13 +410,13 @@ def check_l2_cap(spark: SparkSession) -> list[CheckResult]:
                 round(sum(case when hqla_classification = 'LEVEL_2A' then market_value_usd else 0 end), 2) as l2a,
                 round(sum(case when hqla_classification = 'LEVEL_2B' then market_value_usd else 0 end), 2) as l2b
             from silver.owd_securities
-            where not is_intracompany and cast(report_date as string) = '{period}'
+            where {detail_filter} and cast(report_date as string) = '{period}'
             """
         ).collect()[0]
         report_row = spark.sql(
             f"""
             select sec_g_hqla_capped_total_usd as capped
-            from {REPORT} where is_consolidated and cast(report_date as string) = '{period}'
+            from {REPORT} where {report_filter} and cast(report_date as string) = '{period}'
             """
         ).collect()[0]
         level_1 = float(detail["l1"] or 0)
@@ -402,14 +424,14 @@ def check_l2_cap(spark: SparkSession) -> list[CheckResult]:
         capped = float(report_row["capped"] or 0)
 
         hqla_before_cap = level_1 + level_2
-        l2_cap = 2.0 / 3 * level_1
+        l2_cap = level_1 * 2 / 3
         expected = round(level_1 + min(level_2, l2_cap), 2)
         ratio = level_2 / hqla_before_cap if hqla_before_cap else 0.0
         cap_triggered = level_2 > l2_cap
 
         results.append(
             CheckResult(
-                name=f"二级资产上限 {period}",
+                name=f"二级资产上限 {scope} {period}",
                 passed=abs(capped - expected) <= 0.05,
                 detail=(
                     f"认列总额 {capped:,.2f}，按 2/3 × 一级 上限应为 {expected:,.2f}；"

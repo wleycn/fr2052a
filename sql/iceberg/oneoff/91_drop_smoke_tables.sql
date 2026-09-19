@@ -13,10 +13,12 @@
 --      WHERE catalog_name = 'spark_catalog'
 --        AND table_name IN ('smoke_check', 'spark_smoke');
 --
--- 两件事没被这次清理覆盖，需要时单独处理：
+-- 两件事不在上面这段里：
 --   1. MinIO 上 warehouse/bronze/smoke_check/ 与 warehouse/silver/spark_smoke/ 的残留文件
---      （Iceberg 的 DROP TABLE 本来会一并清掉数据文件，DELETE 注册行不会）
+--      —— 已用 mc rm --recursive 清掉（Iceberg 的 DROP TABLE 本来会一并清数据文件，DELETE 注册行不会）
 --   2. spark_catalog 名下 9 张 ref 表的同类残留注册行，指向这些表最早一版的 metadata
+--      —— 已在 09-19 第二批用同一条 PG DELETE 清掉；删后 iceberg_tables 只剩 lakehouse 的 42 行，
+--      9 张表在 lakehouse 下照常可见、数据未动
 --
 -- 下面两条 Spark DDL 保留，用于「catalog 名恢复成 spark_catalog」或在新环境里清理同名表。
 

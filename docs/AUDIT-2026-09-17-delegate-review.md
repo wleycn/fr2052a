@@ -50,9 +50,12 @@
 最终修法拉齐了单一来源：判断挪进跑批脚本新增的 `check-source` 环节（用脚本里已有的 `HOST_APP_DIR`），
 DAG 只写 `pipeline_command("check-source")`。正负两向都实跑过：正常目录 rc=0，指向空目录 rc=1。
 
-## 未改的部分（45 条）
+## 未改的部分（审查当时 45 条，现已全部收口）
 
-代码与 dbt 两侧的深层缺陷本轮**一律没有改**：其中多数涉及口径与设计取舍
+> 本节保留审查当时的原话，用来说明那 45 条为什么挂账。三条表的「本轮处置」列是逐条状态的唯一来源；
+> 后续批次 A1–C7 与 09-19 的两批收口已把 80 条全部处置完（修掉，或按决策闭环），本节不再代表现状。
+
+代码与 dbt 两侧的深层缺陷当时**一律没有改**：其中多数涉及口径与设计取舍
 （LCR 分子是否含现金、30 天流入是否设下界、报表表要不要加主键、汇率缺失是否该拦），
 改动会动到已经验证过的基线（样本 md5、16 环节核对、验收清单证据），应当由项目所有者决定取舍后再动。
 这些条目的证据与建议都在下表里，可直接作为下一轮的任务清单。
@@ -375,7 +378,7 @@ DAG 只写 `pipeline_command("check-source")`。正负两向都实跑过：正�
 | 1 | 高",
       "fix": "把 DAG 链改为 `export_pg` 之前插 `publish_access`（与 STEPS 一致），或在 INTERFACE-DESIGN 明确 DAG 与脚本顺序不同的理由；顺序是契约，不能有两份。 | DAG 里 export_pg → publish_access 的顺序与文档和跑批脚本相反，授权/迁移滞后于导出 | ✅ 已修（本轮） |
 | 2 | 高",
-      "fix": "要么补一个 pre-commit/CI 检查（校验 commit message 含 [AI]、改动 .py 首行含头注），写进 .githooks/ 与 lint.yml；要么把 AGENTS.md 该两处改成「靠评审」，并登记为偏离。 | AGENTS.md 声称的「机器门禁」不存在：[AI] commit 标记与 [AI-GENERATED] 头注都没有任何检查实现 | 🟡 部分修：`[AI]` 提交标记已由新增的 `.githooks/commit-msg` 落地（三种情形已单测）；头注告警与引用存在性检查未实现，措辞已更正并登记 KNOWN-ISSUE |
+      "fix": "要么补一个 pre-commit/CI 检查（校验 commit message 含 [AI]、改动 .py 首行含头注），写进 .githooks/ 与 lint.yml；要么把 AGENTS.md 该两处改成「靠评审」，并登记为偏离。 | AGENTS.md 声称的「机器门禁」不存在：[AI] commit 标记与 [AI-GENERATED] 头注都没有任何检查实现 | ✅ 已修（09-19）：共享门禁接进 `.githooks/pre-commit`，两项落地 —— 缺 `[AI-GENERATED]` 头注告警、AGENTS.md 悬空引用与锚点检查（真身住 ng 仓 `tools/pre_commit_gate.py`，同时管凭据、禁入文件、大文件、行尾与写作卫生）；`[AI]` 提交标记按用户裁决撤销，`.githooks/commit-msg` 与闸里那条判据一并删除。证据：一条真实提交通过两道闸入库；造凭据的反向探针被拦且 HEAD 未动 |
 | 3 | 高",
       "fix": "去掉 `--list`（该脚本默认行为就是列目录），或给脚本加 `--list`；并核对其余 README 命令（同页 78-81 行）。 | README 给出的取数命令 `inspect_catalog.py --list` 不存在该参数 | ✅ 已修（本轮） |
 | 4 | 高",
@@ -397,7 +400,7 @@ DAG 只写 `pipeline_command("check-source")`。正负两向都实跑过：正�
 | 12 | 中",
       "fix": "删掉该句，或把技能名校验真的写进 pre-commit（技能目录可枚举）。 | AGENTS.md 引用的 `pre_commit_gate.py` 不存在 | ✅ 已修（本轮） |
 | 13 | 中",
-      "fix": "二选一：补条目文件并在 PROJECT/AGENTS/README 的目录清单登记；或删掉该机制，改为只追加 docs/build-log.md，并在 AGENTS 说明。 | 变更留痕机制三处口径不一：目录为空、路径未被项目地图承认 | 🟡 部分修：PROJECT-STRUCTURE 已注明该目录当前为空、E6/E7 未按格式留痕；是否补条目待定 |
+      "fix": "二选一：补条目文件并在 PROJECT/AGENTS/README 的目录清单登记；或删掉该机制，改为只追加 docs/build-log.md，并在 AGENTS 说明。 | 变更留痕机制三处口径不一：目录为空、路径未被项目地图承认 | ✅ 已修（09-19）：`docs/changes/engineering.md` 按四段格式（范围 / 变更 / 验证 / 回滚）补齐 25 条，覆盖 E6 质量闸、E7 审查修复与后续各批；`AGENTS.md` §9 项目地图与 `docs/rules/PROJECT-STRUCTURE.md` 的目录职责表都登记了该目录 |
 | 14 | 低",
       "      "fix": "AGENTS.md 改为「E0–E7 构建日志」，或按实际保留范围写「构建日志（原始路径，用户要求保留）」。 | AGENTS.md 把构建日志写成「E0-E5」，与实际含 E0–E7 冲突 | ✅ 已修（本轮） |
 | 15 | 中",
@@ -409,7 +412,7 @@ DAG 只写 `pipeline_command("check-source")`。正负两向都实跑过：正�
 | 18 | 中",
       "fix": "以 fr2052a_daily_batch.py 的 `>>` 链为唯一来源重写 INTERFACE-DESIGN §5.1 与该 DAG 的 docstring。 | INTERFACE-DESIGN 的日批任务流漏登 owd_scd2、verify_rbac，DAG 自带 docstring 也漏 publish_access 与 verify_rbac | ✅ 已修（本轮） |
 | 19 | 低",
-      "fix": "要么把脚本改成必填（required=True），要么文档把「必填」改为「默认值」。 | INTERFACE-DESIGN 把 run_dq_rules 的 --batch-id 标为必填、replay 两个参数标为必填，代码里都有默认值 | ⬜ 待你定（证据已核，未动） |
+      "fix": "要么把脚本改成必填（required=True），要么文档把「必填」改为「默认值」。 | INTERFACE-DESIGN 把 run_dq_rules 的 --batch-id 标为必填、replay 两个参数标为必填，代码里都有默认值 | ✅ 已修（09-19）：按代码实况改文档，不改代码 —— `run_dq_rules.py --batch-id` 与 `replay_ods_to_kafka.py` 的 `--data-dir` / `--config` 三处「必填=是」改为「否」并写明默认值（`UNKNOWN`、`/opt/fr2052a-app/sample_data/ods`、`config/pipeline_topics.json`）；跑批脚本正按「可不传」调用，改成必填会反向破坏调用方 |
 | 20 | 中",
       "fix": "标注「节选，全集见 ref.ref_validation_rules」，或补全 20 条并按 apply_layer 分组。 | DATA-DESIGN 的 VDQ 表只列 20 条规则中的 9 条且未标注节选 | ✅ 已修（本轮） |
 | 21 | 低",
@@ -419,23 +422,23 @@ DAG 只写 `pipeline_command("check-source")`。正负两向都实跑过：正�
 | 23 | 低",
       "fix": "改为「10 次 spark-submit」或直接贴 `--list` 与日志摘要。 | 验收清单的性能证据「8 次 Spark 作业」与实跑环节数不符 | ✅ 已修（本轮） |
 | 24 | 中",
-      "fix": "性能 #3 换成可执行动作（如 `time bash deploy/server2/run-daily-pipeline.sh gate health` 并记录耗时），CR #2 改成机器判据或标人工项，:46 补真实输出或改标 🔍，签署栏留空则对应判据标 ⬜。 | 验收清单存在不可实核/自循环判据，且签名栏全空却给「独立复核」判 ✅ | 🟡 部分修：性能 #3 自循环判据改为可实核的耗时判据（标未实核）；「独立复核 ✅」降为 ⬜ 并写明只有同一执行方留日志、签名栏为空 |
+      "fix": "性能 #3 换成可执行动作（如 `time bash deploy/server2/run-daily-pipeline.sh gate health` 并记录耗时），CR #2 改成机器判据或标人工项，:46 补真实输出或改标 🔍，签署栏留空则对应判据标 ⬜。 | 验收清单存在不可实核/自循环判据，且签名栏全空却给「独立复核」判 ✅ | ✅ 已修（09-19）：性能 #3 的自循环判据换成实核耗时 —— `gate` 0.070 秒、`health` 1.858 秒（Server 2 实测），性能 #4 补三张控制表的 EXPLAIN 计划；「独立复核 ✅」改为 🔍 不适用并写明替代标准，签名栏随之注明不适用；CR #2 的注释质量仍是人工判据，共享门禁另加了注释卫生检查（注释掉的代码 / 裸 TODO）作为机器兜底 |
 | 25 | 中",
-      "fix": "在偏离表补两行（监控：Grafana/Prometheus → 用 pipeline_health.py 直出结论；BI：Superset → 无），并按本节要求补代价与回退汇总行。 | 需求侧未落地的监控与 BI 选型没有在偏离登记表登记 | ⬜ 未修，登记待定：监控栈（Prometheus/Grafana）与 BI（Superset）未落地且未登记偏离 |
+      "fix": "在偏离表补两行（监控：Grafana/Prometheus → 用 pipeline_health.py 直出结论；BI：Superset → 无），并按本节要求补代价与回退汇总行。 | 需求侧未落地的监控与 BI 选型没有在偏离登记表登记 | ✅ 已修（09-19）：偏离表补两行 —— 监控由 `python/governance/pipeline_health.py` 直出结论、不接 Prometheus 与 Grafana；BI 明确不做（演示没有分析型消费方）；代价与回退汇总各补一条 |
 | 26 | 低",
-      "fix": "把规则 2 改成与本文件实际锚点格式一致的写法（指向锚点表行），或给锚点补 `### #slug` 标题并让偏离表逐行引用。 | 偏离登记表自己定的格式规则与该文件实际格式、表内容三方不一致 | ⬜ 未修，登记待定：偏离登记表自定的「指向 `### #slug`」与文件实际格式不符 |
+      "fix": "把规则 2 改成与本文件实际锚点格式一致的写法（指向锚点表行），或给锚点补 `### #slug` 标题并让偏离表逐行引用。 | 偏离登记表自己定的格式规则与该文件实际格式、表内容三方不一致 | ✅ 已修（09-19）：纪律第 2 条改为「处置列指向本文件里已有的锚点行，即首列的 `#kebab-case`」，与本文件实际的锚点形态一致；门禁只校验真出现过的 `#slug` 引用，改文字不用动闸 |
 | 27 | 低",
       "fix": "以 pipeline_health.py 的实际输出为准统一四处（或改为「不在此抄清单，见脚本」，符合单源纪律）。 | 巡检覆盖清单三处不一致（代码 8 项，两份文档只写 6 项） | ✅ 已修（本轮） |
 | 28 | 低",
       "fix": "统一写「七份核心文档（九文档体系的本项目子集）」，或补齐缺失两型文档。 | 「九项核心文档」与实际七份不符，且未见登记 | ✅ 已修（本轮） |
 | 29 | 低",
-      "fix": "§3.6 改为「脚本全集见 python/ 目录树」+ 按 python/ 子目录分组列全，或补一张 script → 用途 → 退出码 的表。 | INTERFACE-DESIGN「其他脚本」清单漏掉半数已交付脚本，与质量检查点表对不上 | ⬜ 未修：INTERFACE「其他脚本」清单仍只列 6 个（实际 33 个） |
+      "fix": "§3.6 改为「脚本全集见 python/ 目录树」+ 按 python/ 子目录分组列全，或补一张 script → 用途 → 退出码 的表。 | INTERFACE-DESIGN「其他脚本」清单漏掉半数已交付脚本，与质量检查点表对不上 | ✅ 已修（09-19）：`INTERFACE-DESIGN.md` §3.6 的脚本清单按 `python/` 子目录列全 34 个 `.py`，并声明「脚本全集只在该处维护」；`MODULE-DESIGN.md` 的 Python CLI 表补上脚本所在目录 |
 | 30 | 低",
       "fix": "修正两处锚点（PROJECT 改为 #运行环境--验证命令 或删自引用；DATA-DESIGN 改为 #6-血缘与监管映射接口）。 | 两处 Markdown 锚点失效（自引用错锚、指向不存在的标题） | ✅ 已修（本轮） |
 | 31 | 低",
       "fix": "该行拆成「单跑接入 | ods-replay」「单跑实时扫描 | realtime-scan」，对账另写一行指向 verify-ads 或 GL 对账 DAG。 | README 常见任务表把「对账」与实时扫描混成一条命令，且对账无独立环节 | ✅ 已修（本轮） |
 | 32 | 低",
-      "fix": "在 README 目录速览与 PROJECT-STRUCTURE 根目录清单登记该文件（或注明它是派生产物、可重建）。 | 仓库根多出一份未登记在教学文档体系之外的《教学文档-小白版.md》 | 🟡 按设计处理：教学文档是本机产物，已 `.gitignore` 并在 PROJECT-STRUCTURE 根目录清单注明 |
+      "fix": "在 README 目录速览与 PROJECT-STRUCTURE 根目录清单登记该文件（或注明它是派生产物、可重建）。 | 仓库根多出一份未登记在教学文档体系之外的《教学文档-小白版.md》 | ✅ 决策（09-19）：教学文档是本机产物，不入库（`.gitignore` 同时覆盖旧名 `教学文档-小白版.md` 与现名 `ProjectInstruction.md`），`docs/rules/PROJECT-STRUCTURE.md` 的根目录清单已注明「教学文档只在本机」 |
 
 <details><summary>展开：三、文档体系审查 的逐条证据与建议</summary>
 

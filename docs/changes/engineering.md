@@ -212,6 +212,14 @@
 ## raw-requirements-archive
 
 - 范围：`requirements/` → `references/`（11 个文件整体改名，内容不变）、`README.md`、`AGENTS.md` §9、`docs/business/{PROJECT,KNOWN-ISSUE}.md`、`docs/rules/{PROJECT-STRUCTURE,DEVELOP-FLOW}.md`、两处代码 docstring（`deploy/server1/airflow/dags/fr2052a_daily_batch.py`、`python/generators/ods_data.py`）
-- 变更：原始需求文档的归档位由 `requirements/` 改为 `references/`。这些文档的内容早在建文档体系时已按九文档拆解归位，留在仓库里是为了保住项目来历的凭据，但目录名 `requirements/` 读起来像一份活的需求输入，与它的实际角色不符；改名后它明确是参考归档。文字侧同步七处：README 与 PROJECT 的目录树、PROJECT 的分层纪律表、PROJECT-STRUCTURE 的目录职责表、DEVELOP-FLOW 阶段 1 的输入路径、两处代码 docstring 的引用路径；`AGENTS.md` §9 项目地图补一行（原先没有这一行，地图答不出「原始需求在哪」）。同一批把「监控与 BI 栈」这条暂缓项按裁决收口：监控由 `python/governance/pipeline_health.py` 直出结论，BI 明确不做，偏离表与代价表随之更新。
+- 变更：原始需求文档的归档位由 `requirements/` 改为 `references/`。这些文档的内容早在建文档体系时已按九文档拆解归位，留在仓库里是为了保住项目来历的凭据，但目录名 `requirements/` 读起来像一份活的需求输入，与它的实际角色不符；改名后它明确是参考归档。文字侧同步七处引用。目录树与分层纪律表改了 README、PROJECT、PROJECT-STRUCTURE、DEVELOP-FLOW 四处；两处代码 docstring 的引用路径也一并改；`AGENTS.md` §9 项目地图补一行（原先没有这一行，地图答不出「原始需求在哪」）。同一批把「监控与 BI 栈」这条暂缓项按裁决收口：监控由 `python/governance/pipeline_health.py` 直出结论，BI 明确不做，偏离表与代价表随之更新。
 - 验证：`git diff -M --numstat` 显示 11 个文件全部是纯改名（增删各 0 行）；全仓搜索 `requirements/`，活文件里只剩这一条回退说明，历史留痕（审计报告与已关闭的交接单）按「历史记录不重写」保留原措辞；`make lint` 全绿；共享门禁的悬空引用与行尾卫生两项无告警。
 - 回滚：`git mv references requirements`，再把上述七处引用改回去。
+
+## audit-ledger-closeout
+
+- 范围：`python/lakehouse/verify_gold.py`（`check_l2_cap` 扩到三档视角）、`docs/AUDIT-2026-09-17-delegate-review.md`、`docs/rules/ACCEPTANCE-CHECKLIST.md`、`docs/business/KNOWN-ISSUE.md`、`sql/iceberg/oneoff/91_drop_smoke_tables.sql`
+- 变更：三件事。**① 实体级上限复算加进核对脚本**。原先 `check_l2_cap` 只核合并行。法人实体单体行的认列额由模型单独算一遍，却没有人独立复算，只靠 WARNING 级的 VDQ-017 守着：会记录，不阻断。现在改为逐报告期、三档视角逐期展开 —— 合并行抵销集团内往来后重算，实体行按该实体不抵销重算。任一条不成立即以退出码 1 结束。核对项由 30 条增至 40 条。**② 清掉 Iceberg 目录里旧名字下的注册行**。E3 用 `spark_catalog` 建表，E4 起改名为 `lakehouse`。该表主键的头一段就是目录名，于是旧名字下 9 张 ref 表的注册行一直留着，指向各表第 0 版元数据。按裁决用一条 PG `DELETE` 清掉，不碰 MinIO 上的数据文件。**③ 审计台账收口**。80 条发现逐条核对后回填处置状态，最后 8 条（机器门禁、变更留痕、必填参数、验收判据、监控与 BI、偏离表格式、脚本清单、教学文档）改为已修或已决策。「未改的部分」一节标注为审查当时的记录。验收清单的签名栏补注「不填写是该项的处置结果」。
+- 与红线的一处冲突（按 AGENTS §0 登记）：`verify_gold.py` 用 `float` 承接金额做比较，与 §3 第 3 条「金额禁止用 `float`」冲突。这是存量做法（全文件 17 处），本次沿用未改：该脚本只做核对、不落库，金额量级 10¹⁰ 时 float64 的分辨率约 10⁻⁵，远小于各判据 0.05 的容差。要彻底合规需整文件改 `Decimal`，属单独一批。
+- 验证：`verify-ads` 在 Server 2 重跑全绿，40 项通过。其中 12 条「二级资产上限」（2 期 × 1 合并行 + 5 实体）逐条与独立复算一致到分；ENT001 在 09-15 那期还覆盖到「未触发上限」的分支。删注册行后 `iceberg_catalog.iceberg_tables` 只剩 `lakehouse` 的 42 行。`inspect_catalog.py` 仍列出 ref 9 张表，抽检 `ref_calendar` 122 行。审计报告按其行格式重新解析，80 条全部含处置结论。`make lint` 全绿。
+- 回滚：`git revert` 本次提交。删掉的 9 行注册行不回滚 —— 它们是旧目录名下的残留，重建等于把 E3 的中间状态再放回来。核对脚本的改动回滚后退回只核合并行。
