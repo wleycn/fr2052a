@@ -54,9 +54,9 @@ PostgreSQL 常驻表，按环节写入或覆盖；无快照与压缩策略。
 
 ## 上下游依赖
 
-- **上游**：dbt 模型 meta、`ref.ref_regulatory_mapping`。
+- **上游**：dbt 模型 meta 与列级 meta（`dbt/models/**/schema.yml`）。
 - **下游**：业务文档 §4 血缘图与监管问答。
 
 ## 质量规则清单
 
-列级映射来自 `ref.ref_regulatory_mapping`，表级边来自 dbt 模型依赖；当前落 52 条表级边与 36 条列级监管映射。
+列级映射来自各模型 `schema.yml` 的列级 meta（`render_lineage.py` 从 dbt manifest 读 `rule_id`、`regulatory_reference`、`haircut_rate`、`owner`），表级边来自模型之间的 `ref()` 依赖；当前落 52 条表级边与 36 条列级监管映射。

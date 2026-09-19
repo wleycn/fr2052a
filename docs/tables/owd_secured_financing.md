@@ -86,4 +86,6 @@ Iceberg v2 表，快照保留 7 天或至少 10 个（`python/lakehouse/maintain
 
 ## 质量规则清单
 
-本层规则共 8 条：`VDQ-003` 金额非负、`VDQ-004` 利率区间、`VDQ-005` 币种三位 ISO、`VDQ-006` 已用额度不超授信、`VDQ-007` 回购抵押品市值合理、`VDQ-008` 到期日不早于报告日、`VDQ-009` 折算误差小于 1%、`VDQ-020` LEI 格式。
+本表适用的单表规则共 3 条：`VDQ-004` 利率落在区间、`VDQ-005` 币种是三位 ISO 4217 代码、`VDQ-007` 回购抵押品市值合理。
+
+跨表规则 `VDQ-009` 至 `VDQ-015` 由核对脚本覆盖（`verify_silver.py`、`verify_gold.py` 与 GL 对账模型），不在跑批的单表断言里。`VDQ-017` 至 `VDQ-019` 针对 `gold.ads_fr2052a_report`，`VDQ-020` 针对 `ref.ref_counterparty`，`VDQ-021` 针对 `bronze.ods_securities`，都不落本表。

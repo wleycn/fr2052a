@@ -3,7 +3,7 @@ version: 2
 # OWD 层列级契约。
 #
 # 这里登记的不只是说明文字，还有**脱敏事实**：带 meta.pii 的列表示该列在 OWD 层已被
-# mask_pii 宏脱敏，pii_source 指向明文所在的位置（bronze 层「表.列」）。
+# mask_pii 宏脱敏，pii_source 指向明文所在的位置（落地层的 ODS 表，值形如 `ods_deposits.customer_id`）。
 # python/governance/build_pii_vault.py 读这份声明来建 PII 对照表 —— 明文只在这张
 # 受权限限制的表里存在一份，其他任何地方都只有 token。
 #

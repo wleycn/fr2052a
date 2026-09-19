@@ -60,7 +60,7 @@ Iceberg v2 表，快照保留 7 天或至少 10 个（`python/lakehouse/maintain
 
 ## 上下游依赖
 
-- **上游**：`silver.owd_loans`、`silver.owd_deposits`、`silver.owd_off_bs`，流出率取自行为假设。
+- **上游**：`silver.owd_deposits`、`silver.owd_secured_financing`、`silver.owd_loans`、`silver.owd_securities`，流出率取自行为假设。
 - **下游**：报表 Section F 与 Section K、`ads.ads_liquidity_metrics` 的流入流出两侧。
 
 ## 质量规则清单
