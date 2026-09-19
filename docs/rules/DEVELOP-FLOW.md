@@ -57,7 +57,7 @@
 | 4 | 改完先 `make lint`；提交经 `.githooks/pre-commit` |
 | 5 | `bash run-daily-pipeline.sh verify-bronze verify-silver verify-scd2 verify-ads verify-rbac` |
 | 7 | `bash deploy/reset-demo.sh --apply` 整条链路重跑 |
-| 9 | `bash deploy/sync-deploy.sh` 把脚本同步到两台服务器 |
+| 9 | 两条同步边界都要走：`bash deploy/sync-deploy.sh`（deploy 树）与 `bash deploy/server2/sync-app.sh`（app 树），最后 `bash deploy/sync-deploy.sh --check` 确认无漂移 |
 
 ## 变更流程
 

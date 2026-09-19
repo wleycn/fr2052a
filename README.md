@@ -80,6 +80,7 @@ git config core.hooksPath .githooks   # 做一次：之后每次提交前自动�
 | 时间旅行取证 | `bash spark-submit-fr2052a.sh /opt/fr2052a-app/python/audit/time_travel.py --table silver.owd_deposits_history --list-snapshots` |
 | 重置环境 | 在开发机执行 `bash deploy/reset-demo.sh --apply` |
 | 代码质量闸 | 在开发机执行 `make lint`（首次先 `git config core.hooksPath .githooks`） |
+| 同步代码到服务器 | 在开发机执行 `bash deploy/sync-deploy.sh`（deploy 树）与 `bash deploy/server2/sync-app.sh`（app 树）；两条边界都要走，漏一条就是「脚本是新的、编排是旧的」 |
 
 Airflow 界面在 `http://192.168.17.22:8080`，MinIO 控制台在 `http://192.168.17.22:9001`，监控面板在 `http://192.168.17.22:3000`（Grafana，匿名只读）。
 
