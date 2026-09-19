@@ -149,4 +149,4 @@ Airflow 里的 DAG 默认**暂停**：`fr2052a_daily_batch`、`fr2052a_backfill_
 - `#detail-report-mismatch` — 明细与报表口径不一致（正回购/30天过滤）
 - `#scd2-reversed-interval` — 版本区间不得反向（失效日早于生效日）
 - `#delegate-audit-20260917` — 三路独立审查的 80 条发现与处置
-- `#retired-report-id-in-ledger` — 报送台账里留着已退役报表身份的 3 行
+- `#retired-report-id-in-ledger` — 报表身份改名后，台账会留下对不上报表的孤儿行
